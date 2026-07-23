@@ -1,0 +1,15 @@
+[package]
+name = "widkanban"
+version = "0.1.0"
+description = "Lightweight frameless desktop Kanban widget aggregating GitHub Issues and Google Tasks"
+authors = ["WidKanban Developer"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.2.0", features = ["tray-icon"] }
+tauri-plugin-shell = "2.2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
