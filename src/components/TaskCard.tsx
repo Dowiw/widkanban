@@ -30,14 +30,14 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     isDragging,
   } = useSortable({
     id: task.id,
-    data: {
-      task,
-    },
+    data: { task },
+    // Disables real-time layout animation recalculations on sibling cards while hovering around
+    animateLayoutChanges: () => false,
   });
 
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    transition,
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging || isOverlay ? 'none' : transition || undefined,
   };
 
   const isGitHub = task.source === 'github';
@@ -57,8 +57,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
       ref={setNodeRef}
       style={style}
       className={`card-glass group relative rounded-xl p-3 shadow-sm select-none ${
-        isDragging ? 'opacity-30 border-dashed border-indigo-400' : ''
-      } ${isOverlay ? 'drag-active cursor-grabbing z-50' : 'hover:border-slate-600'}`}
+        isDragging ? 'opacity-20 border-dashed border-indigo-400/40' : ''
+      } ${isOverlay ? 'drag-active z-50' : ''}`}
     >
       {/* Top Source Badge & Drag Grip */}
       <div className="flex items-center justify-between mb-2">
@@ -111,9 +111,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
         {task.title}
       </h3>
 
-      {/* Footer Meta (Labels / Due Dates) */}
+      {/* Footer Meta */}
       <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px]">
-        {/* GitHub Labels */}
         {isGitHub && task.sourceMeta?.labels?.map((label: string, idx: number) => (
           <span
             key={idx}
@@ -124,7 +123,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           </span>
         ))}
 
-        {/* Google Task Due Date */}
         {!isGitHub && task.sourceMeta?.dueDate && (
           <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-blue-950/50 text-blue-300 border border-blue-500/20">
             <Calendar className="h-2.5 w-2.5" />
