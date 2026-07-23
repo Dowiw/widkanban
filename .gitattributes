@@ -1,0 +1,10 @@
+# Enforce LF line endings across Windows and Linux for source files and Cargo.lock
+* text=auto eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.json text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.md text eol=lf
