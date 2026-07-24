@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { 
   Pin, 
   RotateCw, 
@@ -8,7 +9,8 @@ import {
   Filter, 
   Github, 
   CheckSquare, 
-  Layers
+  Layers,
+  X
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -34,6 +36,16 @@ export const Header: React.FC = () => {
     setIsRefreshing(true);
     refreshTasks();
     setTimeout(() => setIsRefreshing(false), 600);
+  };
+
+  const handleCloseWindow = async () => {
+    try {
+      const appWindow = getCurrentWindow();
+      await appWindow.hide();
+    } catch {
+      // Graceful fallback for browser preview mode
+      console.log('Running in browser preview mode; window hide ignored.');
+    }
   };
 
   return (
@@ -101,9 +113,18 @@ export const Header: React.FC = () => {
           <button
             onClick={() => setAddTaskOpen(true)}
             title="Add Mock Task"
-            className="p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all ml-1"
+            className="p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all ml-0.5"
           >
             <Plus className="h-3.5 w-3.5" />
+          </button>
+
+          {/* Close / Hide Window X Button */}
+          <button
+            onClick={handleCloseWindow}
+            title="Hide to System Tray"
+            className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ml-1"
+          >
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
