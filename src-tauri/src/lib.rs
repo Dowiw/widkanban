@@ -31,6 +31,25 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app_handle = tray.app_handle();
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let is_visible = window.is_visible().unwrap_or(true);
+                            if is_visible {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "toggle" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -72,4 +91,3 @@ mod tests {
         assert!(response.contains("WidKanban"));
     }
 }
-
