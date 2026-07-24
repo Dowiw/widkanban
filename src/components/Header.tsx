@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import { 
   Pin, 
   RotateCw, 
@@ -39,21 +39,28 @@ export const Header: React.FC = () => {
     setTimeout(() => setIsRefreshing(false), 600);
   };
 
+  const handleTogglePin = async () => {
+    togglePin();
+    try {
+      await invoke('toggle_always_on_top');
+    } catch {
+      // Browser fallback
+    }
+  };
+
   const handleMinimizeWindow = async () => {
     try {
-      const appWindow = getCurrentWindow();
-      await appWindow.hide();
+      await invoke('hide_window');
     } catch {
-      console.log('Running in browser preview mode; window hide ignored.');
+      console.log('Running in browser preview mode; hide ignored.');
     }
   };
 
   const handleCloseApp = async () => {
     try {
-      const appWindow = getCurrentWindow();
-      await appWindow.close();
+      await invoke('close_app');
     } catch {
-      console.log('Running in browser preview mode; window close ignored.');
+      console.log('Running in browser preview mode; close ignored.');
     }
   };
 
@@ -110,7 +117,7 @@ export const Header: React.FC = () => {
           </button>
 
           <button
-            onClick={togglePin}
+            onClick={handleTogglePin}
             title={isPinned ? 'Always on top (Active)' : 'Always on top (Inactive)'}
             className={`p-1.5 rounded-md transition-colors ${
               isPinned ? 'bg-indigo-500/30 text-indigo-300' : 'text-slate-400 hover:text-white hover:bg-white/5'
