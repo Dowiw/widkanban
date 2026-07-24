@@ -10,6 +10,7 @@ import {
   Github, 
   CheckSquare, 
   Layers,
+  Minus,
   X
 } from 'lucide-react';
 
@@ -38,13 +39,21 @@ export const Header: React.FC = () => {
     setTimeout(() => setIsRefreshing(false), 600);
   };
 
-  const handleCloseWindow = async () => {
+  const handleMinimizeWindow = async () => {
     try {
       const appWindow = getCurrentWindow();
       await appWindow.hide();
     } catch {
-      // Graceful fallback for browser preview mode
       console.log('Running in browser preview mode; window hide ignored.');
+    }
+  };
+
+  const handleCloseApp = async () => {
+    try {
+      const appWindow = getCurrentWindow();
+      await appWindow.close();
+    } catch {
+      console.log('Running in browser preview mode; window close ignored.');
     }
   };
 
@@ -118,11 +127,20 @@ export const Header: React.FC = () => {
             <Plus className="h-3.5 w-3.5" />
           </button>
 
-          {/* Close / Hide Window X Button */}
+          {/* Minimize / Hide to System Tray (-) */}
           <button
-            onClick={handleCloseWindow}
-            title="Hide to System Tray"
-            className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ml-1"
+            onClick={handleMinimizeWindow}
+            title="Minimize to System Tray"
+            className="p-1.5 rounded-md text-slate-400 hover:text-indigo-300 hover:bg-white/5 transition-colors ml-1"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+
+          {/* Close / Quit Application (X) */}
+          <button
+            onClick={handleCloseApp}
+            title="Quit Application"
+            className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
           >
             <X className="h-3.5 w-3.5" />
           </button>
