@@ -50,9 +50,9 @@ export const Header: React.FC = () => {
 
   const handleMinimizeWindow = async () => {
     try {
-      await invoke('hide_window');
+      await invoke('minimize_window');
     } catch {
-      console.log('Running in browser preview mode; hide ignored.');
+      console.log('Running in browser preview mode; minimize ignored.');
     }
   };
 
@@ -64,20 +64,22 @@ export const Header: React.FC = () => {
     }
   };
 
+  const dragProps = isPinned ? {} : { 'data-tauri-drag-region': true };
+
   return (
-    <header className="widget-drag-bar flex flex-col border-b border-white/10 bg-slate-950/70 p-3 select-none">
+    <header className="widget-drag-bar flex flex-col border-b border-slate-200 bg-white p-3 select-none">
       {/* Top Bar with Drag Area */}
       <div 
-        data-tauri-drag-region 
-        className="flex items-center justify-between cursor-grab active:cursor-grabbing py-1"
+        {...dragProps}
+        className={`flex items-center justify-between py-1 ${isPinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       >
         {/* Brand & Stats */}
-        <div data-tauri-drag-region className="flex items-center space-x-2.5">
-          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <div {...dragProps} className="flex items-center space-x-2.5">
+          <div className="h-7 w-7 rounded-lg bg-slate-800 flex items-center justify-center">
             <Layers className="h-4 w-4 text-white" />
           </div>
           <div>
-            <h1 className="text-xs font-bold tracking-wider text-slate-100 uppercase">
+            <h1 className="text-xs font-bold tracking-wider text-slate-800 uppercase">
               WidKanban
             </h1>
             <div className="flex items-center space-x-2 text-[10px] text-slate-400">
@@ -162,20 +164,20 @@ export const Header: React.FC = () => {
             placeholder="Search issues & tasks..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-md bg-slate-900/80 border border-white/10 px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
+            className="w-full rounded-md bg-slate-100 border border-slate-200 px-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500/60"
           />
         </div>
       )}
 
       {/* Filter Tabs */}
       <div className="mt-2.5 flex items-center justify-between text-[11px]">
-        <div className="flex items-center space-x-1 bg-slate-900/60 p-0.5 rounded-lg border border-white/5">
+        <div className="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
           <button
             onClick={() => setFilterSource('all')}
             className={`px-2 py-0.5 rounded-md font-medium transition-all ${
               filterSource === 'all'
-                ? 'bg-slate-800 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-white text-slate-800 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
             }`}
           >
             All
@@ -184,8 +186,8 @@ export const Header: React.FC = () => {
             onClick={() => setFilterSource('github')}
             className={`px-2 py-0.5 rounded-md font-medium flex items-center space-x-1 transition-all ${
               filterSource === 'github'
-                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                : 'text-slate-500 hover:text-slate-700'
             }`}
           >
             <Github className="h-3 w-3" />
@@ -195,8 +197,8 @@ export const Header: React.FC = () => {
             onClick={() => setFilterSource('google_tasks')}
             className={`px-2 py-0.5 rounded-md font-medium flex items-center space-x-1 transition-all ${
               filterSource === 'google_tasks'
-                ? 'bg-blue-950/80 text-blue-300 border border-blue-500/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-blue-50 text-blue-600 border border-blue-200'
+                : 'text-slate-500 hover:text-slate-700'
             }`}
           >
             <CheckSquare className="h-3 w-3" />

@@ -4,55 +4,56 @@
 
 @layer base {
   body {
-    @apply select-none overflow-hidden bg-transparent antialiased;
+    @apply select-none overflow-hidden bg-slate-50 antialiased;
   }
 }
 
 /* Custom sleek scrollbar for widget columns */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.3);
+  background: #f1f5f9;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: #cbd5e1;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
+  background: #94a3b8;
 }
 
 /* High-performance desktop widget container */
 .widget-glass {
-  background: rgba(15, 23, 42, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
   transform: translateZ(0);
 }
 
 /* Card container styling */
 .card-glass {
-  background: rgba(30, 41, 59, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
   will-change: transform;
 }
 
 .card-glass:hover {
-  background: rgba(30, 41, 59, 0.95);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: #f8fafc;
+  border-color: #cbd5e1;
 }
 
 /* High-speed instant drag preview overlay */
 .drag-active {
-  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4), 0 0 2px rgba(129, 140, 248, 0.8);
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2), 0 0 2px rgba(129, 140, 248, 0.6);
   border-color: rgba(129, 140, 248, 0.8) !important;
-  background: rgba(30, 41, 59, 0.98) !important;
+  background: #ffffff !important;
   pointer-events: none !important;
   transition: none !important;
 }

@@ -17,8 +17,8 @@ fn toggle_always_on_top(window: tauri::Window) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn hide_window(window: tauri::Window) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())
+fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -33,7 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet, 
             toggle_always_on_top,
-            hide_window,
+            minimize_window,
             close_app
         ])
         .setup(|app| {
