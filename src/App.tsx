@@ -5,7 +5,7 @@ import { AddTaskModal } from './components/AddTaskModal';
 
 export const App: React.FC = () => {
   return (
-    <div className="widget-glass flex flex-col h-screen w-screen overflow-hidden rounded-2xl border border-white/10 text-slate-100 shadow-2xl">
+    <div className="bg-white flex flex-col h-screen w-screen overflow-hidden rounded-2xl border border-slate-200 text-slate-800 shadow-xl">
       <Header />
       <main className="flex-1 flex overflow-hidden">
         <KanbanBoard />
