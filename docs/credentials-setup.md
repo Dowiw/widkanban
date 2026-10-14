@@ -76,9 +76,10 @@ Fine-grained PATs give you repository-level control and are more secure:
 3. Set a **Token name** (e.g., `WidKanban`), **Expiration**, and **Resource owner** (your account or an org).
 4. Under **Repository access**, choose "All repositories" or select specific ones.
 5. Under **Permissions → Repository permissions**, set:
-   - **Issues**: `Read and write` (needed to apply labels and close issues)
+   - **Issues**: `Read and write` (needed to apply labels, comment, and close issues)
    - **Pull requests**: `Read-only`
    - **Metadata**: `Read-only` (auto-selected)
+   - **Administration** *(optional)*: `Read and write` (only required if you want the ability to permanently hard-delete issues via GraphQL; closing as "not planned" only needs Issues `Read and write`)
 6. Under **Permissions → Account permissions**, set:
    - **User email addresses**: not needed — leave as `No access`
 7. Click **"Generate token"** and copy the result. Fine-grained tokens look like `github_pat_xxxxxxxxxxxx`.
@@ -149,9 +150,9 @@ WidKanban stores credentials locally in a JSON file:
 
 | Platform | Path |
 |---|---|
-| **Windows** | `%APPDATA%\com.widkanban.app\credentials.json` |
-| **macOS** | `~/Library/Application Support/com.widkanban.app/credentials.json` |
-| **Linux** | `~/.local/share/com.widkanban.app/credentials.json` |
+| **Windows** | `%APPDATA%\com.widkanban.desktop\credentials.json` |
+| **macOS** | `~/Library/Application Support/com.widkanban.desktop/credentials.json` |
+| **Linux** | `~/.local/share/com.widkanban.desktop/credentials.json` |
 
 On Unix/macOS the file permissions are set to `600` (only your user account can read it). You can delete this file at any time to revoke all stored credentials — WidKanban will fall back to the mock task dataset on next launch.
 
