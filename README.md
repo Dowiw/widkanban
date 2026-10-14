@@ -22,6 +22,7 @@ WidKanban aggregates both **GitHub Issues/PRs** and **Google Tasks** into a sing
   - [Security & Local Storage](#security--local-storage)
 - [Documentation & Deep Dives](#documentation--deep-dives)
 - [Project Roadmap](#project-roadmap)
+- [Contributing](#contributing)
 
 ---
 
@@ -139,6 +140,7 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
 
 | Document | Description | Key Topics |
 | :--- | :--- | :--- |
+| 🤝 **[Contributor Guide & Manual](CONTRIBUTORS.md)** | Full guide for development workflows, fast testing with ephemeral keys, and PR checklists. | [Architectural invariants](CONTRIBUTORS.md#2-non-negotiable-architectural-invariants), [Dev setup](CONTRIBUTORS.md#3-prerequisites--development-environment-setup), [Ephemeral keys](CONTRIBUTORS.md#4-fast-testing-with-ephemeral--short-lived-keys), [PR checklist](CONTRIBUTORS.md#8-pull-request--verification-checklist). |
 | 🔑 **[Credentials Setup Guide](docs/credentials-setup.md)** | Step-by-step instructions for generating GitHub PATs and Google OAuth tokens. | Token scopes, [Contributor quick-start](docs/credentials-setup.md#contributor-quick-start-fast-testing-with-short-lived-keys), [Local storage paths](docs/credentials-setup.md#where-credentials-are-stored), [Revocation](docs/credentials-setup.md#revoking-credentials). |
 | 🏛️ **[Architecture & System Design](docs/architecture.md)** | Core system architecture, IPC bridge, security invariants, and schemas. | [Mermaid architecture diagram](docs/architecture.md#1-high-level-system-architecture), [`UnifiedTask` schema](docs/architecture.md#2-data-normalization-schema), [Write-back engine](docs/architecture.md#4-sync-model--write-back-engine), [Local trash system](docs/architecture.md#5-task-deletion--local-trash-management). |
 | 🛠️ **[Developer Notes & Troubleshooting](docs/notes.md)** | Implementation quirks, frameless window behavior, and compiler troubleshooting. | [Linux packages](docs/notes.md#1-linux-environment-prerequisites), [Frameless drag region](docs/notes.md#2-frameless-window--drag-region-behavior), [Console warnings](docs/notes.md#3-understanding-common-console-warnings), [MSVC linker fix](docs/notes.md#5-windows-msvc-linker-required-for-reqwest--tokio). |
@@ -160,5 +162,17 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
   - Tokio auto-polling loop (~3 min cadence), desktop notifications on assignment, `.msi` / `.deb` / `.dmg` release bundles.
 
 Track our detailed milestone progress in the [Roadmap & Milestone Checklist](docs/todos.md).
+
+[↑ Back to Top](#table-of-contents)
+
+---
+
+## Contributing
+
+We welcome contributions of all kinds! Please consult our comprehensive **[Contributor Guide & Development Manual](CONTRIBUTORS.md)** before opening an issue or pull request. It includes:
+- Non-negotiable architectural invariants (zero frontend secrets, data normalization).
+- Fast contributor testing workflows with 1-hour ephemeral keys (no Google Cloud project required).
+- Development server modes, test commands (`npm test`, `cargo test`), and build steps.
+- Code conventions and PR verification checklist.
 
 [↑ Back to Top](#table-of-contents)

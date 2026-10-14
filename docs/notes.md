@@ -125,6 +125,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## Related Documentation
 
 - [Project README](../README.md): High-level overview, key features, and quick start.
+- [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
 - [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
 - [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
 - [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.

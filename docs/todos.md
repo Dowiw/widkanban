@@ -88,6 +88,7 @@ WidKanban's development follows a 4-phase progression moving from UI prototyping
 ## Related Documentation
 
 - [Project README](../README.md): High-level overview, key features, and quick start.
+- [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
 - [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
 - [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
 - [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.

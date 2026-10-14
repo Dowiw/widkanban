@@ -198,6 +198,7 @@ On Unix/macOS the file permissions are set to `600` (only your user account can 
 ## Related Documentation
 
 - [Project README](../README.md): High-level overview, key features, and quick start.
+- [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
 - [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
 - [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
 - [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.
