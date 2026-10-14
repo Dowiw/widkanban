@@ -93,6 +93,7 @@ interface TaskState {
   setCompletedOnboarding: (completed: boolean) => void;
   setGithubSyncSettings: (settings: Partial<GitHubSyncSettings>) => void;
   setupRepoLabels: (repo: string) => Promise<RepoLabelsResult | null>;
+  syncLabelsWithHomeBoard: () => Promise<void>;
   refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
@@ -140,10 +141,49 @@ export const useTaskStore = create<TaskState>()(
           const updatedTasks = [...state.tasks];
           const [movedTask] = updatedTasks.splice(taskIndex, 1);
 
+          let updatedSourceMeta = movedTask.sourceMeta;
+          const syncSettings = state.githubSyncSettings;
+          if (
+            movedTask.source === 'github' &&
+            syncSettings.manageLabels &&
+            (targetStatus === 'todo' || targetStatus === 'in_progress')
+          ) {
+            const currentLabels = movedTask.sourceMeta?.labels || [];
+            const todoTrim = syncSettings.todoLabel.trim().toLowerCase();
+            const inProgTrim = syncSettings.inProgressLabel.trim().toLowerCase();
+
+            let newLabels = [...currentLabels];
+            if (targetStatus === 'in_progress') {
+              if (todoTrim) {
+                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
+              }
+              if (inProgTrim && !newLabels.some((l) => l.name.toLowerCase() === inProgTrim)) {
+                newLabels.push({
+                  name: syncSettings.inProgressLabel.trim(),
+                  color: 'd93f0b',
+                  description: 'Work currently in progress (managed by WidKanban)',
+                });
+              }
+            } else if (targetStatus === 'todo') {
+              if (inProgTrim) {
+                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
+              }
+              if (todoTrim && !newLabels.some((l) => l.name.toLowerCase() === todoTrim)) {
+                newLabels.push({
+                  name: syncSettings.todoLabel.trim(),
+                  color: '0075ca',
+                  description: 'Tasks ready to be worked on (managed by WidKanban)',
+                });
+              }
+            }
+            updatedSourceMeta = { ...movedTask.sourceMeta, labels: newLabels };
+          }
+
           const updatedTask: UnifiedTask = {
             ...movedTask,
             status: targetStatus,
             updatedAt: new Date().toISOString(),
+            sourceMeta: updatedSourceMeta,
           };
 
           if (targetIndex !== undefined) {
@@ -297,6 +337,86 @@ export const useTaskStore = create<TaskState>()(
           todoLabel: settings.todoLabel,
           inProgressLabel: settings.inProgressLabel,
         });
+      },
+
+      syncLabelsWithHomeBoard: async () => {
+        const settings = get().githubSyncSettings;
+        if (!settings.manageLabels) return;
+
+        const todoTrim = settings.todoLabel.trim();
+        const inProgTrim = settings.inProgressLabel.trim();
+        const todoLower = todoTrim.toLowerCase();
+        const inProgLower = inProgTrim.toLowerCase();
+
+        // 1. Immediately synchronize local tasks on the home board (instant 60fps UI feedback)
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.source !== 'github') return task;
+
+            const currentLabels = task.sourceMeta?.labels || [];
+            let newLabels = [...currentLabels];
+
+            if (task.status === 'in_progress') {
+              if (todoLower) {
+                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoLower);
+              }
+              if (inProgLower && !newLabels.some((l) => l.name.toLowerCase() === inProgLower)) {
+                newLabels.push({
+                  name: inProgTrim,
+                  color: 'd93f0b',
+                  description: 'Work currently in progress (managed by WidKanban)',
+                });
+              }
+            } else if (task.status === 'todo') {
+              if (inProgLower) {
+                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgLower);
+              }
+              if (todoLower && !newLabels.some((l) => l.name.toLowerCase() === todoLower)) {
+                newLabels.push({
+                  name: todoTrim,
+                  color: '0075ca',
+                  description: 'Tasks ready to be worked on (managed by WidKanban)',
+                });
+              }
+            }
+
+            return {
+              ...task,
+              sourceMeta: {
+                ...task.sourceMeta,
+                labels: newLabels,
+              },
+            };
+          }),
+        }));
+
+        // 2. Dispatch background write-backs to GitHub so remote issues receive the agreed labels
+        const activeGithubTasks = get().tasks.filter(
+          (t) =>
+            t.source === 'github' &&
+            t.sourceMeta?.repo &&
+            t.sourceMeta?.issueNumber &&
+            (t.status === 'todo' || t.status === 'in_progress')
+        );
+
+        const updates = activeGithubTasks.map((t) => {
+          const isProgress = t.status === 'in_progress';
+          const target = isProgress ? inProgTrim : todoTrim;
+          const opposing = isProgress ? todoTrim : inProgTrim;
+
+          return safeInvokeWithResult<void>('update_github_issue_labels', {
+            repo: t.sourceMeta.repo,
+            issueNumber: t.sourceMeta.issueNumber,
+            targetLabel: target || null,
+            opposingLabel: opposing || null,
+            postCommentFallback: settings.postCommentsFallback,
+          });
+        });
+
+        await Promise.allSettled(updates);
+
+        // 3. Re-fetch from GitHub so the home board has full confirmed remote state
+        await get().fetchGithubTasks();
       },
 
       refreshTasks: async () => {

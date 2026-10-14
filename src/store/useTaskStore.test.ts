@@ -536,4 +536,119 @@ describe('useTaskStore', () => {
     });
     expect(res.success).toBe(true);
   });
+
+  it('syncLabelsWithHomeBoard synchronizes local task labels and dispatches GitHub updates', async () => {
+    const ghTask1: UnifiedTask = {
+      id: 'gh_task_1',
+      title: 'In Progress Task',
+      source: 'github',
+      status: 'in_progress',
+      url: 'https://github.com/org/widkanban/issues/1',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {
+        repo: 'org/widkanban',
+        issueNumber: 1,
+        labels: [{ name: 'to-do', color: '0075ca' }],
+      },
+    };
+
+    const ghTask2: UnifiedTask = {
+      id: 'gh_task_2',
+      title: 'Todo Task',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/2',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {
+        repo: 'org/widkanban',
+        issueNumber: 2,
+        labels: [{ name: 'in-progress', color: 'd93f0b' }],
+      },
+    };
+
+    useTaskStore.setState({
+      tasks: [ghTask1, ghTask2],
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        postCommentsFallback: false,
+        hasPromptedSetup: true,
+      },
+    });
+
+    mockInvoke.mockResolvedValue(null);
+
+    const { syncLabelsWithHomeBoard } = useTaskStore.getState();
+    await syncLabelsWithHomeBoard();
+
+    // Verify task1 (in_progress) now has in-progress label locally
+    const updated1 = useTaskStore.getState().tasks.find((t) => t.id === 'gh_task_1');
+    expect(updated1?.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(true);
+    expect(updated1?.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(false);
+
+    // Verify task2 (todo) now has to-do label locally
+    const updated2 = useTaskStore.getState().tasks.find((t) => t.id === 'gh_task_2');
+    expect(updated2?.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(true);
+    expect(updated2?.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(false);
+
+    // Verify update_github_issue_labels was called for both tasks
+    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
+      repo: 'org/widkanban',
+      issueNumber: 1,
+      targetLabel: 'in-progress',
+      opposingLabel: 'to-do',
+      postCommentFallback: false,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
+      repo: 'org/widkanban',
+      issueNumber: 2,
+      targetLabel: 'to-do',
+      opposingLabel: 'in-progress',
+      postCommentFallback: false,
+    });
+  });
+
+  it('moveTask optimistically updates sourceMeta.labels when moving between todo and in_progress', () => {
+    const ghTask: UnifiedTask = {
+      id: 'gh_drag_test',
+      title: 'Drag Label Test',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/99',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {
+        repo: 'org/widkanban',
+        issueNumber: 99,
+        labels: [{ name: 'to-do', color: '0075ca' }],
+      },
+    };
+
+    useTaskStore.setState({
+      tasks: [ghTask],
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        postCommentsFallback: false,
+        hasPromptedSetup: true,
+      },
+    });
+
+    const { moveTask } = useTaskStore.getState();
+
+    // Move to in_progress
+    moveTask('gh_drag_test', 'in_progress');
+    const inProgTask = useTaskStore.getState().tasks.find((t) => t.id === 'gh_drag_test')!;
+    expect(inProgTask.status).toBe('in_progress');
+    expect(inProgTask.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(true);
+    expect(inProgTask.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(false);
+
+    // Move back to todo
+    moveTask('gh_drag_test', 'todo');
+    const todoTask = useTaskStore.getState().tasks.find((t) => t.id === 'gh_drag_test')!;
+    expect(todoTask.status).toBe('todo');
+    expect(todoTask.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(true);
+    expect(todoTask.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(false);
+  });
 });

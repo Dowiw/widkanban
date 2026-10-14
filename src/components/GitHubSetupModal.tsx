@@ -19,6 +19,7 @@ export const GitHubSetupModal: React.FC = () => {
     githubSyncSettings,
     setGithubSyncSettings,
     setupRepoLabels,
+    syncLabelsWithHomeBoard,
   } = useTaskStore();
 
   const [manageLabels, setManageLabels] = useState(githubSyncSettings.manageLabels);
@@ -44,7 +45,8 @@ export const GitHubSetupModal: React.FC = () => {
     )
   );
 
-  const handleSaveSettingsOnly = () => {
+  const handleSaveSettingsOnly = async () => {
+    setIsProcessing(true);
     setGithubSyncSettings({
       manageLabels,
       todoLabel: todoLabel.trim(),
@@ -52,6 +54,12 @@ export const GitHubSetupModal: React.FC = () => {
       postCommentsFallback,
       hasPromptedSetup: true,
     });
+
+    if (manageLabels) {
+      await syncLabelsWithHomeBoard();
+    }
+
+    setIsProcessing(false);
     setGithubSetupOpen(false);
   };
 
@@ -93,6 +101,12 @@ export const GitHubSetupModal: React.FC = () => {
     }
 
     setSetupResults(results);
+
+    // Synchronize labels with the home board now that repos are configured
+    if (manageLabels) {
+      await syncLabelsWithHomeBoard();
+    }
+
     setIsProcessing(false);
 
     // Auto-close after brief delay if all succeeded
@@ -100,7 +114,7 @@ export const GitHubSetupModal: React.FC = () => {
     if (!hasErrors) {
       setTimeout(() => {
         setGithubSetupOpen(false);
-      }, 1200);
+      }, 1000);
     }
   };
 
@@ -286,12 +300,12 @@ export const GitHubSetupModal: React.FC = () => {
               {isProcessing ? (
                 <>
                   <RefreshCw className="h-3 w-3 animate-spin" />
-                  <span>Configuring...</span>
+                  <span>Syncing with Home...</span>
                 </>
               ) : (
                 <>
                   <Check className="h-3.5 w-3.5" />
-                  <span>Set Up Found Repos</span>
+                  <span>Set Up & Sync at Home</span>
                 </>
               )}
             </button>
@@ -299,9 +313,10 @@ export const GitHubSetupModal: React.FC = () => {
             <button
               type="button"
               onClick={handleSaveSettingsOnly}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 active:scale-[0.98] transition-all"
+              disabled={isProcessing}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 active:scale-[0.98] transition-all disabled:opacity-50"
             >
-              Save Preferences
+              {manageLabels ? 'Save & Sync at Home' : 'Save Preferences'}
             </button>
           )}
         </div>
