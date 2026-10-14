@@ -2,7 +2,9 @@
   <img src="public/logo.png" width="100" height="100" alt="WidKanban Logo" />
 </p>
 
-# WidKanban
+<h1 align="center" style="font-family: 'Unifont', monospace;">
+  <img src="public/title.svg" alt="WidKanban" height="44" />
+</h1>
 
 A lightweight, unobtrusive, frameless desktop Kanban widget built with **Tauri v2 (Rust)** and **React 19 + Vite + Tailwind CSS + Zustand + @dnd-kit**.
 
