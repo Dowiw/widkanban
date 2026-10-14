@@ -25,7 +25,9 @@ export const SettingsModal: React.FC = () => {
     clearCredentials,
     fetchGoogleTasks,
     fetchGithubTasks,
-    setCompletedOnboarding 
+    setCompletedOnboarding,
+    deletePreference,
+    setDeletePreference
   } = useTaskStore();
 
   const [githubToken, setGithubToken] = useState('');
@@ -199,6 +201,27 @@ export const SettingsModal: React.FC = () => {
                   className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                 >
                   Configure Labels →
+                </button>
+              </div>
+            )}
+
+            {deletePreference && (
+              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                <span className="text-[11px] text-slate-600 flex items-center space-x-1">
+                  <Trash2 className="h-3 w-3 text-slate-400" />
+                  <span>
+                    Delete mode:{' '}
+                    <strong className="capitalize text-slate-700">
+                      {deletePreference.action.replace('_', ' ')}
+                    </strong>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDeletePreference(null)}
+                  className="text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:underline"
+                >
+                  Reset Prompt
                 </button>
               </div>
             )}

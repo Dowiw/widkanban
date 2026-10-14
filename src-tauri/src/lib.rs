@@ -1093,6 +1093,217 @@ async fn update_github_issue_labels(
     Ok(())
 }
 
+#[derive(Serialize)]
+struct CloseIssuePayload<'a> {
+    state: &'a str,
+    state_reason: &'a str,
+}
+
+#[derive(Serialize)]
+struct GraphQLRequest<'a> {
+    query: &'a str,
+    variables: serde_json::Value,
+}
+
+/// Close a GitHub issue as "not_planned", with optional reason and duplicate reference comments.
+#[tauri::command]
+async fn close_github_issue(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    issue_number: u64,
+    reason: Option<String>,
+    duplicate_of: Option<u64>,
+) -> Result<(), String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // 1. If duplicate or reason specified, post comment first
+    let mut comment_parts = Vec::new();
+    if let Some(dup) = duplicate_of {
+        comment_parts.push(format!("Duplicate of #{}", dup));
+    }
+    if let Some(r) = reason {
+        let r_trim = r.trim();
+        if !r_trim.is_empty() {
+            if duplicate_of.is_some() {
+                comment_parts.push(format!("Reason: {}", r_trim));
+            } else {
+                comment_parts.push(r_trim.to_string());
+            }
+        }
+    }
+
+    if !comment_parts.is_empty() {
+        let comment_body = comment_parts.join("\n\n");
+        let comment_payload = CreateCommentPayload {
+            body: &comment_body,
+        };
+        let comment_url = format!(
+            "https://api.github.com/repos/{}/issues/{}/comments",
+            repo, issue_number
+        );
+        let _ = client
+            .post(&comment_url)
+            .header("User-Agent", "WidKanban-Desktop")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(&token)
+            .json(&comment_payload)
+            .send()
+            .await;
+    }
+
+    // 2. Close issue as not_planned
+    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
+    let patch_payload = CloseIssuePayload {
+        state: "closed",
+        state_reason: "not_planned",
+    };
+
+    let resp = client
+        .patch(&patch_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .json(&patch_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Network error closing issue: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to close issue {}#{} ({}): {}", repo, issue_number, status, body));
+    }
+
+    Ok(())
+}
+
+/// Permanently delete an issue on GitHub via GraphQL (requires Repository Admin/Owner permissions).
+#[tauri::command]
+async fn delete_github_issue_permanently(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    issue_number: u64,
+) -> Result<(), String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let parts: Vec<&str> = repo.split('/').collect();
+    if parts.len() != 2 {
+        return Err(format!("Invalid repository format '{}', expected 'owner/repo'", repo));
+    }
+    let owner = parts[0];
+    let name = parts[1];
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // Step 1: Query issue Node ID
+    let query = r#"
+        query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) {
+                issue(number: $number) {
+                    id
+                }
+            }
+        }
+    "#;
+    let query_payload = GraphQLRequest {
+        query,
+        variables: serde_json::json!({
+            "owner": owner,
+            "name": name,
+            "number": issue_number,
+        }),
+    };
+
+    let q_resp = client
+        .post("https://api.github.com/graphql")
+        .header("User-Agent", "WidKanban-Desktop")
+        .bearer_auth(&token)
+        .json(&query_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Network error querying issue node ID: {}", e))?;
+
+    let q_json: serde_json::Value = q_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse issue ID response: {}", e))?;
+
+    if let Some(errors) = q_json.get("errors").and_then(|e| e.as_array()) {
+        if !errors.is_empty() {
+            let msg = errors[0]
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("GraphQL query failed");
+            return Err(format!("GitHub error: {}", msg));
+        }
+    }
+
+    let issue_id = q_json
+        .pointer("/data/repository/issue/id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Issue {}#{} not found", repo, issue_number))?;
+
+    // Step 2: Call deleteIssue mutation
+    let mutation = r#"
+        mutation($issueId: ID!) {
+            deleteIssue(input: { issueId: $issueId }) {
+                clientMutationId
+            }
+        }
+    "#;
+    let mutation_payload = GraphQLRequest {
+        query: mutation,
+        variables: serde_json::json!({
+            "issueId": issue_id,
+        }),
+    };
+
+    let m_resp = client
+        .post("https://api.github.com/graphql")
+        .header("User-Agent", "WidKanban-Desktop")
+        .bearer_auth(&token)
+        .json(&mutation_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Network error executing delete mutation: {}", e))?;
+
+    let m_json: serde_json::Value = m_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse delete mutation response: {}", e))?;
+
+    if let Some(errors) = m_json.get("errors").and_then(|e| e.as_array()) {
+        if !errors.is_empty() {
+            let msg = errors[0]
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Permanent deletion failed");
+            return Err(format!(
+                "Failed to permanently delete issue on GitHub: {}. (Note: Only repository admins/owners can permanently delete issues)",
+                msg
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
 fn chrono_now_iso() -> String {
@@ -1160,6 +1371,8 @@ pub fn run() {
             update_google_task,
             setup_github_repo_labels,
             update_github_issue_labels,
+            close_github_issue,
+            delete_github_issue_permanently,
         ])
         .setup(|app| {
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
@@ -1398,5 +1611,29 @@ mod tests {
         let deserialized: RepoLabelsResult = serde_json::from_str(&serialized).expect("deserialization failed");
         assert_eq!(res, deserialized);
     }
+
+    #[test]
+    fn test_close_issue_payload_serialization() {
+        let payload = CloseIssuePayload {
+            state: "closed",
+            state_reason: "not_planned",
+        };
+        let serialized = serde_json::to_string(&payload).expect("serialization failed");
+        assert!(serialized.contains(r#""state":"closed""#));
+        assert!(serialized.contains(r#""state_reason":"not_planned""#));
+    }
+
+    #[test]
+    fn test_graphql_request_serialization() {
+        let payload = GraphQLRequest {
+            query: "query { viewer { login } }",
+            variables: serde_json::json!({ "foo": "bar" }),
+        };
+        let serialized = serde_json::to_string(&payload).expect("serialization failed");
+        assert!(serialized.contains("query"));
+        assert!(serialized.contains("variables"));
+        assert!(serialized.contains("foo"));
+    }
 }
+
 

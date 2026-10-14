@@ -12,8 +12,10 @@ import {
   Layers,
   Minus,
   X,
-  Settings
+  Settings,
+  Trash2
 } from 'lucide-react';
+import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
 
 export const Header: React.FC = () => {
   const { 
@@ -27,7 +29,12 @@ export const Header: React.FC = () => {
     setSettingsOpen,
     authStatus,
     refreshTasks,
-    tasks
+    tasks,
+    locallyDeletedTasks,
+    isTrashDropdownOpen,
+    toggleTrashDropdown,
+    hasSeenLocallyDeletedTip,
+    dismissLocallyDeletedTip
   } = useTaskStore();
 
   const [showSearch, setShowSearch] = useState(false);
@@ -142,6 +149,27 @@ export const Header: React.FC = () => {
             )}
           </button>
 
+          {/* Hidden / Deleted Tasks Dropdown Trigger */}
+          <div className="relative">
+            <button
+              onClick={toggleTrashDropdown}
+              title={`Hidden / Deleted Tasks (${locallyDeletedTasks.length})`}
+              className={`p-1.5 rounded-md transition-colors relative ${
+                isTrashDropdownOpen
+                  ? 'bg-rose-50 text-rose-600'
+                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {locallyDeletedTasks.length > 0 && (
+                <span className="absolute -top-1 -right-1 h-3.5 min-w-[14px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center ring-1 ring-white">
+                  {locallyDeletedTasks.length}
+                </span>
+              )}
+            </button>
+            <LocallyDeletedDropdown />
+          </div>
+
           <button
             onClick={() => setAddTaskOpen(true)}
             title="Add Mock Task"
@@ -180,6 +208,24 @@ export const Header: React.FC = () => {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-md bg-slate-100 border border-slate-200 px-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500/60"
           />
+        </div>
+      )}
+
+      {/* One-time resync tip banner */}
+      {locallyDeletedTasks.length > 0 && !hasSeenLocallyDeletedTip && (
+        <div className="mt-2 flex items-center justify-between p-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-800 animate-in fade-in">
+          <div className="flex items-center space-x-1.5 min-w-0 pr-1">
+            <Trash2 className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+            <span className="truncate">
+              You have {locallyDeletedTasks.length} locally hidden task(s). Click the trash icon to view or restore.
+            </span>
+          </div>
+          <button
+            onClick={dismissLocallyDeletedTip}
+            className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-200/60 hover:bg-amber-200 text-amber-900 transition-colors"
+          >
+            Got it
+          </button>
         </div>
       )}
 

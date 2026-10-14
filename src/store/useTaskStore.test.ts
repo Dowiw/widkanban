@@ -434,4 +434,104 @@ describe('useTaskStore', () => {
     });
     expect(res?.createdLabels).toEqual(['to-do']);
   });
+
+  it('deleteTaskLocally moves task to locallyDeletedTasks and removes from active tasks', () => {
+    const { addTask, deleteTaskLocally } = useTaskStore.getState();
+
+    addTask({
+      title: 'Task to locally delete',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/201',
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 201 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    deleteTaskLocally(added.id);
+
+    expect(useTaskStore.getState().tasks.some((t) => t.id === added.id)).toBe(false);
+    expect(useTaskStore.getState().locallyDeletedTasks.some((t) => t.id === added.id)).toBe(true);
+  });
+
+  it('restoreLocallyDeletedTask restores task to active board and removes from locallyDeletedTasks', () => {
+    const { addTask, deleteTaskLocally, restoreLocallyDeletedTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'Task to restore',
+      source: 'github',
+      status: 'in_progress',
+      url: 'https://github.com/org/widkanban/issues/202',
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 202 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    deleteTaskLocally(added.id);
+    expect(useTaskStore.getState().locallyDeletedTasks.some((t) => t.id === added.id)).toBe(true);
+
+    restoreLocallyDeletedTask(added.id);
+    expect(useTaskStore.getState().tasks.some((t) => t.id === added.id)).toBe(true);
+    expect(useTaskStore.getState().locallyDeletedTasks.some((t) => t.id === added.id)).toBe(false);
+  });
+
+  it('fetchGithubTasks filters out locallyDeletedTasks so they do not reappear on resync', async () => {
+    const hiddenTask: UnifiedTask = {
+      id: 'gh_hidden_301',
+      title: 'Hidden task',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/301',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 301 },
+    };
+
+    const regularTask: UnifiedTask = {
+      id: 'gh_regular_302',
+      title: 'Regular task',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/302',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 302 },
+    };
+
+    useTaskStore.setState({
+      locallyDeletedTasks: [hiddenTask],
+      tasks: [],
+    });
+
+    mockInvoke.mockResolvedValueOnce([hiddenTask, regularTask]);
+
+    const { fetchGithubTasks } = useTaskStore.getState();
+    await fetchGithubTasks();
+
+    const currentTasks = useTaskStore.getState().tasks;
+    expect(currentTasks.some((t) => t.id === hiddenTask.id)).toBe(false);
+    expect(currentTasks.some((t) => t.id === regularTask.id)).toBe(true);
+  });
+
+  it('closeGitHubIssueOnRemote invokes close_github_issue with reason and duplicate', async () => {
+    mockInvoke.mockResolvedValueOnce(null);
+
+    const { closeGitHubIssueOnRemote } = useTaskStore.getState();
+    await closeGitHubIssueOnRemote('org/widkanban', 42, 'Not needed', 10);
+
+    expect(mockInvoke).toHaveBeenCalledWith('close_github_issue', {
+      repo: 'org/widkanban',
+      issueNumber: 42,
+      reason: 'Not needed',
+      duplicateOf: 10,
+    });
+  });
+
+  it('deleteGitHubIssuePermanentlyOnRemote invokes delete_github_issue_permanently command', async () => {
+    mockInvoke.mockResolvedValueOnce(null);
+
+    const { deleteGitHubIssuePermanentlyOnRemote } = useTaskStore.getState();
+    await deleteGitHubIssuePermanentlyOnRemote('org/widkanban', 42);
+
+    expect(mockInvoke).toHaveBeenCalledWith('delete_github_issue_permanently', {
+      repo: 'org/widkanban',
+      issueNumber: 42,
+    });
+  });
 });

@@ -8,6 +8,7 @@ import {
   AuthStatus,
   GitHubSyncSettings,
   RepoLabelsResult,
+  DeletePreference,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -32,10 +33,36 @@ interface TaskState {
   authStatus: AuthStatus;
   githubSyncSettings: GitHubSyncSettings;
 
+  // Local trash & deletion modal state
+  locallyDeletedTasks: UnifiedTask[];
+  deleteModalTask: UnifiedTask | null;
+  deletePreference: DeletePreference | null;
+  hasSeenLocallyDeletedTip: boolean;
+  isTrashDropdownOpen: boolean;
+
   // Actions
   moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
   addTask: (task: Omit<UnifiedTask, 'id' | 'updatedAt'>) => void;
   deleteTask: (taskId: string) => void;
+  openDeleteModal: (task: UnifiedTask) => void;
+  closeDeleteModal: () => void;
+  setTrashDropdownOpen: (isOpen: boolean) => void;
+  toggleTrashDropdown: () => void;
+  deleteTaskLocally: (taskId: string) => void;
+  restoreLocallyDeletedTask: (taskId: string) => void;
+  clearLocallyDeletedTasks: () => void;
+  setDeletePreference: (pref: DeletePreference | null) => void;
+  dismissLocallyDeletedTip: () => void;
+  closeGitHubIssueOnRemote: (
+    repo: string,
+    issueNumber: number,
+    reason?: string,
+    duplicateOf?: number
+  ) => Promise<boolean>;
+  deleteGitHubIssuePermanentlyOnRemote: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<boolean>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -75,6 +102,11 @@ export const useTaskStore = create<TaskState>()(
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
+      locallyDeletedTasks: [],
+      deleteModalTask: null,
+      deletePreference: null,
+      hasSeenLocallyDeletedTip: false,
+      isTrashDropdownOpen: false,
 
       moveTask: (taskId, targetStatus, targetIndex) => {
         // --- Optimistic UI update ---
@@ -166,9 +198,65 @@ export const useTaskStore = create<TaskState>()(
       },
 
       deleteTask: (taskId) => {
+        const task = get().tasks.find((t) => t.id === taskId);
         set((state) => ({
           tasks: state.tasks.filter((t) => t.id !== taskId),
+          locallyDeletedTasks:
+            task && !state.locallyDeletedTasks.some((t) => t.id === taskId)
+              ? [task, ...state.locallyDeletedTasks]
+              : state.locallyDeletedTasks,
         }));
+      },
+
+      openDeleteModal: (task) => set({ deleteModalTask: task }),
+      closeDeleteModal: () => set({ deleteModalTask: null }),
+      setTrashDropdownOpen: (isOpen) => set({ isTrashDropdownOpen: isOpen }),
+      toggleTrashDropdown: () =>
+        set((state) => ({ isTrashDropdownOpen: !state.isTrashDropdownOpen })),
+
+      deleteTaskLocally: (taskId) => {
+        const task = get().tasks.find((t) => t.id === taskId);
+        set((state) => ({
+          tasks: state.tasks.filter((t) => t.id !== taskId),
+          locallyDeletedTasks:
+            task && !state.locallyDeletedTasks.some((t) => t.id === taskId)
+              ? [task, ...state.locallyDeletedTasks]
+              : state.locallyDeletedTasks,
+          deleteModalTask: null,
+        }));
+      },
+
+      restoreLocallyDeletedTask: (taskId) => {
+        const task = get().locallyDeletedTasks.find((t) => t.id === taskId);
+        if (!task) return;
+        set((state) => ({
+          locallyDeletedTasks: state.locallyDeletedTasks.filter((t) => t.id !== taskId),
+          tasks: state.tasks.some((t) => t.id === taskId)
+            ? state.tasks
+            : [...state.tasks, task],
+        }));
+      },
+
+      clearLocallyDeletedTasks: () => set({ locallyDeletedTasks: [] }),
+      setDeletePreference: (pref) => set({ deletePreference: pref }),
+      dismissLocallyDeletedTip: () => set({ hasSeenLocallyDeletedTip: true }),
+
+      closeGitHubIssueOnRemote: async (repo, issueNumber, reason, duplicateOf) => {
+        const res = await safeInvoke<void>('close_github_issue', {
+          repo,
+          issueNumber,
+          reason: reason || null,
+          duplicateOf: duplicateOf || null,
+        });
+        return res !== null;
+      },
+
+      deleteGitHubIssuePermanentlyOnRemote: async (repo, issueNumber) => {
+        const res = await safeInvoke<void>('delete_github_issue_permanently', {
+          repo,
+          issueNumber,
+        });
+        return res !== null;
       },
 
       setSearchQuery: (query) => set({ searchQuery: query }),
@@ -215,8 +303,10 @@ export const useTaskStore = create<TaskState>()(
         if (!fetched) return;
 
         set((state) => {
+          const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
+          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
           const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
-          return { tasks: [...nonGithubTasks, ...fetched] };
+          return { tasks: [...nonGithubTasks, ...activeFetched] };
         });
       },
 
@@ -285,6 +375,9 @@ export const useTaskStore = create<TaskState>()(
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
         githubSyncSettings: state.githubSyncSettings,
+        locallyDeletedTasks: state.locallyDeletedTasks,
+        deletePreference: state.deletePreference,
+        hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
@@ -298,6 +391,15 @@ export const useTaskStore = create<TaskState>()(
             ...currentState.githubSyncSettings,
             ...((persistedState as Partial<TaskState>).githubSyncSettings || {}),
           };
+        }
+        if (Array.isArray((persistedState as Partial<TaskState>)?.locallyDeletedTasks)) {
+          merged.locallyDeletedTasks = (persistedState as Partial<TaskState>).locallyDeletedTasks || [];
+        }
+        if ((persistedState as Partial<TaskState>)?.deletePreference !== undefined) {
+          merged.deletePreference = (persistedState as Partial<TaskState>).deletePreference || null;
+        }
+        if (typeof (persistedState as Partial<TaskState>)?.hasSeenLocallyDeletedTip === 'boolean') {
+          merged.hasSeenLocallyDeletedTip = (persistedState as Partial<TaskState>).hasSeenLocallyDeletedTip!;
         }
         return merged;
       },

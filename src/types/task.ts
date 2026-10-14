@@ -92,3 +92,10 @@ export interface RepoLabelsResult {
   createdLabels: string[];
 }
 
+export type DeleteActionType = 'local' | 'github_close' | 'github_permanent';
+
+export interface DeletePreference {
+  action: DeleteActionType;
+  remember: boolean;
+}
+

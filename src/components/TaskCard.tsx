@@ -63,7 +63,13 @@ function getContrastTextColor(hex: string): string {
 }
 
 export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) => {
-  const { deleteTask } = useTaskStore();
+  const {
+    openDeleteModal,
+    deleteTaskLocally,
+    deletePreference,
+    closeGitHubIssueOnRemote,
+    deleteGitHubIssuePermanentlyOnRemote,
+  } = useTaskStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
 
@@ -93,9 +99,27 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     window.open(urlToOpen || task.url, '_blank');
   };
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    deleteTask(task.id);
+
+    if (deletePreference?.remember) {
+      if (deletePreference.action === 'local' || !isGitHub) {
+        deleteTaskLocally(task.id);
+        return;
+      }
+      if (deletePreference.action === 'github_close' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
+        await closeGitHubIssueOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
+        deleteTaskLocally(task.id);
+        return;
+      }
+      if (deletePreference.action === 'github_permanent' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
+        await deleteGitHubIssuePermanentlyOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
+        deleteTaskLocally(task.id);
+        return;
+      }
+    }
+
+    openDeleteModal(task);
   };
 
   const handleToggleExpand = (e: React.MouseEvent) => {
