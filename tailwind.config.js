@@ -20,6 +20,7 @@ export default {
       },
       fontFamily: {
         sans: ['Outfit', 'system-ui', '-apple-system', 'sans-serif'],
+        unifont: ['"Unifont"', '"GNU Unifont"', 'monospace'],
       }
     },
   },

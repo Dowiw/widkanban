@@ -90,7 +90,7 @@ export const Header: React.FC = () => {
             className="h-7 w-7 rounded-lg object-contain shadow-sm border border-slate-200/80 bg-white p-0.5" 
           />
           <div>
-            <h1 className="text-xs font-bold tracking-wider text-slate-800 uppercase">
+            <h1 className="font-unifont text-sm font-semibold tracking-wide text-slate-800">
               WidKanban
             </h1>
             <div className="flex items-center space-x-2 text-[10px] text-slate-400">

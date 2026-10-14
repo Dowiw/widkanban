@@ -1,6 +1,14 @@
+@import '@fontsource/unifont';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer utilities {
+  .font-unifont {
+    font-family: 'Unifont', 'GNU Unifont', monospace;
+  }
+}
 
 @layer base {
   body {
