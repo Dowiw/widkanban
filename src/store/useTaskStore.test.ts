@@ -28,15 +28,17 @@ describe('useTaskStore', () => {
     });
   });
 
-  it('initializes with mock tasks dataset', () => {
+  it('initializes with mock tasks dataset and no github placeholders', () => {
     const state = useTaskStore.getState();
     expect(state.tasks).toHaveLength(INITIAL_MOCK_TASKS.length);
     expect(state.isPinned).toBe(true);
+    // Verify no placeholder GitHub issues exist in initial state
+    expect(state.tasks.some((t) => t.source === 'github')).toBe(false);
   });
 
   it('moves task status from todo to in_progress', () => {
     const { moveTask } = useTaskStore.getState();
-    const taskIdToMove = 'gh_101'; // initially 'todo'
+    const taskIdToMove = 'gt_201'; // initially 'todo'
 
     moveTask(taskIdToMove, 'in_progress');
 
@@ -70,8 +72,18 @@ describe('useTaskStore', () => {
 
   it('does NOT fire update_google_task IPC when moving a GitHub issue', () => {
     mockInvoke.mockClear();
-    const { moveTask } = useTaskStore.getState();
-    moveTask('gh_101', 'in_progress');
+    const { addTask, moveTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'GitHub issue test',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/101',
+      sourceMeta: { repo: 'widkanban', issueNumber: 101 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.source === 'github')!;
+    moveTask(added.id, 'in_progress');
 
     const googleUpdateCalls = mockInvoke.mock.calls.filter(
       (call) => call[0] === 'update_google_task'
@@ -105,7 +117,7 @@ describe('useTaskStore', () => {
 
   it('deletes a task by ID', () => {
     const { deleteTask } = useTaskStore.getState();
-    const targetId = 'gh_103';
+    const targetId = 'gt_203';
 
     deleteTask(targetId);
 
@@ -117,8 +129,8 @@ describe('useTaskStore', () => {
   it('updates search query and provider filter state', () => {
     const { setSearchQuery, setFilterSource, togglePin } = useTaskStore.getState();
 
-    setSearchQuery('OAuth');
-    expect(useTaskStore.getState().searchQuery).toBe('OAuth');
+    setSearchQuery('Google');
+    expect(useTaskStore.getState().searchQuery).toBe('Google');
 
     setFilterSource('google_tasks');
     expect(useTaskStore.getState().filterSource).toBe('google_tasks');
@@ -159,7 +171,18 @@ describe('useTaskStore', () => {
     expect(parsed.state.tasks.some((t: { title: string }) => t.title === 'Persistent task test')).toBe(true);
   });
 
-  it('fetchGoogleTasks replaces existing google_tasks with fresh API data', async () => {
+  it('fetchGoogleTasks replaces existing google_tasks with fresh API data and keeps GitHub tasks', async () => {
+    const sampleGithubTask: UnifiedTask = {
+      id: 'gh_custom_99',
+      title: 'User GitHub issue',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/99',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'widkanban', issueNumber: 99 },
+    };
+    useTaskStore.setState({ tasks: [...INITIAL_MOCK_TASKS, sampleGithubTask] });
+
     const freshGoogleTask: UnifiedTask = {
       id: 'gt_fresh_001',
       title: 'Fresh task from API',
@@ -186,8 +209,8 @@ describe('useTaskStore', () => {
     expect(tasks.some((t) => t.id === 'gt_202')).toBe(false);
     expect(tasks.some((t) => t.id === 'gt_203')).toBe(false);
 
-    // GitHub tasks should be untouched
-    expect(tasks.some((t) => t.source === 'github')).toBe(true);
+    // GitHub task should be untouched
+    expect(tasks.some((t) => t.id === 'gh_custom_99')).toBe(true);
   });
 
   it('fetchGoogleTasks does nothing when IPC returns null (token missing)', async () => {
@@ -200,7 +223,18 @@ describe('useTaskStore', () => {
     expect(useTaskStore.getState().tasks).toEqual(tasksBefore);
   });
 
-  it('clearCredentials for google removes all google_tasks from board', async () => {
+  it('clearCredentials for google removes all google_tasks from board and preserves GitHub tasks', async () => {
+    const sampleGithubTask: UnifiedTask = {
+      id: 'gh_custom_99',
+      title: 'User GitHub issue',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/99',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'widkanban', issueNumber: 99 },
+    };
+    useTaskStore.setState({ tasks: [...INITIAL_MOCK_TASKS, sampleGithubTask] });
+
     // Simulate a successful clear returning no google token
     mockInvoke.mockResolvedValueOnce({ has_github: false, has_google: false });
 
@@ -213,6 +247,6 @@ describe('useTaskStore', () => {
 
     // GitHub tasks should survive
     const githubTasks = tasks.filter((t) => t.source === 'github');
-    expect(githubTasks.length).toBeGreaterThan(0);
+    expect(githubTasks).toHaveLength(1);
   });
 });

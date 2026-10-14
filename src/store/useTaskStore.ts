@@ -200,6 +200,15 @@ export const useTaskStore = create<TaskState>()(
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
       }),
+      merge: (persistedState, currentState) => {
+        const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
+        if (Array.isArray(merged.tasks)) {
+          merged.tasks = merged.tasks.filter(
+            (t) => !['gh_101', 'gh_102', 'gh_103'].includes(t.id)
+          );
+        }
+        return merged;
+      },
     }
   )
 );
