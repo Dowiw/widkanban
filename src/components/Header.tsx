@@ -9,7 +9,6 @@ import {
   Filter, 
   Github, 
   CheckSquare, 
-  Layers,
   Minus,
   X,
   Settings,
@@ -85,9 +84,11 @@ export const Header: React.FC = () => {
       >
         {/* Brand & Stats */}
         <div {...dragProps} className="flex items-center space-x-2.5">
-          <div className="h-7 w-7 rounded-lg bg-slate-800 flex items-center justify-center">
-            <Layers className="h-4 w-4 text-white" />
-          </div>
+          <img 
+            src="/logo.png" 
+            alt="WidKanban" 
+            className="h-7 w-7 rounded-lg object-contain shadow-sm border border-slate-200/80 bg-white p-0.5" 
+          />
           <div>
             <h1 className="text-xs font-bold tracking-wider text-slate-800 uppercase">
               WidKanban
