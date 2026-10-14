@@ -9,6 +9,9 @@ import {
   GitHubSyncSettings,
   RepoLabelsResult,
   DeletePreference,
+  ThemeMode,
+  WidgetCustomizationSettings,
+  DEFAULT_CUSTOMIZATION_SETTINGS,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -61,7 +64,16 @@ interface TaskState {
   hasSeenLocallyDeletedTip: boolean;
   isTrashDropdownOpen: boolean;
 
+  // Customization & Appearance
+  customization: WidgetCustomizationSettings;
+
   // Actions
+  setCustomization: (settings: Partial<WidgetCustomizationSettings>) => void;
+  toggleTheme: () => void;
+  setWindowSizePreset: (preset: 'compact' | 'wide' | 'expanded') => Promise<void>;
+  resetWindowPositionAndSize: () => Promise<void>;
+  syncWindowResizable: (resizable: boolean) => Promise<void>;
+
   moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
   addTask: (task: Omit<UnifiedTask, 'id' | 'updatedAt'>) => void;
   deleteTask: (taskId: string) => void;
@@ -129,6 +141,9 @@ export const useTaskStore = create<TaskState>()(
       deletePreference: null,
       hasSeenLocallyDeletedTip: false,
       isTrashDropdownOpen: false,
+
+      // Customization initial state
+      customization: DEFAULT_CUSTOMIZATION_SETTINGS,
 
       moveTask: (taskId, targetStatus, targetIndex) => {
         // --- Optimistic UI update ---
@@ -320,7 +335,53 @@ export const useTaskStore = create<TaskState>()(
 
       setSearchQuery: (query) => set({ searchQuery: query }),
       setFilterSource: (source) => set({ filterSource: source }),
-      togglePin: () => set((state) => ({ isPinned: !state.isPinned })),
+      togglePin: () => {
+        const nextPinned = !get().isPinned;
+        set({ isPinned: nextPinned });
+        safeInvoke('set_window_resizable', { resizable: !nextPinned });
+        safeInvoke('toggle_always_on_top');
+      },
+      syncWindowResizable: async (resizable: boolean) => {
+        await safeInvoke('set_window_resizable', { resizable });
+      },
+      setCustomization: (settings) =>
+        set((state) => ({
+          customization: { ...state.customization, ...settings },
+        })),
+      toggleTheme: () => {
+        const current = get().customization.theme;
+        const next: ThemeMode = current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system';
+        get().setCustomization({ theme: next });
+      },
+      setWindowSizePreset: async (preset) => {
+        let width = 380;
+        let height = 680;
+        if (preset === 'wide') {
+          width = 850;
+          height = 600;
+        } else if (preset === 'expanded') {
+          width = 1100;
+          height = 720;
+        }
+        await safeInvoke('set_window_size', { width, height });
+        set((state) => ({
+          customization: {
+            ...state.customization,
+            defaultWidth: width,
+            defaultHeight: height,
+          },
+        }));
+      },
+      resetWindowPositionAndSize: async () => {
+        await safeInvoke('reset_window_geometry');
+        set((state) => ({
+          customization: {
+            ...state.customization,
+            defaultWidth: DEFAULT_CUSTOMIZATION_SETTINGS.defaultWidth,
+            defaultHeight: DEFAULT_CUSTOMIZATION_SETTINGS.defaultHeight,
+          },
+        }));
+      },
       setAddTaskOpen: (isOpen) => set({ isAddTaskOpen: isOpen }),
       setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
       setGithubSetupOpen: (isOpen) => set({ isGithubSetupOpen: isOpen }),
@@ -517,6 +578,7 @@ export const useTaskStore = create<TaskState>()(
         locallyDeletedTasks: state.locallyDeletedTasks,
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
+        customization: state.customization,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
@@ -539,6 +601,12 @@ export const useTaskStore = create<TaskState>()(
         }
         if (typeof (persistedState as Partial<TaskState>)?.hasSeenLocallyDeletedTip === 'boolean') {
           merged.hasSeenLocallyDeletedTip = (persistedState as Partial<TaskState>).hasSeenLocallyDeletedTip!;
+        }
+        if ((persistedState as Partial<TaskState>)?.customization) {
+          merged.customization = {
+            ...DEFAULT_CUSTOMIZATION_SETTINGS,
+            ...((persistedState as Partial<TaskState>).customization || {}),
+          };
         }
         return merged;
       },

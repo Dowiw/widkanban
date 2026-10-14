@@ -69,6 +69,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     deletePreference,
     closeGitHubIssueOnRemote,
     deleteGitHubIssuePermanentlyOnRemote,
+    customization,
   } = useTaskStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
@@ -89,6 +90,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition: isDragging || isOverlay ? 'none' : transition || undefined,
+    borderRadius: 'var(--card-radius, 8px)',
   };
 
   const isGitHub = task.source === 'github';
@@ -140,11 +142,18 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     setIsSubtasksOpen((prev) => !prev);
   };
 
+  const densityPadding =
+    customization.cardDensity === 'compact'
+      ? 'p-2'
+      : customization.cardDensity === 'relaxed'
+      ? 'p-4'
+      : 'p-3';
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`card-glass group relative rounded-xl p-3 shadow-sm select-none transition-all ${
+      className={`card-glass group relative shadow-sm select-none transition-all ${densityPadding} ${
         isDragging ? 'opacity-20 border-dashed border-indigo-400/40' : ''
       } ${isOverlay ? 'drag-active z-50' : ''}`}
     >
@@ -155,7 +164,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           <button
             {...attributes}
             {...listeners}
-            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-700 p-0.5 shrink-0"
+            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 shrink-0"
             title="Drag task card"
           >
             <GripVertical className="h-3.5 w-3.5" />
@@ -166,15 +175,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
             <span
               className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border truncate ${
                 task.sourceMeta?.isPullRequest
-                  ? 'bg-purple-50 text-purple-700 border-purple-200'
-                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/60'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60'
               }`}
               title={task.sourceMeta?.repo ? `${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}` : 'GitHub'}
             >
               {task.sourceMeta?.isPullRequest ? (
-                <GitPullRequest className="h-2.5 w-2.5 shrink-0 text-purple-600" />
+                <GitPullRequest className="h-2.5 w-2.5 shrink-0 text-purple-600 dark:text-purple-400" />
               ) : (
-                <CircleDot className="h-2.5 w-2.5 shrink-0 text-emerald-600" />
+                <CircleDot className="h-2.5 w-2.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
               )}
               <span className="truncate">
                 {task.sourceMeta?.repo
@@ -186,10 +195,10 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
             </span>
           ) : (
             <span
-              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 truncate"
+              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/60 truncate"
               title={task.sourceMeta?.listTitle || 'Google Tasks'}
             >
-              <CheckSquare className="h-2.5 w-2.5 shrink-0 text-blue-600" />
+              <CheckSquare className="h-2.5 w-2.5 shrink-0 text-blue-600 dark:text-blue-400" />
               <span className="truncate">{task.sourceMeta?.listTitle || 'Google Task'}</span>
             </span>
           )}
@@ -199,21 +208,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
         <div className="flex items-center space-x-0.5 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
           <button
             onClick={handleToggleExpand}
-            className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title={isExpanded ? 'Collapse details' : 'Expand details'}
           >
             {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </button>
           <button
             onClick={handleOpenUrl}
-            className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title="Open in Browser"
           >
             <ExternalLink className="h-3 w-3" />
           </button>
           <button
             onClick={handleDelete}
-            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title="Delete Task"
           >
             <Trash2 className="h-3 w-3" />
@@ -224,7 +233,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
       {/* Task Title */}
       <h3
         onClick={handleToggleExpand}
-        className={`text-xs font-medium text-slate-800 leading-relaxed cursor-pointer hover:text-indigo-600 transition-colors ${
+        className={`text-xs font-medium text-slate-800 dark:text-slate-100 leading-relaxed cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors ${
           isExpanded ? 'mb-2' : 'line-clamp-2 mb-2'
         }`}
       >

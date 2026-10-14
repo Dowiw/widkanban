@@ -651,4 +651,92 @@ describe('useTaskStore', () => {
     expect(todoTask.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(true);
     expect(todoTask.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(false);
   });
+
+  describe('customization and window sizing', () => {
+    it('initializes with default customization values', () => {
+      const state = useTaskStore.getState();
+      expect(state.customization.theme).toBe('system');
+      expect(state.customization.cornerRadius).toBe(16);
+      expect(state.customization.fontFamily).toBe('outfit');
+      expect(state.customization.columnHeaderHeight).toBe(36);
+      expect(state.customization.columnMinWidth).toBe(260);
+      expect(state.customization.cardDensity).toBe('normal');
+    });
+
+    it('updates customization settings partially', () => {
+      const { setCustomization } = useTaskStore.getState();
+      setCustomization({
+        cornerRadius: 0,
+        fontFamily: 'unifont',
+        columnHeaderHeight: 48,
+        cardDensity: 'compact',
+      });
+
+      const state = useTaskStore.getState();
+      expect(state.customization.cornerRadius).toBe(0);
+      expect(state.customization.fontFamily).toBe('unifont');
+      expect(state.customization.columnHeaderHeight).toBe(48);
+      expect(state.customization.cardDensity).toBe('compact');
+      // Unmodified properties remain default
+      expect(state.customization.theme).toBe('system');
+      expect(state.customization.columnMinWidth).toBe(260);
+    });
+
+    it('cycles theme through system -> light -> dark -> system via toggleTheme', () => {
+      const { toggleTheme } = useTaskStore.getState();
+      expect(useTaskStore.getState().customization.theme).toBe('system');
+
+      toggleTheme();
+      expect(useTaskStore.getState().customization.theme).toBe('light');
+
+      toggleTheme();
+      expect(useTaskStore.getState().customization.theme).toBe('dark');
+
+      toggleTheme();
+      expect(useTaskStore.getState().customization.theme).toBe('system');
+    });
+
+    it('toggles pin and triggers set_window_resizable with inverse pin state', () => {
+      const { togglePin } = useTaskStore.getState();
+      expect(useTaskStore.getState().isPinned).toBe(true);
+
+      // Unpin: should enable resizing (resizable: true)
+      togglePin();
+      expect(useTaskStore.getState().isPinned).toBe(false);
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: true });
+      expect(mockInvoke).toHaveBeenCalledWith('toggle_always_on_top', undefined);
+
+      // Pin: should lock resizing (resizable: false)
+      togglePin();
+      expect(useTaskStore.getState().isPinned).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: false });
+    });
+
+    it('applies window size presets and updates defaultWidth/defaultHeight', async () => {
+      const { setWindowSizePreset } = useTaskStore.getState();
+
+      await setWindowSizePreset('wide');
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_size', { width: 850, height: 600 });
+      expect(useTaskStore.getState().customization.defaultWidth).toBe(850);
+      expect(useTaskStore.getState().customization.defaultHeight).toBe(600);
+
+      await setWindowSizePreset('expanded');
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_size', { width: 1100, height: 720 });
+      expect(useTaskStore.getState().customization.defaultWidth).toBe(1100);
+
+      await setWindowSizePreset('compact');
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_size', { width: 380, height: 680 });
+      expect(useTaskStore.getState().customization.defaultWidth).toBe(380);
+    });
+
+    it('resets window position and size geometry via resetWindowPositionAndSize', async () => {
+      const { resetWindowPositionAndSize, setCustomization } = useTaskStore.getState();
+      setCustomization({ defaultWidth: 999, defaultHeight: 888 });
+
+      await resetWindowPositionAndSize();
+      expect(mockInvoke).toHaveBeenCalledWith('reset_window_geometry', undefined);
+      expect(useTaskStore.getState().customization.defaultWidth).toBe(380);
+      expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
+    });
+  });
 });

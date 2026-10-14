@@ -1352,17 +1352,53 @@ fn is_leap(y: u32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+#[tauri::command]
+fn set_window_resizable(app: tauri::AppHandle, resizable: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.set_resizable(resizable).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_window_size(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn reset_window_geometry(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 380.0,
+                height: 680.0,
+            }))
+            .map_err(|e| e.to_string())?;
+        window.center().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ─── Tauri Application Entry ──────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
             toggle_always_on_top,
             minimize_window,
             close_app,
+            set_window_resizable,
+            set_window_size,
+            reset_window_geometry,
             get_auth_status,
             save_credentials,
             clear_credentials,

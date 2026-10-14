@@ -51,18 +51,18 @@ export const AddTaskModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-white/10 p-4 shadow-2xl space-y-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-4 shadow-2xl space-y-4 text-slate-800 dark:text-slate-100">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3">
           <div className="flex items-center space-x-2">
-            <Plus className="h-4 w-4 text-indigo-400" />
-            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+            <Plus className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
+            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
               Add Mock Task
             </h3>
           </div>
           <button
             onClick={() => setAddTaskOpen(false)}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/5"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
@@ -72,15 +72,15 @@ export const AddTaskModal: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           {/* Source Selection */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">Provider</label>
+            <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">Provider</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setSource('github')}
                 className={`flex items-center justify-center space-x-1.5 p-2 rounded-lg border transition-all ${
                   source === 'github'
-                    ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
-                    : 'bg-slate-800/40 border-white/5 text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500/50 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <Github className="h-3.5 w-3.5" />
@@ -91,8 +91,8 @@ export const AddTaskModal: React.FC = () => {
                 onClick={() => setSource('google_tasks')}
                 className={`flex items-center justify-center space-x-1.5 p-2 rounded-lg border transition-all ${
                   source === 'google_tasks'
-                    ? 'bg-blue-950/60 border-blue-500/50 text-blue-300'
-                    : 'bg-slate-800/40 border-white/5 text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-500/50 text-blue-700 dark:text-blue-300'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <CheckSquare className="h-3.5 w-3.5" />
@@ -103,24 +103,24 @@ export const AddTaskModal: React.FC = () => {
 
           {/* Title */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">Task Title</label>
+            <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">Task Title</label>
             <input
               type="text"
               required
               placeholder="e.g. Implement refresh token storage"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-lg bg-slate-950 border border-white/10 p-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
+              className="w-full rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 p-2 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
             />
           </div>
 
           {/* Status Column */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">Initial Status</label>
+            <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">Initial Status</label>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as TaskStatus)}
-              className="w-full rounded-lg bg-slate-950 border border-white/10 p-2 text-slate-200 focus:outline-none focus:border-indigo-500/60"
+              className="w-full rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 p-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500/60"
             >
               <option value="todo">To Do</option>
               <option value="in_progress">In Progress</option>
@@ -130,7 +130,7 @@ export const AddTaskModal: React.FC = () => {
 
           {/* Extra Meta */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">
+            <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">
               {source === 'github' ? 'Repository Name' : 'Task List Name'}
             </label>
             <input
@@ -138,7 +138,7 @@ export const AddTaskModal: React.FC = () => {
               placeholder={source === 'github' ? 'widkanban' : 'Work'}
               value={metaInfo}
               onChange={(e) => setMetaInfo(e.target.value)}
-              className="w-full rounded-lg bg-slate-950 border border-white/10 p-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
+              className="w-full rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 p-2 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
             />
           </div>
 
@@ -147,7 +147,7 @@ export const AddTaskModal: React.FC = () => {
             <button
               type="button"
               onClick={() => setAddTaskOpen(false)}
-              className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+              className="px-3 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
             >
               Cancel
             </button>

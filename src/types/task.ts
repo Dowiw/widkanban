@@ -99,3 +99,38 @@ export interface DeletePreference {
   remember: boolean;
 }
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type FontFamilyOption = 'outfit' | 'unifont' | 'system' | 'mono';
+export type CardDensity = 'compact' | 'normal' | 'relaxed';
+
+export interface WidgetCustomizationSettings {
+  // Appearance
+  theme: ThemeMode;
+  cornerRadius: number; // 0 to 32px (0 = sharp)
+  fontFamily: FontFamilyOption;
+
+  // Advanced & Layout
+  columnHeaderHeight: number; // 24 to 56px (default 36px)
+  columnHeaderFontSize: 'xs' | 'sm' | 'base';
+  columnMinWidth: number; // 200 to 400px (default 260px)
+  cardDensity: CardDensity;
+
+  // Window Defaults
+  defaultWidth: number;
+  defaultHeight: number;
+  rememberWindowPlacement: boolean;
+}
+
+export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
+  theme: 'system',
+  cornerRadius: 16,
+  fontFamily: 'outfit',
+  columnHeaderHeight: 36,
+  columnHeaderFontSize: 'xs',
+  columnMinWidth: 260,
+  cardDensity: 'normal',
+  defaultWidth: 380,
+  defaultHeight: 680,
+  rememberWindowPlacement: true,
+};
+
