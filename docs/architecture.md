@@ -37,11 +37,28 @@ graph TD
 
 ## 2. Data Normalization Schema
 
-All tasks fetched from disparate external providers (GitHub Issues, Google Tasks) are normalized into a unified TypeScript interface:
+All tasks fetched from disparate external providers (GitHub Issues/PRs, Google Tasks) are normalized into a unified TypeScript interface:
 
 ```typescript
 export type TaskSource = 'github' | 'google_tasks';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
+
+export interface GitHubLabel {
+  name: string;
+  color: string;       // 6-char hex code from GitHub (e.g. "d73a4a")
+  description?: string;
+}
+
+export interface PRBranchInfo {
+  headRef: string;     // e.g. "feat/branch-compare"
+  baseRef: string;     // e.g. "main"
+  isFork?: boolean;    // true if PR originated from an external fork
+  headRepo?: string;   // e.g. "contributor/widkanban"
+  isDraft?: boolean;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+}
 
 export interface UnifiedTask {
   id: string;             // Unique identifier, e.g., 'gh_102' or 'gt_abc123'
@@ -50,13 +67,29 @@ export interface UnifiedTask {
   status: TaskStatus;     // 'todo' | 'in_progress' | 'done'
   url: string;            // Direct web URL to the issue or task item
   updatedAt: string;      // ISO 8601 timestamp
+  description?: string;   // Markdown body or task notes
   sourceMeta: {
-    repo?: string;        // GitHub repository name
-    issueNumber?: number; // GitHub issue/PR number
-    labels?: string[];    // GitHub issue labels
-    listId?: string;      // Google Task list identifier
-    notes?: string;       // Google Task description/notes
-    dueDate?: string;     // Google Task due date
+    // --- Google Tasks ---
+    listId?: string;
+    listTitle?: string;
+    notes?: string;
+    dueDate?: string;            // RFC 3339 timestamp
+    parentId?: string;
+    hasSubtasks?: boolean;
+    subtaskCount?: number;
+    subtasks?: SubtaskItem[];
+    links?: TaskLink[];
+
+    // --- GitHub ---
+    repo?: string;               // e.g. "owner/repo"
+    issueNumber?: number;
+    isPullRequest?: boolean;     // PR vs Issue badge differentiation
+    commentsCount?: number;
+    milestone?: { title: string; dueOn?: string };
+    author?: TaskUser;
+    assignees?: TaskUser[];
+    labels?: GitHubLabel[];
+    branchInfo?: PRBranchInfo;   // Branch, fork, draft status, and diff statistics
   };
 }
 ```
