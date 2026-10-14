@@ -16,6 +16,7 @@ lerna-debug.log*
 # Rust / Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/
+bin/
 
 # Environment variables & secrets
 .env

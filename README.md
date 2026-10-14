@@ -71,6 +71,12 @@ sudo apt-get install -y \
    npm run tauri dev
    ```
 
+4. Build release binaries and installers into `./bin/`:
+   ```bash
+   npm run build:bin
+   ```
+   This compiles the native release executable and bundles (`.deb`, `.AppImage`, etc.) directly into the `./bin/` directory.
+
 ---
 
 ## Documentation

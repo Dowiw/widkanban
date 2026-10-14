@@ -17,3 +17,8 @@ export interface UnifiedTask {
     dueDate?: string;
   };
 }
+
+export interface AuthStatus {
+  has_github: boolean;
+  has_google: boolean;
+}

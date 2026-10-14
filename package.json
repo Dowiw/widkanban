@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:bin": "npm run tauri build -- --bundles deb && mkdir -p bin && cp src-tauri/target/release/widkanban bin/ && cp -r src-tauri/target/release/bundle/deb bin/ 2>/dev/null || true",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

@@ -89,4 +89,36 @@ describe('useTaskStore', () => {
     togglePin();
     expect(useTaskStore.getState().isPinned).toBe(false);
   });
+
+  it('manages settings modal and onboarding state', () => {
+    const { setSettingsOpen, setCompletedOnboarding } = useTaskStore.getState();
+
+    expect(useTaskStore.getState().isSettingsOpen).toBe(false);
+    expect(useTaskStore.getState().hasCompletedOnboarding).toBe(false);
+
+    setSettingsOpen(true);
+    expect(useTaskStore.getState().isSettingsOpen).toBe(true);
+
+    setCompletedOnboarding(true);
+    expect(useTaskStore.getState().hasCompletedOnboarding).toBe(true);
+  });
+
+  it('persists board tasks and filters to localStorage', () => {
+    const { addTask, setFilterSource } = useTaskStore.getState();
+
+    addTask({
+      title: 'Persistent task test',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/100',
+      sourceMeta: { repo: 'widkanban' },
+    });
+    setFilterSource('github');
+
+    const storedData = localStorage.getItem('widkanban-store');
+    expect(storedData).not.toBeNull();
+    const parsed = JSON.parse(storedData!);
+    expect(parsed.state.filterSource).toBe('github');
+    expect(parsed.state.tasks.some((t: { title: string }) => t.title === 'Persistent task test')).toBe(true);
+  });
 });

@@ -1,8 +1,65 @@
+use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Manager,
 };
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct StoredCredentials {
+    pub github_token: Option<String>,
+    pub google_token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AuthStatus {
+    pub has_github: bool,
+    pub has_google: bool,
+}
+
+fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
+
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+
+    dir.push("credentials.json");
+    Ok(dir)
+}
+
+fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+    if let Ok(path) = get_credentials_path(app_handle) {
+        if path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                if let Ok(creds) = serde_json::from_str::<StoredCredentials>(&contents) {
+                    return creds;
+                }
+            }
+        }
+    }
+    StoredCredentials::default()
+}
+
+fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
+    let path = get_credentials_path(app_handle)?;
+    let serialized = serde_json::to_string_pretty(creds)
+        .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
+
+    std::fs::write(&path, serialized)
+        .map_err(|e| format!("Failed to write credentials file: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        let _ = std::fs::set_permissions(&path, permissions);
+    }
+
+    Ok(())
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -26,6 +83,68 @@ fn close_app(app_handle: tauri::AppHandle) {
     app_handle.exit(0);
 }
 
+#[tauri::command]
+fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
+    let creds = read_credentials(&app_handle);
+    Ok(AuthStatus {
+        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+    })
+}
+
+#[tauri::command]
+fn save_credentials(
+    app_handle: tauri::AppHandle,
+    github_token: Option<String>,
+    google_token: Option<String>,
+) -> Result<AuthStatus, String> {
+    let mut creds = read_credentials(&app_handle);
+    if let Some(gh) = github_token {
+        let trimmed = gh.trim().to_string();
+        if trimmed.is_empty() {
+            creds.github_token = None;
+        } else {
+            creds.github_token = Some(trimmed);
+        }
+    }
+    if let Some(gt) = google_token {
+        let trimmed = gt.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_token = None;
+        } else {
+            creds.google_token = Some(trimmed);
+        }
+    }
+    write_credentials(&app_handle, &creds)?;
+
+    Ok(AuthStatus {
+        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+    })
+}
+
+#[tauri::command]
+fn clear_credentials(
+    app_handle: tauri::AppHandle,
+    provider: Option<String>,
+) -> Result<AuthStatus, String> {
+    let mut creds = read_credentials(&app_handle);
+    match provider.as_deref() {
+        Some("github") => creds.github_token = None,
+        Some("google") => creds.google_token = None,
+        _ => {
+            creds.github_token = None;
+            creds.google_token = None;
+        }
+    }
+    write_credentials(&app_handle, &creds)?;
+
+    Ok(AuthStatus {
+        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -34,7 +153,10 @@ pub fn run() {
             greet, 
             toggle_always_on_top,
             minimize_window,
-            close_app
+            close_app,
+            get_auth_status,
+            save_credentials,
+            clear_credentials
         ])
         .setup(|app| {
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
@@ -110,5 +232,32 @@ mod tests {
         let response = greet("Developer");
         assert!(response.contains("Hello, Developer!"));
         assert!(response.contains("WidKanban"));
+    }
+
+    #[test]
+    fn test_stored_credentials_serialization() {
+        let creds = StoredCredentials {
+            github_token: Some("ghp_test123456789".to_string()),
+            google_token: Some("ya29.test123".to_string()),
+        };
+        let serialized = serde_json::to_string(&creds).expect("Serialization failed");
+        let deserialized: StoredCredentials =
+            serde_json::from_str(&serialized).expect("Deserialization failed");
+
+        assert_eq!(creds, deserialized);
+    }
+
+    #[test]
+    fn test_auth_status_evaluation() {
+        let creds = StoredCredentials {
+            github_token: Some("ghp_test123".to_string()),
+            google_token: Some("   ".to_string()),
+        };
+        let status = AuthStatus {
+            has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        };
+        assert!(status.has_github);
+        assert!(!status.has_google);
     }
 }

@@ -11,7 +11,8 @@ import {
   CheckSquare, 
   Layers,
   Minus,
-  X
+  X,
+  Settings
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -23,6 +24,8 @@ export const Header: React.FC = () => {
     isPinned, 
     togglePin, 
     setAddTaskOpen, 
+    setSettingsOpen,
+    authStatus,
     refreshTasks,
     tasks
   } = useTaskStore();
@@ -122,10 +125,21 @@ export const Header: React.FC = () => {
             onClick={handleTogglePin}
             title={isPinned ? 'Always on top (Active)' : 'Always on top (Inactive)'}
             className={`p-1.5 rounded-md transition-colors ${
-              isPinned ? 'bg-indigo-500/30 text-indigo-300' : 'text-slate-400 hover:text-white hover:bg-white/5'
+              isPinned ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-indigo-300' : ''}`} />
+            <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-indigo-600' : ''}`} />
+          </button>
+
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="API Keys & Integrations"
+            className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors relative"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            {(authStatus.has_github || authStatus.has_google) && (
+              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-white" />
+            )}
           </button>
 
           <button

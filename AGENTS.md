@@ -87,6 +87,7 @@ Always run these commands from the repository root (`/home/dowiw/project_repos/w
 | :--- | :--- | :--- |
 | **Run Unit Tests** | `npm test` | Runs Vitest unit tests |
 | **Type Check & Build** | `npm run build` | Verifies TypeScript types and compiles Vite bundle |
+| **Build Binaries & Bundles** | `npm run build:bin` | Builds native release binary & packages into `./bin/` |
 | **Browser Dev Server** | `npm run dev` | Rapid webview preview (`http://localhost:1420`) |
 | **Desktop Widget Dev** | `npm run tauri dev` | Launches native Tauri v2 desktop application |
 | **Rust Typecheck** | `cargo check --manifest-path src-tauri/Cargo.toml` | Verifies Rust code compilation without full link |
