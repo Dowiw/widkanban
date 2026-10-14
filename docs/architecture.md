@@ -151,4 +151,4 @@ WidKanban provides a flexible two-tier deletion system for external tasks (GitHu
 - [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
 - [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
 - [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
-- [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.
+- [Roadmap & Feature Checklist](todos.md): Feature checklist and development roadmap.

@@ -94,7 +94,7 @@ sudo apt-get install -y \
 <a id="windows-msvc-linker"></a>
 ## 5. Windows: MSVC Linker Required for `reqwest` + `tokio`
 
-After the Google Tasks integration (Phase 3), `Cargo.toml` now depends on `reqwest` and `tokio`. These crates include build scripts that require the **MSVC C++ linker (`link.exe`)** to compile on Windows (`x86_64-pc-windows-msvc` toolchain).
+Following the Google Tasks integration, `Cargo.toml` now depends on `reqwest` and `tokio`. These crates include build scripts that require the **MSVC C++ linker (`link.exe`)** to compile on Windows (`x86_64-pc-windows-msvc` toolchain).
 
 **Symptom:**
 ```
@@ -128,5 +128,5 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
 - [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
 - [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
-- [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.
+- [Roadmap & Feature Checklist](todos.md): Feature checklist and development roadmap.
 

@@ -319,7 +319,7 @@ error: linker `link.exe` not found
 - [Credentials Setup Guide](docs/credentials-setup.md): Complete guide for generating and managing API tokens.
 - [Architecture & System Design](docs/architecture.md): Deep-dive into IPC bridge, data schemas, and security model.
 - [Developer Notes](docs/notes.md): Environment dependencies, GTK notes, and compiler fixes.
-- [Roadmap & TODOs](docs/todos.md): Milestone checklist and phase status.
+- [Roadmap & Feature Checklist](docs/todos.md): Feature checklist and development roadmap.
 
 ---
 

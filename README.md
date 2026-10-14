@@ -144,24 +144,25 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
 | 🔑 **[Credentials Setup Guide](docs/credentials-setup.md)** | Step-by-step instructions for generating GitHub PATs and Google OAuth tokens. | Token scopes, [Contributor quick-start](docs/credentials-setup.md#contributor-quick-start-fast-testing-with-short-lived-keys), [Local storage paths](docs/credentials-setup.md#where-credentials-are-stored), [Revocation](docs/credentials-setup.md#revoking-credentials). |
 | 🏛️ **[Architecture & System Design](docs/architecture.md)** | Core system architecture, IPC bridge, security invariants, and schemas. | [Mermaid architecture diagram](docs/architecture.md#1-high-level-system-architecture), [`UnifiedTask` schema](docs/architecture.md#2-data-normalization-schema), [Write-back engine](docs/architecture.md#4-sync-model--write-back-engine), [Local trash system](docs/architecture.md#5-task-deletion--local-trash-management). |
 | 🛠️ **[Developer Notes & Troubleshooting](docs/notes.md)** | Implementation quirks, frameless window behavior, and compiler troubleshooting. | [Linux packages](docs/notes.md#1-linux-environment-prerequisites), [Frameless drag region](docs/notes.md#2-frameless-window--drag-region-behavior), [Console warnings](docs/notes.md#3-understanding-common-console-warnings), [MSVC linker fix](docs/notes.md#5-windows-msvc-linker-required-for-reqwest--tokio). |
-| 🗺️ **[Roadmap & Milestone TODOs](docs/todos.md)** | Development progress, milestone checklists, and planned upcoming features. | [Phase 1: UI Prototype](docs/todos.md#phase-1-scaffolding--frameless-ui-prototype-completed), [Phase 2: GitHub API](docs/todos.md#phase-2-github-integration--issue-management-completed), [Phase 3: Google Tasks](docs/todos.md#phase-3-google-tasks-integration-completed), [Phase 4: Packaging](docs/todos.md#phase-4-background-sync-engine--packaging-active--upcoming). |
+| 🗺️ **[Roadmap & Feature TODOs](docs/todos.md)** | Development progress, milestone checklists, and planned upcoming features. | [Completed features](docs/todos.md#completed-capabilities), [Upcoming roadmap](docs/todos.md#upcoming--planned-features). |
 
 [↑ Back to Top](#table-of-contents)
 
 ---
 
-## Project Roadmap
+## Project Roadmap & Status
 
-- **Phase 1: Scaffolding & UI Prototype** ✅
-  - Frameless glassmorphic widget, tray controls, `@dnd-kit` drag-and-drop, local task creation.
-- **Phase 2: GitHub API Integration & Issue Management** ✅
-  - Assigned issues & PR fetching, rich PR branch comparisons, diff stats, label synchronization, and remote/local issue deletion.
-- **Phase 3: Google Tasks Integration** ✅
-  - OAuth token support, multi-list tasks sync, subtasks & links normalization, completion status write-back.
-- **Phase 4: Background Sync Engine & Native Packaging** 🎯 *(Active / Next)*
-  - Tokio auto-polling loop (~3 min cadence), desktop notifications on assignment, `.msi` / `.deb` / `.dmg` release bundles.
+### Completed & Supported ✅
+- **Desktop Widget**: Frameless glassmorphic window, tray controls, `@dnd-kit` drag-and-drop, quick add task modal.
+- **GitHub Integration**: Assigned issues & PR fetching, rich PR branch comparisons, diff stats, label synchronization, and remote/local issue deletion.
+- **Google Tasks Integration**: OAuth token support, multi-list tasks sync, subtasks & links normalization, completion status write-back.
 
-Track our detailed milestone progress in the [Roadmap & Milestone Checklist](docs/todos.md).
+### Planned & Upcoming 🎯
+- **Background Sync Engine**: Tokio background polling loop (~3 min cadence) and native desktop notifications on assignment.
+- **Distribution Packages**: Standalone `.msi` / `.exe` (Windows), `.AppImage` / `.deb` (Linux), and `.dmg` (macOS) installers.
+- **In-App OAuth Loopback**: Built-in local HTTP callback server for frictionless Google Tasks authentication.
+
+Track our full feature checklist in the [Roadmap & Feature Checklist](docs/todos.md).
 
 [↑ Back to Top](#table-of-contents)
 

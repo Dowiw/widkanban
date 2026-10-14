@@ -1,39 +1,35 @@
-# WidKanban — Roadmap & Milestone TODOs
+# WidKanban — Feature Checklist & Roadmap
 
-This document tracks the phased development roadmap, completed capabilities, and active milestones for **WidKanban**.
+This document tracks completed capabilities, active milestones, and planned features for **WidKanban**.
 
 ---
 
 ## Table of Contents
 
-- [Overview & Roadmap Strategy](#overview--roadmap-strategy)
-- [Phase 1: Scaffolding & Frameless UI Prototype (Completed)](#phase-1-scaffolding--frameless-ui-prototype-completed)
-- [Phase 2: GitHub Integration & Issue Management (Completed)](#phase-2-github-integration--issue-management-completed)
-- [Phase 3: Google Tasks Integration (Completed)](#phase-3-google-tasks-integration-completed)
-- [Phase 4: Background Sync Engine & Packaging (Active / Upcoming)](#phase-4-background-sync-engine--packaging-active--upcoming)
+- [Completed Capabilities](#completed-capabilities)
+  - [Frameless Desktop Widget & UI](#frameless-desktop-widget--ui)
+  - [GitHub Integration & Issue Management](#github-integration--issue-management)
+  - [Google Tasks Integration](#google-tasks-integration)
+- [Upcoming & Planned Features](#upcoming--planned-features)
+  - [Background Tokio Polling Loop](#background-tokio-polling-loop)
+  - [Native Desktop Notifications](#native-desktop-notifications)
+  - [Cross-Platform Installers](#cross-platform-installers)
+  - [In-App OAuth Loopback Flow](#in-app-oauth-loopback-flow)
 - [Future Ideas & Enhancements](#future-ideas--enhancements)
 - [Related Documentation](#related-documentation)
 
 ---
 
-## Overview & Roadmap Strategy
+## Completed Capabilities
 
-WidKanban's development follows a 4-phase progression moving from UI prototyping to external provider integrations, robust state persistence, and native operating system packaging.
-
----
-
-## Phase 1: Scaffolding & Frameless UI Prototype (Completed)
-
-- [x] **Frameless Glassmorphic Window**: Transparent background (`widget-glass`), borderless window decorations, and always-on-top pin toggle.
+### Frameless Desktop Widget & UI
+- [x] **Frameless Glassmorphic Window**: Transparent backdrop (`widget-glass`), borderless window decorations, and always-on-top pin toggle.
 - [x] **Native System Tray Menu**: Context menu integration for Show/Hide, Always on Top, and Quit actions.
 - [x] **Interactive Drag & Drop**: `@dnd-kit` core + sortable integration with instant 60fps optimistic state updates in Zustand.
 - [x] **Quick Add Task Modal**: Local task creation with status, priority, and markdown description support.
 - [x] **Task Search & Filtering**: Instant search across titles, repos, notes, and provider badge filters (`All`, `GitHub`, `Google Tasks`).
 
----
-
-## Phase 2: GitHub Integration & Issue Management (Completed)
-
+### GitHub Integration & Issue Management
 - [x] **Token Management**: Secure native storage of GitHub Personal Access Tokens (PAT) via Tauri IPC into OS app data (`credentials.json`).
 - [x] **Issue & PR Querying**: Automated query of user-assigned open issues and review-requested pull requests (`GET /user/issues?state=open`).
 - [x] **Rich Task Details**:
@@ -51,10 +47,7 @@ WidKanban's development follows a 4-phase progression moving from UI prototyping
   - [x] Remote permanent deletion via GitHub GraphQL API `deleteIssue` mutation (for repository admins).
   - [x] Header trash dropdown with restore actions and sync filter to prevent locally hidden tasks from reappearing unprompted.
 
----
-
-## Phase 3: Google Tasks Integration (Completed)
-
+### Google Tasks Integration
 - [x] **OAuth 2.0 Credential Storage**: Support for Google OAuth tokens (`ya29....`) stored natively in Rust.
 - [x] **Multi-List Synchronization**: Fetching all task lists and task items (`GET /tasks/v1/users/@me/lists`).
 - [x] **Subtasks & Links Normalization**: Support for indented parent-child subtasks and related email / document links.
@@ -65,15 +58,21 @@ WidKanban's development follows a 4-phase progression moving from UI prototyping
 
 ---
 
-## Phase 4: Background Sync Engine & Packaging (Active / Upcoming)
+## Upcoming & Planned Features
 
-- [ ] **Tokio Background Polling Loop**: Periodic background sync engine (~3-minute cadence) running on async threads.
-- [ ] **Native Desktop Notifications**: Toast notifications when new issues or tasks are assigned.
-- [ ] **Cross-Platform Installers**:
-  - [ ] Windows: Standalone `.msi` and `.exe` installer bundles.
-  - [ ] Linux: `.AppImage` and `.deb` distribution packages.
-  - [ ] macOS: Signed `.dmg` application packages.
-- [ ] **Full OAuth 2.0 Loopback Flow**: Built-in local HTTP callback server (`http://localhost:<port>/callback`) for frictionless Google login without OAuth Playground.
+### Background Tokio Polling Loop
+- [ ] Periodic background sync engine (~3-minute cadence) running on async threads to refresh assigned issues and tasks automatically.
+
+### Native Desktop Notifications
+- [ ] System notifications when new issues or tasks are assigned to the user.
+
+### Cross-Platform Installers
+- [ ] **Windows**: Standalone `.msi` and `.exe` installer bundles.
+- [ ] **Linux**: `.AppImage` and `.deb` distribution packages.
+- [ ] **macOS**: Signed `.dmg` application packages.
+
+### In-App OAuth Loopback Flow
+- [ ] Built-in local HTTP callback server (`http://localhost:<port>/callback`) for seamless Google sign-in without needing the OAuth Playground.
 
 ---
 
