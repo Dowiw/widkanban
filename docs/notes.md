@@ -71,3 +71,34 @@ sudo apt-get install -y \
 
 - **RAM Footprint**: ~30 MB to 50 MB RAM in idle desktop widget state.
 - **CPU Footprint**: ~0% CPU at idle; active only during drag interaction or 3-minute background poll.
+
+---
+
+## 5. Windows: MSVC Linker Required for `reqwest` + `tokio`
+
+After the Google Tasks integration (Phase 3), `Cargo.toml` now depends on `reqwest` and `tokio`. These crates include build scripts that require the **MSVC C++ linker (`link.exe`)** to compile on Windows (`x86_64-pc-windows-msvc` toolchain).
+
+**Symptom:**
+```
+error: linker `link.exe` not found
+note: please ensure that Visual Studio 2017 or later, or Build Tools for Visual Studio were installed with the Visual C++ option
+```
+
+**Fix — Install Visual C++ Build Tools:**
+
+Option A — via Visual Studio Installer (if VS is already installed):
+1. Open **Visual Studio Installer**.
+2. Click **Modify** on your VS 2022 installation.
+3. Under **Workloads**, select **"Desktop development with C++"**.
+4. Click **Modify** to install.
+
+Option B — Standalone Build Tools (no full VS needed):
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+After installation, open a new terminal so `link.exe` is on `PATH`, then re-run:
+```powershell
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+

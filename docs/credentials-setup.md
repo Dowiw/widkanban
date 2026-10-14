@@ -12,7 +12,7 @@ This guide explains exactly what credentials WidKanban needs, why they are requi
 | Provider | Credential Type | Required For |
 |---|---|---|
 | **GitHub** | Personal Access Token (PAT) — classic or fine-grained | Fetching assigned issues & PRs, updating status via labels, closing issues |
-| **Google Tasks** | Google API OAuth 2.0 token *(Phase 3, not yet implemented)* | Fetching task lists, syncing task completion status |
+| **Google Tasks** | OAuth 2.0 Access Token (`ya29.…`) | Fetching task lists and items, syncing task completion status |
 
 ---
 
@@ -72,40 +72,54 @@ Fine-grained PATs give you repository-level control and are more secure:
 
 ---
 
-## 2. Google Tasks — OAuth 2.0 (Coming in Phase 3)
+## 2. Google Tasks — OAuth 2.0 Access Token
 
-> [!IMPORTANT]
-> Google Tasks integration is **not yet available**. It is planned for Phase 3 of the roadmap. The instructions below describe what will be required when it ships.
+WidKanban connects to the Google Tasks REST API using an **OAuth 2.0 access token** (a short-lived credential that looks like `ya29.a0A…`). You generate this token once using the Google OAuth Playground and paste it into the WidKanban Settings modal.
 
-Google Tasks uses **OAuth 2.0** instead of a simple static token. WidKanban will handle the full OAuth flow natively in the Rust backend — you won't need to manually copy any token.
+> [!NOTE]
+> Access tokens from the OAuth Playground expire after **1 hour** by default. For a long-lived setup, tick **"Auto-refresh the token before it expires"** in the OAuth Playground settings, or use a proper OAuth client registered in Google Cloud Console (see Option B below).
 
-### What you will need to do (when Phase 3 ships)
-
-You have two options depending on your use case:
-
-#### Option A — Use the built-in WidKanban OAuth client *(easiest)*
-WidKanban will ship with a pre-registered OAuth 2.0 client ID. You simply:
-1. Click **"Connect Google Tasks"** in the Settings modal.
-2. A browser window will open asking you to sign in and grant access to your Google Tasks.
-3. After authorisation, Google redirects back to WidKanban automatically.
-
-#### Option B — Bring your own Google Cloud project *(advanced / self-hosted)*
-If you want full control over the OAuth client (e.g., for a self-hosted build):
-
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (or select an existing one).
-3. In the left menu go to **APIs & Services → Library** and enable the **"Tasks API"**.
-4. Go to **APIs & Services → Credentials** and click **"Create Credentials → OAuth 2.0 Client ID"**.
-5. Set Application type to **"Desktop app"**.
-6. Give it a name (e.g., `WidKanban`) and click **Create**.
-7. Download the `client_secret_*.json` file.
-8. Place it in the WidKanban config directory and set the path in settings.
-
-### Required OAuth Scopes (Google)
+### Required OAuth Scope
 
 | Scope | Why it's needed |
 |---|---|
-| `https://www.googleapis.com/auth/tasks` | Read and update your Google Tasks (including marking tasks complete) |
+| `https://www.googleapis.com/auth/tasks` | Full read/write access to your Google Tasks (required to mark tasks complete and update status) |
+
+### Option A — Google OAuth Playground *(easiest, for personal use)*
+
+1. Open the [Google OAuth Playground](https://developers.google.com/oauthplayground).
+2. In the **Step 1** panel on the left, find **"Tasks API v1"** and select:
+   - `https://www.googleapis.com/auth/tasks`
+3. Click **"Authorize APIs"** — a Google sign-in popup will appear.
+4. Sign in with the Google account whose tasks you want to sync and grant access.
+5. You will be returned to the Playground at **Step 2**. Click **"Exchange authorization code for tokens"**.
+6. In the **Step 2** response panel you will see the **Access token** field. It starts with `ya29.`. Copy it.
+7. Paste it into the **Google Tasks OAuth Token** field in WidKanban Settings and click **Save**.
+
+> [!TIP]
+> To get a longer-lived token, click the ⚙ gear icon in the OAuth Playground, tick **"Use your own OAuth credentials"**, enter your Google Cloud OAuth client ID and secret (see Option B), and tick **"Auto-refresh the token before it expires"**.
+
+### Option B — Register your own Google Cloud OAuth client *(for production / long-term use)*
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project (or select an existing one).
+3. Navigate to **APIs & Services → Library** and enable the **"Tasks API"**.
+4. Navigate to **APIs & Services → OAuth consent screen**:
+   - Set User Type to **External** (for personal accounts) or **Internal** (for Workspace org).
+   - Add your Google account as a test user if your app is still in "Testing" publishing status.
+5. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**:
+   - Application type: **Desktop app**
+   - Name: `WidKanban`
+6. Copy the **Client ID** and **Client Secret**.
+7. Use these in the OAuth Playground (⚙ → "Use your own OAuth credentials") as described in Option A to generate a token with auto-refresh.
+
+### Entering the Token in WidKanban
+
+1. Open WidKanban.
+2. Click the **Settings (⚙)** icon in the header.
+3. Paste your `ya29.…` token into the **Google Tasks OAuth Token** field.
+4. Click **Save**. WidKanban will immediately fetch your tasks across all task lists.
+5. Use the **↻ sync button** next to "Connected" to refresh tasks manually at any time.
 
 ---
 

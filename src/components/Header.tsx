@@ -27,6 +27,7 @@ export const Header: React.FC = () => {
     setSettingsOpen,
     authStatus,
     refreshTasks,
+    fetchGoogleTasks,
     tasks
   } = useTaskStore();
 
@@ -36,9 +37,12 @@ export const Header: React.FC = () => {
   const ghCount = tasks.filter((t) => t.source === 'github').length;
   const gtCount = tasks.filter((t) => t.source === 'google_tasks').length;
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
     refreshTasks();
+    if (authStatus.has_google) {
+      await fetchGoogleTasks();
+    }
     setTimeout(() => setIsRefreshing(false), 600);
   };
 

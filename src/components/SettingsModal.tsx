@@ -10,7 +10,8 @@ import {
   EyeOff, 
   Trash2,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 
 export const SettingsModal: React.FC = () => {
@@ -20,6 +21,7 @@ export const SettingsModal: React.FC = () => {
     authStatus, 
     saveCredentials, 
     clearCredentials,
+    fetchGoogleTasks,
     setCompletedOnboarding 
   } = useTaskStore();
 
@@ -29,6 +31,7 @@ export const SettingsModal: React.FC = () => {
   const [showGoogle, setShowGoogle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
 
   if (!isSettingsOpen) return null;
 
@@ -56,6 +59,12 @@ export const SettingsModal: React.FC = () => {
 
   const handleDisconnect = async (provider: 'github' | 'google') => {
     await clearCredentials(provider);
+  };
+
+  const handleFetchGoogleTasks = async () => {
+    setIsFetchingGoogle(true);
+    await fetchGoogleTasks();
+    setIsFetchingGoogle(false);
   };
 
   const handleClose = () => {
@@ -160,15 +169,24 @@ export const SettingsModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Google Tasks API Key / Token Section */}
+          {/* Google Tasks OAuth Access Token Section */}
           <div className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50/50 p-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-1.5">
                 <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
-                <span className="font-semibold text-slate-800">Google Tasks API Key / Token</span>
+                <span className="font-semibold text-slate-800">Google Tasks OAuth Token</span>
               </div>
               {authStatus.has_google ? (
                 <div className="flex items-center space-x-1">
+                  <button
+                    type="button"
+                    onClick={handleFetchGoogleTasks}
+                    disabled={isFetchingGoogle}
+                    title="Sync Google Tasks now"
+                    className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isFetchingGoogle ? 'animate-spin' : ''}`} />
+                  </button>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
                     Connected
                   </span>
@@ -191,7 +209,7 @@ export const SettingsModal: React.FC = () => {
             <div className="relative">
               <input
                 type={showGoogle ? 'text' : 'password'}
-                placeholder={authStatus.has_google ? '•••••••••••••••• (Leave blank to keep current)' : 'AIza... or OAuth token'}
+                placeholder={authStatus.has_google ? '•••••••••••••••• (Leave blank to keep current)' : 'ya29.a0A...'}
                 value={googleToken}
                 onChange={(e) => setGoogleToken(e.target.value)}
                 className="w-full rounded-lg bg-white border border-slate-200 py-1.5 pl-2.5 pr-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
@@ -205,8 +223,17 @@ export const SettingsModal: React.FC = () => {
               </button>
             </div>
 
-            <div className="text-[10px] text-slate-400 pt-0.5">
-              <span>Enables bidirectional sync for your Google Tasks lists.</span>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+              <span>Scope: <code>https://www.googleapis.com/auth/tasks</code></span>
+              <a
+                href="https://developers.google.com/oauthplayground"
+                target="_blank"
+                rel="noreferrer"
+                className="text-indigo-600 hover:underline flex items-center space-x-0.5"
+              >
+                <span>Get OAuth token</span>
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
             </div>
           </div>
 

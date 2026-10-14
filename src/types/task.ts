@@ -13,6 +13,7 @@ export interface UnifiedTask {
     issueNumber?: number;
     labels?: string[];
     listId?: string;
+    listTitle?: string;
     notes?: string;
     dueDate?: string;
   };
