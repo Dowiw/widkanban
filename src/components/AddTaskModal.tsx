@@ -26,7 +26,8 @@ export const AddTaskModal: React.FC = () => {
         sourceMeta: {
           repo: metaInfo.trim() || 'widkanban',
           issueNumber: Math.floor(Math.random() * 899) + 100,
-          labels: ['user-created'],
+          labels: [{ name: 'user-created', color: '6366f1' }],
+          isPullRequest: false,
         },
       });
     } else {
@@ -36,8 +37,9 @@ export const AddTaskModal: React.FC = () => {
         status,
         url: 'https://tasks.google.com',
         sourceMeta: {
-          listId: metaInfo.trim() || 'Personal',
-          dueDate: 'Today',
+          listId: metaInfo.trim() || 'personal',
+          listTitle: metaInfo.trim() || 'Personal',
+          dueDate: new Date().toISOString(),
         },
       });
     }

@@ -33,8 +33,9 @@ interface TaskState {
   setAddTaskOpen: (isOpen: boolean) => void;
   setSettingsOpen: (isOpen: boolean) => void;
   setCompletedOnboarding: (completed: boolean) => void;
-  refreshTasks: () => void;
+  refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
+  fetchGithubTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
   saveCredentials: (creds: { githubToken?: string; googleToken?: string }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
@@ -73,42 +74,42 @@ export const useTaskStore = create<TaskState>()(
           };
 
           if (targetIndex !== undefined) {
-            const sameStatusTasks = updatedTasks.filter((t) => t.status === targetStatus);
-            const otherStatusTasks = updatedTasks.filter((t) => t.status !== targetStatus);
-            sameStatusTasks.splice(targetIndex, 0, updatedTask);
-            return { tasks: [...otherStatusTasks, ...sameStatusTasks] };
+            updatedTasks.splice(targetIndex, 0, updatedTask);
           } else {
-            return { tasks: [...updatedTasks, updatedTask] };
+            updatedTasks.push(updatedTask);
           }
+
+          return { tasks: updatedTasks };
         });
 
         // --- Background write-back for Google Tasks ---
         const task = prevTasks.find((t) => t.id === taskId);
-        if (task?.source === 'google_tasks' && task.sourceMeta.listId) {
-          // Strip the "gt_" prefix to get the raw Google Tasks API task ID
-          const rawTaskId = taskId.startsWith('gt_') ? taskId.slice(3) : taskId;
-
-          safeInvoke('update_google_task', {
-            taskId: rawTaskId,
+        if (task && task.source === 'google_tasks' && task.sourceMeta?.listId) {
+          const rawId = task.id.replace(/^gt_/, '');
+          safeInvoke<void>('update_google_task', {
+            taskId: rawId,
             listId: task.sourceMeta.listId,
             newStatus: targetStatus,
-          }).catch((err) => {
-            console.error('[Google Tasks write-back failed]', err);
-            // Revert optimistic update on failure
-            set({ tasks: prevTasks });
+          }).then((res) => {
+            if (res === null) {
+              console.warn(`[Sync] Background update failed for Google Task ${rawId}. Reverting...`);
+              set({ tasks: prevTasks });
+            }
           });
         }
       },
 
       addTask: (newTaskData) => {
-        set((state) => {
-          const newTask: UnifiedTask = {
-            ...newTaskData,
-            id: `${newTaskData.source === 'github' ? 'gh' : 'gt'}_${Date.now()}`,
-            updatedAt: new Date().toISOString(),
-          };
-          return { tasks: [newTask, ...state.tasks] };
-        });
+        const id = `${newTaskData.source === 'github' ? 'gh' : 'gt'}_${Date.now()}`;
+        const task: UnifiedTask = {
+          ...newTaskData,
+          id,
+          updatedAt: new Date().toISOString(),
+        };
+
+        set((state) => ({
+          tasks: [task, ...state.tasks],
+        }));
       },
 
       deleteTask: (taskId) => {
@@ -124,25 +125,31 @@ export const useTaskStore = create<TaskState>()(
       setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
       setCompletedOnboarding: (completed) => set({ hasCompletedOnboarding: completed }),
 
-      refreshTasks: () => {
-        set((state) => ({
-          tasks: state.tasks.map((t) => ({ ...t, updatedAt: new Date().toISOString() })),
-        }));
+      refreshTasks: async () => {
+        const status = await get().checkAuthStatus();
+        const promises: Promise<void>[] = [];
+        if (status.has_google) promises.push(get().fetchGoogleTasks());
+        if (status.has_github) promises.push(get().fetchGithubTasks());
+        await Promise.all(promises);
       },
 
-      /**
-       * Fetch all Google Tasks from the Rust backend and merge them into the
-       * local task list. Existing Google Tasks are replaced wholesale by the
-       * fresh API data; GitHub tasks and manually-added tasks are left untouched.
-       */
       fetchGoogleTasks: async () => {
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_google_tasks');
-        if (!fetched) return; // Token missing or IPC unavailable — silently skip
+        if (!fetched) return;
 
         set((state) => {
-          // Remove all existing google_tasks entries and replace with fresh data
           const nonGoogleTasks = state.tasks.filter((t) => t.source !== 'google_tasks');
           return { tasks: [...fetched, ...nonGoogleTasks] };
+        });
+      },
+
+      fetchGithubTasks: async () => {
+        const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
+        if (!fetched) return;
+
+        set((state) => {
+          const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
+          return { tasks: [...nonGithubTasks, ...fetched] };
         });
       },
 
@@ -162,10 +169,10 @@ export const useTaskStore = create<TaskState>()(
         });
         if (res) {
           set({ authStatus: res, hasCompletedOnboarding: true });
-          // Immediately fetch Google Tasks after saving a new token
-          if (res.has_google) {
-            await get().fetchGoogleTasks();
-          }
+          const syncs: Promise<void>[] = [];
+          if (res.has_google) syncs.push(get().fetchGoogleTasks());
+          if (res.has_github) syncs.push(get().fetchGithubTasks());
+          await Promise.all(syncs);
           return true;
         }
         return false;
@@ -177,14 +184,17 @@ export const useTaskStore = create<TaskState>()(
         });
         if (res) {
           set((state) => {
-            // If Google token was cleared, remove Google tasks from the board
+            let updatedTasks = state.tasks;
             if (provider === 'google' || !provider) {
-              return {
-                authStatus: res,
-                tasks: state.tasks.filter((t) => t.source !== 'google_tasks'),
-              };
+              updatedTasks = updatedTasks.filter((t) => t.source !== 'google_tasks');
             }
-            return { authStatus: res };
+            if (provider === 'github' || !provider) {
+              updatedTasks = updatedTasks.filter((t) => t.source !== 'github');
+            }
+            return {
+              authStatus: res,
+              tasks: updatedTasks,
+            };
           });
           return true;
         }

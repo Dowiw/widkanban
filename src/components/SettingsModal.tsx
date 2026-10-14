@@ -22,6 +22,7 @@ export const SettingsModal: React.FC = () => {
     saveCredentials, 
     clearCredentials,
     fetchGoogleTasks,
+    fetchGithubTasks,
     setCompletedOnboarding 
   } = useTaskStore();
 
@@ -32,6 +33,7 @@ export const SettingsModal: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
+  const [isFetchingGithub, setIsFetchingGithub] = useState(false);
 
   if (!isSettingsOpen) return null;
 
@@ -65,6 +67,12 @@ export const SettingsModal: React.FC = () => {
     setIsFetchingGoogle(true);
     await fetchGoogleTasks();
     setIsFetchingGoogle(false);
+  };
+
+  const handleFetchGithubTasks = async () => {
+    setIsFetchingGithub(true);
+    await fetchGithubTasks();
+    setIsFetchingGithub(false);
   };
 
   const handleClose = () => {
@@ -122,6 +130,15 @@ export const SettingsModal: React.FC = () => {
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
                     Connected
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleFetchGithubTasks}
+                    disabled={isFetchingGithub}
+                    title="Sync GitHub tasks now"
+                    className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isFetchingGithub ? 'animate-spin text-emerald-600' : ''}`} />
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleDisconnect('github')}

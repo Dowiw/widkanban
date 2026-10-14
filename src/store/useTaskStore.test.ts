@@ -32,7 +32,6 @@ describe('useTaskStore', () => {
     const state = useTaskStore.getState();
     expect(state.tasks).toHaveLength(INITIAL_MOCK_TASKS.length);
     expect(state.isPinned).toBe(true);
-    // Verify no placeholder GitHub issues exist in initial state
     expect(state.tasks.some((t) => t.source === 'github')).toBe(false);
   });
 
@@ -60,7 +59,6 @@ describe('useTaskStore', () => {
 
   it('fires update_google_task IPC when moving a Google Task', () => {
     const { moveTask } = useTaskStore.getState();
-    // gt_201 is a google_tasks source task with listId 'work_deliverables'
     moveTask('gt_201', 'done');
 
     expect(mockInvoke).toHaveBeenCalledWith('update_google_task', {
@@ -91,7 +89,7 @@ describe('useTaskStore', () => {
     expect(googleUpdateCalls).toHaveLength(0);
   });
 
-  it('adds a new GitHub task correctly', () => {
+  it('adds a new GitHub task correctly with rich label metadata', () => {
     const { addTask } = useTaskStore.getState();
 
     addTask({
@@ -102,7 +100,9 @@ describe('useTaskStore', () => {
       sourceMeta: {
         repo: 'widkanban',
         issueNumber: 999,
-        labels: ['auth'],
+        labels: [{ name: 'auth', color: 'd73a4a' }],
+        isPullRequest: false,
+        commentsCount: 2,
       },
     });
 
@@ -113,6 +113,7 @@ describe('useTaskStore', () => {
     expect(createdTask.title).toBe('Fix authentication token refresh');
     expect(createdTask.id).toContain('gh_');
     expect(createdTask.source).toBe('github');
+    expect(createdTask.sourceMeta.labels?.[0].color).toBe('d73a4a');
   });
 
   it('deletes a task by ID', () => {
@@ -193,7 +194,6 @@ describe('useTaskStore', () => {
       sourceMeta: { listId: 'abc', listTitle: 'My Tasks' },
     };
 
-    // Make invoke return fresh tasks for this call
     mockInvoke.mockResolvedValueOnce([freshGoogleTask]);
 
     const { fetchGoogleTasks } = useTaskStore.getState();
@@ -201,24 +201,48 @@ describe('useTaskStore', () => {
 
     const tasks = useTaskStore.getState().tasks;
 
-    // Fresh google task should be present
     expect(tasks.some((t) => t.id === 'gt_fresh_001')).toBe(true);
-
-    // Old mock google tasks should be gone (replaced wholesale)
     expect(tasks.some((t) => t.id === 'gt_201')).toBe(false);
     expect(tasks.some((t) => t.id === 'gt_202')).toBe(false);
     expect(tasks.some((t) => t.id === 'gt_203')).toBe(false);
-
-    // GitHub task should be untouched
     expect(tasks.some((t) => t.id === 'gh_custom_99')).toBe(true);
   });
 
-  it('fetchGoogleTasks does nothing when IPC returns null (token missing)', async () => {
-    mockInvoke.mockResolvedValueOnce(null);
+  it('fetchGithubTasks replaces existing GitHub tasks with fresh data and keeps Google tasks', async () => {
+    const freshGithubTask: UnifiedTask = {
+      id: 'gh_fresh_777',
+      title: 'PR: Implement OAuth',
+      source: 'github',
+      status: 'in_progress',
+      url: 'https://github.com/org/widkanban/pull/777',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {
+        repo: 'org/widkanban',
+        issueNumber: 777,
+        isPullRequest: true,
+        commentsCount: 5,
+        labels: [{ name: 'feature', color: 'a2eeef' }],
+      },
+    };
+
+    mockInvoke.mockResolvedValueOnce([freshGithubTask]);
+
+    const { fetchGithubTasks } = useTaskStore.getState();
+    await fetchGithubTasks();
+
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks.some((t) => t.id === 'gh_fresh_777')).toBe(true);
+    // Google tasks must still be present
+    expect(tasks.some((t) => t.id === 'gt_201')).toBe(true);
+  });
+
+  it('fetchGoogleTasks and fetchGithubTasks do nothing when IPC returns null', async () => {
+    mockInvoke.mockResolvedValue(null);
 
     const tasksBefore = useTaskStore.getState().tasks;
-    const { fetchGoogleTasks } = useTaskStore.getState();
+    const { fetchGoogleTasks, fetchGithubTasks } = useTaskStore.getState();
     await fetchGoogleTasks();
+    await fetchGithubTasks();
 
     expect(useTaskStore.getState().tasks).toEqual(tasksBefore);
   });
@@ -235,8 +259,7 @@ describe('useTaskStore', () => {
     };
     useTaskStore.setState({ tasks: [...INITIAL_MOCK_TASKS, sampleGithubTask] });
 
-    // Simulate a successful clear returning no google token
-    mockInvoke.mockResolvedValueOnce({ has_github: false, has_google: false });
+    mockInvoke.mockResolvedValueOnce({ has_github: true, has_google: false });
 
     const { clearCredentials } = useTaskStore.getState();
     await clearCredentials('google');
@@ -245,8 +268,32 @@ describe('useTaskStore', () => {
     const googleTasksRemaining = tasks.filter((t) => t.source === 'google_tasks');
     expect(googleTasksRemaining).toHaveLength(0);
 
-    // GitHub tasks should survive
     const githubTasks = tasks.filter((t) => t.source === 'github');
     expect(githubTasks).toHaveLength(1);
+  });
+
+  it('clearCredentials for github removes all github tasks from board and preserves Google tasks', async () => {
+    const sampleGithubTask: UnifiedTask = {
+      id: 'gh_custom_99',
+      title: 'User GitHub issue',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/99',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'widkanban', issueNumber: 99 },
+    };
+    useTaskStore.setState({ tasks: [...INITIAL_MOCK_TASKS, sampleGithubTask] });
+
+    mockInvoke.mockResolvedValueOnce({ has_github: false, has_google: true });
+
+    const { clearCredentials } = useTaskStore.getState();
+    await clearCredentials('github');
+
+    const tasks = useTaskStore.getState().tasks;
+    const githubTasks = tasks.filter((t) => t.source === 'github');
+    expect(githubTasks).toHaveLength(0);
+
+    const googleTasks = tasks.filter((t) => t.source === 'google_tasks');
+    expect(googleTasks.length).toBeGreaterThan(0);
   });
 });

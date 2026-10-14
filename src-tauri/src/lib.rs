@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -19,9 +20,92 @@ pub struct AuthStatus {
     pub has_google: bool,
 }
 
+// ─── Provider Specific Detailed Models ──────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct GitHubLabel {
+    pub name: String,
+    pub color: String,
+    pub description: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TaskUser {
+    pub login: String,
+    #[serde(rename = "avatarUrl")]
+    pub avatar_url: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TaskMilestone {
+    pub title: String,
+    #[serde(rename = "dueOn")]
+    pub due_on: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TaskLink {
+    pub description: Option<String>,
+    pub link: String,
+    #[serde(rename = "linkType")]
+    pub link_type: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SubtaskItem {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+}
+
+// ─── UnifiedTask (mirrored for Rust serialization) ──────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SourceMeta {
+    pub repo: Option<String>,
+    #[serde(rename = "issueNumber")]
+    pub issue_number: Option<u64>,
+    pub labels: Option<Vec<GitHubLabel>>,
+    #[serde(rename = "isPullRequest")]
+    pub is_pull_request: Option<bool>,
+    #[serde(rename = "commentsCount")]
+    pub comments_count: Option<u64>,
+    pub milestone: Option<TaskMilestone>,
+    pub author: Option<TaskUser>,
+    pub assignees: Option<Vec<TaskUser>>,
+    #[serde(rename = "listId")]
+    pub list_id: Option<String>,
+    #[serde(rename = "listTitle")]
+    pub list_title: Option<String>,
+    pub notes: Option<String>,
+    #[serde(rename = "dueDate")]
+    pub due_date: Option<String>,
+    #[serde(rename = "parentId")]
+    pub parent_id: Option<String>,
+    #[serde(rename = "hasSubtasks")]
+    pub has_subtasks: Option<bool>,
+    #[serde(rename = "subtaskCount")]
+    pub subtask_count: Option<usize>,
+    pub subtasks: Option<Vec<SubtaskItem>>,
+    pub links: Option<Vec<TaskLink>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct UnifiedTask {
+    pub id: String,
+    pub title: String,
+    pub source: String,      // "github" | "google_tasks"
+    pub status: String,      // "todo" | "in_progress" | "done"
+    pub url: String,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+    pub description: Option<String>,
+    #[serde(rename = "sourceMeta")]
+    pub source_meta: SourceMeta,
+}
+
 // ─── Google Tasks API Types ──────────────────────────────────────────────────
 
-/// Raw task list from `GET /tasks/v1/users/@me/lists`
 #[derive(Deserialize, Debug)]
 struct GTaskList {
     id: String,
@@ -33,8 +117,16 @@ struct GTaskListsResponse {
     items: Option<Vec<GTaskList>>,
 }
 
-/// Raw task item from `GET /tasks/v1/lists/{listId}/tasks`
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct GTaskLink {
+    description: Option<String>,
+    link: Option<String>,
+    #[serde(rename = "type")]
+    link_type: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 struct GTask {
     id: String,
     title: Option<String>,
@@ -42,6 +134,8 @@ struct GTask {
     notes: Option<String>,
     due: Option<String>,
     updated: Option<String>,
+    parent: Option<String>,
+    links: Option<Vec<GTaskLink>>,
     #[serde(rename = "selfLink")]
     self_link: Option<String>,
 }
@@ -51,36 +145,53 @@ struct GTasksResponse {
     items: Option<Vec<GTask>>,
 }
 
-/// Payload for PATCH to update a Google Task's status
 #[derive(Serialize)]
 struct GTaskPatchPayload {
     status: String,
 }
 
-// ─── UnifiedTask (mirrored for Rust serialization) ──────────────────────────
+// ─── GitHub API Types ────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SourceMeta {
-    pub repo: Option<String>,
-    pub issue_number: Option<u64>,
-    pub labels: Option<Vec<String>>,
-    pub list_id: Option<String>,
-    pub list_title: Option<String>,
-    pub notes: Option<String>,
-    pub due_date: Option<String>,
+#[derive(Deserialize, Debug)]
+struct GHUser {
+    login: String,
+    avatar_url: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct UnifiedTask {
-    pub id: String,
-    pub title: String,
-    pub source: String,      // "github" | "google_tasks"
-    pub status: String,      // "todo" | "in_progress" | "done"
-    pub url: String,
-    #[serde(rename = "updatedAt")]
-    pub updated_at: String,
-    #[serde(rename = "sourceMeta")]
-    pub source_meta: SourceMeta,
+#[derive(Deserialize, Debug)]
+struct GHLabel {
+    name: String,
+    color: String,
+    description: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GHMilestone {
+    title: String,
+    due_on: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+struct GHPullRequestRef {
+    html_url: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GHIssue {
+    id: u64,
+    number: u64,
+    title: String,
+    state: String, // "open" | "closed"
+    body: Option<String>,
+    html_url: String,
+    comments: Option<u64>,
+    updated_at: Option<String>,
+    user: Option<GHUser>,
+    assignees: Option<Vec<GHUser>>,
+    labels: Option<Vec<GHLabel>>,
+    milestone: Option<GHMilestone>,
+    pull_request: Option<GHPullRequestRef>,
 }
 
 // ─── Credential File Helpers ─────────────────────────────────────────────────
@@ -129,12 +240,8 @@ fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -
     Ok(())
 }
 
-// ─── Google Tasks Status Mapping ─────────────────────────────────────────────
+// ─── Status & Helper Mappings ────────────────────────────────────────────────
 
-/// Map Google Tasks API status string to WidKanban TaskStatus.
-/// Google only has "needsAction" and "completed" — we map:
-///   "completed"   → "done"
-///   "needsAction" → "todo"  (no direct "in_progress" equivalent in Google Tasks)
 fn google_status_to_task_status(gs: Option<&str>) -> String {
     match gs {
         Some("completed") => "done".to_string(),
@@ -142,13 +249,43 @@ fn google_status_to_task_status(gs: Option<&str>) -> String {
     }
 }
 
-/// Map WidKanban TaskStatus back to Google Tasks API status string.
-/// "done" → "completed", everything else → "needsAction"
 fn task_status_to_google_status(ts: &str) -> String {
     match ts {
         "done" => "completed".to_string(),
         _ => "needsAction".to_string(),
     }
+}
+
+fn parse_github_repo_from_url(url: &str) -> Option<String> {
+    let parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
+    if parts.len() >= 5 {
+        let owner = parts[3];
+        let repo = parts[4];
+        if !owner.is_empty() && !repo.is_empty() {
+            return Some(format!("{}/{}", owner, repo));
+        }
+    }
+    None
+}
+
+fn github_issue_status(state: &str, labels: Option<&[GHLabel]>) -> String {
+    if state == "closed" {
+        return "done".to_string();
+    }
+    if let Some(labels) = labels {
+        for label in labels {
+            let lower = label.name.to_lowercase();
+            if lower == "in-progress"
+                || lower == "in progress"
+                || lower == "in_progress"
+                || lower == "wip"
+                || lower == "doing"
+            {
+                return "in_progress".to_string();
+            }
+        }
+    }
+    "todo".to_string()
 }
 
 // ─── Tauri IPC Commands ───────────────────────────────────────────────────────
@@ -237,14 +374,8 @@ fn clear_credentials(
     })
 }
 
-/// Fetch all Google Tasks across all task lists for the authenticated user.
-///
-/// Flow:
-///   1. GET /tasks/v1/users/@me/lists  → list IDs
-///   2. For each list: GET /tasks/v1/lists/{listId}/tasks?showCompleted=true&showHidden=false
-///   3. Normalize each GTask → UnifiedTask and return the flattened vec.
-///
-/// Returns an error string if the token is missing or the API call fails.
+/// Fetch all Google Tasks across all task lists for the authenticated user,
+/// resolving subtask hierarchy and deep links.
 #[tauri::command]
 async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
     let creds = read_credentials(&app_handle);
@@ -278,7 +409,14 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .map_err(|e| format!("Failed to parse task lists response: {}", e))?;
 
     let lists = lists_body.items.unwrap_or_default();
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
+
+    struct RawTaskEntry {
+        task: GTask,
+        list_id: String,
+        list_title: String,
+    }
+
+    let mut raw_entries: Vec<RawTaskEntry> = Vec::new();
 
     // 2. Fetch tasks from each list
     for list in &lists {
@@ -298,7 +436,6 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
 
         if !tasks_resp.status().is_success() {
-            // Skip lists that we can't read rather than aborting everything
             continue;
         }
 
@@ -308,51 +445,212 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         };
 
         for task in tasks_body.items.unwrap_or_default() {
-            // Skip deleted / hidden tasks that have no title
-            let title = match task.title {
-                Some(ref t) if !t.trim().is_empty() => t.clone(),
-                _ => continue,
-            };
-
-            let status = google_status_to_task_status(task.status.as_deref());
-            let updated_at = task
-                .updated
-                .unwrap_or_else(|| chrono_now_iso());
-
-            // Build a web URL: direct deep-link not available from the API,
-            // so we use the selfLink URL (tasks.googleapis.com/…) as a fallback.
-            let url = task
-                .self_link
-                .unwrap_or_else(|| "https://tasks.google.com".to_string());
-
-            unified_tasks.push(UnifiedTask {
-                id: format!("gt_{}", task.id),
-                title,
-                source: "google_tasks".to_string(),
-                status,
-                url,
-                updated_at,
-                source_meta: SourceMeta {
-                    repo: None,
-                    issue_number: None,
-                    labels: None,
-                    list_id: Some(list.id.clone()),
-                    list_title: Some(list.title.clone()),
-                    notes: task.notes,
-                    due_date: task.due,
-                },
-            });
+            if let Some(ref t) = task.title {
+                if !t.trim().is_empty() {
+                    raw_entries.push(RawTaskEntry {
+                        task,
+                        list_id: list.id.clone(),
+                        list_title: list.title.clone(),
+                    });
+                }
+            }
         }
+    }
+
+    // 3. Map parent task -> subtask items
+    let mut subtasks_map: HashMap<String, Vec<SubtaskItem>> = HashMap::new();
+    for entry in &raw_entries {
+        if let Some(ref parent_id) = entry.task.parent {
+            let status = google_status_to_task_status(entry.task.status.as_deref());
+            let title = entry.task.title.clone().unwrap_or_default();
+            subtasks_map
+                .entry(parent_id.clone())
+                .or_default()
+                .push(SubtaskItem {
+                    id: format!("gt_{}", entry.task.id),
+                    title,
+                    status,
+                });
+        }
+    }
+
+    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
+
+    // 4. Construct UnifiedTask records
+    for entry in raw_entries {
+        let task = entry.task;
+        let title = task.title.unwrap_or_default();
+        let status = google_status_to_task_status(task.status.as_deref());
+        let updated_at = task.updated.unwrap_or_else(|| chrono_now_iso());
+        let url = task
+            .self_link
+            .unwrap_or_else(|| "https://tasks.google.com".to_string());
+
+        let raw_id = task.id;
+        let parent_id = task.parent.as_ref().map(|p| format!("gt_{}", p));
+
+        let subtasks = subtasks_map.get(&raw_id).cloned();
+        let has_subtasks = subtasks.as_ref().map(|s| !s.is_empty());
+        let subtask_count = subtasks.as_ref().map(|s| s.len());
+
+        let links: Option<Vec<TaskLink>> = task.links.map(|gls| {
+            gls.into_iter()
+                .filter_map(|l| {
+                    let link = l.link?;
+                    let link_type = if link.starts_with("mailto:") || link.contains("mail.google.com") {
+                        Some("email".to_string())
+                    } else if link.contains("calendar.google.com") {
+                        Some("calendar".to_string())
+                    } else {
+                        Some("generic".to_string())
+                    };
+                    Some(TaskLink {
+                        description: l.description,
+                        link,
+                        link_type,
+                    })
+                })
+                .collect()
+        });
+
+        unified_tasks.push(UnifiedTask {
+            id: format!("gt_{}", raw_id),
+            title,
+            source: "google_tasks".to_string(),
+            status,
+            url,
+            updated_at,
+            description: task.notes.clone(),
+            source_meta: SourceMeta {
+                repo: None,
+                issue_number: None,
+                labels: None,
+                is_pull_request: None,
+                comments_count: None,
+                milestone: None,
+                author: None,
+                assignees: None,
+                list_id: Some(entry.list_id),
+                list_title: Some(entry.list_title),
+                notes: task.notes,
+                due_date: task.due,
+                parent_id,
+                has_subtasks,
+                subtask_count,
+                subtasks,
+                links,
+            },
+        });
+    }
+
+    Ok(unified_tasks)
+}
+
+/// Fetch assigned GitHub issues and pull requests with rich metadata.
+#[tauri::command]
+async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get("https://api.github.com/user/issues?filter=all&state=open&per_page=100")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch GitHub issues: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error {}: {}", status, body));
+    }
+
+    let issues: Vec<GHIssue> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub issues response: {}", e))?;
+
+    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
+
+    for issue in issues {
+        let repo = parse_github_repo_from_url(&issue.html_url);
+        let status = github_issue_status(&issue.state, issue.labels.as_deref());
+        let is_pull_request = issue.pull_request.is_some();
+
+        let labels = issue.labels.map(|labs| {
+            labs.into_iter()
+                .map(|l| GitHubLabel {
+                    name: l.name,
+                    color: l.color,
+                    description: l.description,
+                })
+                .collect()
+        });
+
+        let author = issue.user.map(|u| TaskUser {
+            login: u.login,
+            avatar_url: u.avatar_url.unwrap_or_default(),
+        });
+
+        let assignees = issue.assignees.map(|users| {
+            users
+                .into_iter()
+                .map(|u| TaskUser {
+                    login: u.login,
+                    avatar_url: u.avatar_url.unwrap_or_default(),
+                })
+                .collect()
+        });
+
+        let milestone = issue.milestone.map(|m| TaskMilestone {
+            title: m.title,
+            due_on: m.due_on,
+        });
+
+        unified_tasks.push(UnifiedTask {
+            id: format!("gh_{}", issue.id),
+            title: issue.title,
+            source: "github".to_string(),
+            status,
+            url: issue.html_url,
+            updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
+            description: issue.body,
+            source_meta: SourceMeta {
+                repo,
+                issue_number: Some(issue.number),
+                labels,
+                is_pull_request: Some(is_pull_request),
+                comments_count: issue.comments,
+                milestone,
+                author,
+                assignees,
+                list_id: None,
+                list_title: None,
+                notes: None,
+                due_date: None,
+                parent_id: None,
+                has_subtasks: None,
+                subtask_count: None,
+                subtasks: None,
+                links: None,
+            },
+        });
     }
 
     Ok(unified_tasks)
 }
 
 /// Update a single Google Task's completion status.
-///
-/// `task_id`   – the raw Google Tasks API task ID (without the "gt_" prefix)
-/// `list_id`   – the task list ID the task belongs to
-/// `new_status`– WidKanban TaskStatus: "todo" | "in_progress" | "done"
 #[tauri::command]
 async fn update_google_task(
     app_handle: tauri::AppHandle,
@@ -457,6 +755,7 @@ pub fn run() {
             save_credentials,
             clear_credentials,
             fetch_google_tasks,
+            fetch_github_tasks,
             update_google_task,
         ])
         .setup(|app| {
@@ -576,9 +875,34 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_github_repo_from_url() {
+        assert_eq!(
+            parse_github_repo_from_url("https://github.com/facebook/react/issues/123"),
+            Some("facebook/react".to_string())
+        );
+        assert_eq!(
+            parse_github_repo_from_url("https://github.com/org/widkanban/pull/45"),
+            Some("org/widkanban".to_string())
+        );
+        assert_eq!(parse_github_repo_from_url("invalid-url"), None);
+    }
+
+    #[test]
+    fn test_github_issue_status_mapping() {
+        assert_eq!(github_issue_status("closed", None), "done");
+        assert_eq!(github_issue_status("open", None), "todo");
+
+        let in_progress_labels = vec![GHLabel {
+            name: "in-progress".to_string(),
+            color: "ededed".to_string(),
+            description: None,
+        }];
+        assert_eq!(github_issue_status("open", Some(&in_progress_labels)), "in_progress");
+    }
+
+    #[test]
     fn test_chrono_now_iso_format() {
         let ts = chrono_now_iso();
-        // Should look like "2024-10-14T19:00:00Z"
         assert!(ts.ends_with('Z'), "timestamp must end with Z: {}", ts);
         assert_eq!(ts.len(), 20, "timestamp must be 20 chars: {}", ts);
         assert_eq!(&ts[4..5], "-");
