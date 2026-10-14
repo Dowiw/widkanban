@@ -4,6 +4,9 @@ import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
 describe('useTaskStore', () => {
   beforeEach(() => {
+    // Clear persisted storage between tests to prevent state bleed
+    localStorage.clear();
+
     // Reset store state before each test
     useTaskStore.setState({
       tasks: INITIAL_MOCK_TASKS,
@@ -11,6 +14,8 @@ describe('useTaskStore', () => {
       filterSource: 'all',
       isPinned: true,
       isAddTaskOpen: false,
+      isSettingsOpen: false,
+      hasCompletedOnboarding: false,
     });
   });
 
