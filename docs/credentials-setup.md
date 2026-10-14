@@ -7,6 +7,29 @@ This guide explains exactly what credentials WidKanban needs, why they are requi
 
 ---
 
+## Table of Contents
+
+- [Summary of Required Credentials](#summary-of-required-credentials)
+- [Contributor Quick-Start: Fast Testing with Short-Lived Keys](#contributor-quick-start-fast-testing-with-short-lived-keys)
+  - [1. Google Tasks (1-hour Ephemeral Token)](#1-google-tasks-1-hour-ephemeral-token--no-cloud-setup-required)
+  - [2. GitHub (Short-Lived & Scoped Test Token)](#2-github-short-lived--scoped-test-token)
+  - [3. Cleaning Up After Testing](#3-cleaning-up-after-testing)
+- [1. GitHub — Personal Access Token (PAT)](#1-github--personal-access-token-pat)
+  - [Required Scopes](#required-scopes)
+  - [How to Create a Classic PAT](#how-to-create-a-classic-pat)
+  - [How to Create a Fine-Grained PAT (Recommended)](#how-to-create-a-fine-grained-pat-recommended)
+  - [Entering the GitHub Token in WidKanban](#entering-the-github-token-in-widkanban)
+- [2. Google Tasks — OAuth 2.0 Access Token](#2-google-tasks--oauth-20-access-token)
+  - [Required OAuth Scope](#required-oauth-scope)
+  - [Option A — Google OAuth Playground (Recommended for Contributors)](#option-a--google-oauth-playground-recommended-for-contributors--testing)
+  - [Option B — Register Your Own Google Cloud OAuth Client](#option-b--register-your-own-google-cloud-oauth-client-for-production--long-term-use)
+  - [Entering the Google Tasks Token in WidKanban](#entering-the-google-tasks-token-in-widkanban)
+- [Where Credentials Are Stored](#where-credentials-are-stored)
+- [Revoking Credentials](#revoking-credentials)
+- [Related Documentation](#related-documentation)
+
+---
+
 ## Summary of Required Credentials
 
 | Provider | Credential Type | Lifespan / Mode | Required For |
@@ -16,7 +39,9 @@ This guide explains exactly what credentials WidKanban needs, why they are requi
 
 ---
 
-## 🛠️ Contributor Quick-Start: Fast Testing with Short-Lived Keys
+<a id="contributor-quick-start"></a>
+<a id="contributor-quick-start-fast-testing-with-short-lived-keys"></a>
+## Contributor Quick-Start: Fast Testing with Short-Lived Keys
 
 If you are a **contributor or developer** testing features, bug fixes, or PRs, **you do not need to set up a production Google Cloud project or create permanent credentials**:
 
@@ -84,7 +109,7 @@ Fine-grained PATs give you repository-level control and are more secure:
    - **User email addresses**: not needed — leave as `No access`
 7. Click **"Generate token"** and copy the result. Fine-grained tokens look like `github_pat_xxxxxxxxxxxx`.
 
-### Entering the Token in WidKanban
+### Entering the GitHub Token in WidKanban
 
 1. Open WidKanban.
 2. Click the **Settings (⚙)** icon in the header.
@@ -134,7 +159,7 @@ WidKanban connects to the Google Tasks REST API using an **OAuth 2.0 access toke
 6. Copy the **Client ID** and **Client Secret**.
 7. Use these in the OAuth Playground (⚙ → "Use your own OAuth credentials") as described in Option A to generate a token with auto-refresh.
 
-### Entering the Token in WidKanban
+### Entering the Google Tasks Token in WidKanban
 
 1. Open WidKanban.
 2. Click the **Settings (⚙)** icon in the header.
@@ -167,3 +192,12 @@ On Unix/macOS the file permissions are set to `600` (only your user account can 
 ### Google Tasks
 - In WidKanban Settings, click **"Disconnect Google Tasks"**.
 - To fully revoke, visit https://myaccount.google.com/permissions and remove WidKanban from the list of connected apps.
+
+---
+
+## Related Documentation
+
+- [Project README](../README.md): High-level overview, key features, and quick start.
+- [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
+- [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
+- [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.

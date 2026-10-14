@@ -37,4 +37,5 @@ bin/
 Thumbs.db
 
 # Other files
-todos.md
+/todos.md
+!docs/todos.md

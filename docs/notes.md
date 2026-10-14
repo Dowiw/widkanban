@@ -4,6 +4,22 @@ This document contains key implementation details, Linux environment prerequisit
 
 ---
 
+## Table of Contents
+
+- [1. Linux Environment Prerequisites](#1-linux-environment-prerequisites)
+- [2. Frameless Window & Drag Region Behavior](#2-frameless-window--drag-region-behavior)
+  - [Transparent & Frameless Setup](#transparent--frameless-setup-tauriconfjson)
+  - [Dragging the Window](#dragging-the-window)
+- [3. Understanding Common Console Warnings](#3-understanding-common-console-warnings)
+  - [libEGL Warning / MESA LLVMpipe Fallback](#libegl-warning--mesa-error-zink-failed-to-choose-pdev)
+  - [GTK Scale Factor Debug Log](#gtk-critical--gtk_widget_get_scale_factor-assertion-failed)
+- [4. Performance & Memory Profile](#4-performance--memory-profile)
+- [5. Windows: MSVC Linker Required for reqwest + tokio](#5-windows-msvc-linker-required-for-reqwest--tokio)
+- [Related Documentation](#related-documentation)
+
+---
+
+<a id="1-linux-environment-prerequisites"></a>
 ## 1. Linux Environment Prerequisites
 
 When building or running WidKanban on Linux (Ubuntu, Debian, or WSL2 with WSLg), the following system packages must be installed for GTK3, WebKit2GTK, and system tray support:
@@ -74,6 +90,8 @@ sudo apt-get install -y \
 
 ---
 
+<a id="5-windows-msvc-linker-required-for-reqwest--tokio"></a>
+<a id="windows-msvc-linker"></a>
 ## 5. Windows: MSVC Linker Required for `reqwest` + `tokio`
 
 After the Google Tasks integration (Phase 3), `Cargo.toml` now depends on `reqwest` and `tokio`. These crates include build scripts that require the **MSVC C++ linker (`link.exe`)** to compile on Windows (`x86_64-pc-windows-msvc` toolchain).
@@ -101,4 +119,13 @@ After installation, open a new terminal so `link.exe` is on `PATH`, then re-run:
 ```powershell
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+---
+
+## Related Documentation
+
+- [Project README](../README.md): High-level overview, key features, and quick start.
+- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
+- [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
+- [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.
 

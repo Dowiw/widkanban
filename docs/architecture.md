@@ -4,6 +4,17 @@ This document details the architectural design, security model, data schemas, an
 
 ---
 
+## Table of Contents
+
+- [1. High-Level System Architecture](#1-high-level-system-architecture)
+- [2. Data Normalization Schema](#2-data-normalization-schema)
+- [3. Security & Token Storage Model](#3-security--token-storage-model)
+- [4. Sync Model & Write-Back Engine](#4-sync-model--write-back-engine)
+- [5. Task Deletion & Local Trash Management](#5-task-deletion--local-trash-management)
+- [Related Documentation](#related-documentation)
+
+---
+
 ## 1. High-Level System Architecture
 
 ```mermaid
@@ -114,3 +125,29 @@ export interface UnifiedTask {
   - **GitHub Write-back**: Moving to *Done* closes the issue (`PATCH /repos/{owner}/{repo}/issues/{number}`). Moving to *In Progress* applies an `in-progress` label.
   - **Google Tasks Write-back**: Moving to *Done* sets task status to `completed` (`PATCH /tasks/v1/lists/{listId}/tasks/{taskId}`).
 - **Tokio Background Polling Loop**: A background thread polls APIs every ~3 minutes and emits a `tasks-updated` event to the webview.
+
+---
+
+## 5. Task Deletion & Local Trash Management
+
+WidKanban provides a flexible two-tier deletion system for external tasks (GitHub Issues):
+
+1. **Delete Locally Only**:
+   - The task is removed from the visible Kanban columns and preserved in `locallyDeletedTasks` in the Zustand store.
+   - Subsequent GitHub background polls and syncs filter out locally hidden tasks so they do not reappear unprompted.
+   - Users can view and **restore** locally deleted tasks at any time via the Trash dropdown in the widget header.
+   - A subtle, one-time dismissible banner informs users when remote issues have been kept hidden locally.
+
+2. **Delete on GitHub**:
+   - **Close Issue (Standard)**: Dispatches `close_github_issue` via Tauri IPC. The issue is marked `closed` with `state_reason: "not_planned"` (and an optional explanation or duplicate link comment). Does not require repository admin privileges.
+   - **Permanently Delete (Admin)**: Dispatches `delete_github_issue_permanently` via the GitHub GraphQL `deleteIssue` mutation. Requires repository admin/owner permissions.
+   - **Preferences**: Users can choose to remember their deletion mode or reset their preference anytime in Settings.
+
+---
+
+## Related Documentation
+
+- [Project README](../README.md): Overview, key features, and quick start.
+- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
+- [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
+- [Roadmap & TODOs](todos.md): Milestone progress and feature breakdown for upcoming phases.
