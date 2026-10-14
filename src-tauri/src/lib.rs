@@ -370,7 +370,7 @@ async fn update_google_task(
     let payload = GTaskPatchPayload { status: google_status };
 
     let client = reqwest::Client::builder()
-        .use_rustls_tls()
+        .use_native_tls()
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
