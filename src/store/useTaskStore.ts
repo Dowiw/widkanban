@@ -12,12 +12,33 @@ import {
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
+interface IpcResult<T = void> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
 const safeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> => {
   try {
     return await invoke<T>(cmd, args);
   } catch (err) {
     console.warn(`[Tauri IPC fallback] Failed to invoke '${cmd}':`, err);
     return null;
+  }
+};
+
+const safeInvokeWithResult = async <T = void>(
+  cmd: string,
+  args?: Record<string, unknown>
+): Promise<IpcResult<T>> => {
+  try {
+    const data = await invoke<T>(cmd, args);
+    return { success: true, data };
+  } catch (err) {
+    const error =
+      typeof err === 'string' ? err : err instanceof Error ? err.message : String(err);
+    console.warn(`[Tauri IPC] Failed to invoke '${cmd}':`, error);
+    return { success: false, error };
   }
 };
 
@@ -58,11 +79,11 @@ interface TaskState {
     issueNumber: number,
     reason?: string,
     duplicateOf?: number
-  ) => Promise<boolean>;
+  ) => Promise<{ success: boolean; error?: string }>;
   deleteGitHubIssuePermanentlyOnRemote: (
     repo: string,
     issueNumber: number
-  ) => Promise<boolean>;
+  ) => Promise<{ success: boolean; error?: string }>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -138,12 +159,12 @@ export const useTaskStore = create<TaskState>()(
         const task = prevTasks.find((t) => t.id === taskId);
         if (task && task.source === 'google_tasks' && task.sourceMeta?.listId) {
           const rawId = task.id.replace(/^gt_/, '');
-          safeInvoke<void>('update_google_task', {
+          safeInvokeWithResult<void>('update_google_task', {
             taskId: rawId,
             listId: task.sourceMeta.listId,
             newStatus: targetStatus,
           }).then((res) => {
-            if (res === null) {
+            if (!res.success) {
               console.warn(`[Sync] Background update failed for Google Task ${rawId}. Reverting...`);
               set({ tasks: prevTasks });
             }
@@ -166,14 +187,14 @@ export const useTaskStore = create<TaskState>()(
             const opposingLabel =
               targetStatus === 'in_progress' ? settings.todoLabel : settings.inProgressLabel;
 
-            safeInvoke<void>('update_github_issue_labels', {
+            safeInvokeWithResult<void>('update_github_issue_labels', {
               repo: task.sourceMeta.repo,
               issueNumber: task.sourceMeta.issueNumber,
               targetLabel: targetLabel.trim() || null,
               opposingLabel: opposingLabel.trim() || null,
               postCommentFallback: settings.postCommentsFallback,
             }).then((res) => {
-              if (res === null) {
+              if (!res.success) {
                 console.warn(
                   `[Sync] Background label update failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
                 );
@@ -242,21 +263,19 @@ export const useTaskStore = create<TaskState>()(
       dismissLocallyDeletedTip: () => set({ hasSeenLocallyDeletedTip: true }),
 
       closeGitHubIssueOnRemote: async (repo, issueNumber, reason, duplicateOf) => {
-        const res = await safeInvoke<void>('close_github_issue', {
+        return await safeInvokeWithResult<void>('close_github_issue', {
           repo,
           issueNumber,
           reason: reason || null,
           duplicateOf: duplicateOf || null,
         });
-        return res !== null;
       },
 
       deleteGitHubIssuePermanentlyOnRemote: async (repo, issueNumber) => {
-        const res = await safeInvoke<void>('delete_github_issue_permanently', {
+        return await safeInvokeWithResult<void>('delete_github_issue_permanently', {
           repo,
           issueNumber,
         });
-        return res !== null;
       },
 
       setSearchQuery: (query) => set({ searchQuery: query }),

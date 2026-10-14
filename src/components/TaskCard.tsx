@@ -108,13 +108,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
         return;
       }
       if (deletePreference.action === 'github_close' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
-        await closeGitHubIssueOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
-        deleteTaskLocally(task.id);
+        const res = await closeGitHubIssueOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
+        if (res.success) {
+          deleteTaskLocally(task.id);
+        } else {
+          openDeleteModal(task);
+        }
         return;
       }
       if (deletePreference.action === 'github_permanent' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
-        await deleteGitHubIssuePermanentlyOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
-        deleteTaskLocally(task.id);
+        const res = await deleteGitHubIssuePermanentlyOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
+        if (res.success) {
+          deleteTaskLocally(task.id);
+        } else {
+          openDeleteModal(task);
+        }
         return;
       }
     }

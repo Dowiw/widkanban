@@ -50,14 +50,14 @@ export const DeleteTaskModal: React.FC = () => {
       chosenAction = 'github_close';
       if (repo && issueNumber) {
         const dupNum = isDuplicate && duplicateNumber.trim() ? parseInt(duplicateNumber.trim(), 10) : undefined;
-        const success = await closeGitHubIssueOnRemote(
+        const res = await closeGitHubIssueOnRemote(
           repo,
           issueNumber,
           reason.trim() || undefined,
           isNaN(dupNum as number) ? undefined : dupNum
         );
-        if (!success) {
-          setErrorMessage(`Failed to close issue ${repo}#${issueNumber} on GitHub. Check permissions.`);
+        if (!res.success) {
+          setErrorMessage(res.error || `Failed to close issue ${repo}#${issueNumber} on GitHub.`);
           setIsSubmitting(false);
           return;
         }
@@ -66,10 +66,11 @@ export const DeleteTaskModal: React.FC = () => {
     } else {
       chosenAction = 'github_permanent';
       if (repo && issueNumber) {
-        const success = await deleteGitHubIssuePermanentlyOnRemote(repo, issueNumber);
-        if (!success) {
+        const res = await deleteGitHubIssuePermanentlyOnRemote(repo, issueNumber);
+        if (!res.success) {
           setErrorMessage(
-            `Failed to permanently delete ${repo}#${issueNumber}. You must have Repository Admin/Owner permissions.`
+            res.error ||
+              `Failed to permanently delete ${repo}#${issueNumber}. You must have Repository Admin/Owner permissions.`
           );
           setIsSubmitting(false);
           return;

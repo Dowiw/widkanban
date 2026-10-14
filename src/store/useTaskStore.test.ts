@@ -513,7 +513,7 @@ describe('useTaskStore', () => {
     mockInvoke.mockResolvedValueOnce(null);
 
     const { closeGitHubIssueOnRemote } = useTaskStore.getState();
-    await closeGitHubIssueOnRemote('org/widkanban', 42, 'Not needed', 10);
+    const res = await closeGitHubIssueOnRemote('org/widkanban', 42, 'Not needed', 10);
 
     expect(mockInvoke).toHaveBeenCalledWith('close_github_issue', {
       repo: 'org/widkanban',
@@ -521,17 +521,19 @@ describe('useTaskStore', () => {
       reason: 'Not needed',
       duplicateOf: 10,
     });
+    expect(res.success).toBe(true);
   });
 
   it('deleteGitHubIssuePermanentlyOnRemote invokes delete_github_issue_permanently command', async () => {
     mockInvoke.mockResolvedValueOnce(null);
 
     const { deleteGitHubIssuePermanentlyOnRemote } = useTaskStore.getState();
-    await deleteGitHubIssuePermanentlyOnRemote('org/widkanban', 42);
+    const res = await deleteGitHubIssuePermanentlyOnRemote('org/widkanban', 42);
 
     expect(mockInvoke).toHaveBeenCalledWith('delete_github_issue_permanently', {
       repo: 'org/widkanban',
       issueNumber: 42,
     });
+    expect(res.success).toBe(true);
   });
 });
