@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4736 832" width="296" height="52">
   <style>
     .unifont-title {
-      fill: #0f172a;
+      fill: #64748b;
     }
     @media (prefers-color-scheme: dark) {
       .unifont-title {
-        fill: #f8fafc;
+        fill: #94a3b8;
       }
     }
   </style>
