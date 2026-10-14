@@ -18,7 +18,9 @@ import {
   ChevronUp,
   CornerDownRight,
   Check,
-  Tag
+  Tag,
+  GitBranch,
+  GitFork
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -297,6 +299,52 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
               </span>
             )}
 
+            {/* PR Branch Comparison Chip */}
+            {task.sourceMeta?.branchInfo && (
+              <span
+                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-mono truncate max-w-[150px]"
+                title={`Comparing ${task.sourceMeta.branchInfo.headRef} into ${task.sourceMeta.branchInfo.baseRef}`}
+              >
+                <GitBranch className="h-2.5 w-2.5 text-purple-600 shrink-0" />
+                <span className="truncate">{task.sourceMeta.branchInfo.headRef}</span>
+                <span className="text-purple-400 font-sans">→</span>
+                <span className="truncate">{task.sourceMeta.branchInfo.baseRef}</span>
+              </span>
+            )}
+
+            {/* PR Draft Badge */}
+            {task.sourceMeta?.branchInfo?.isDraft && (
+              <span className="px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-medium">
+                Draft
+              </span>
+            )}
+
+            {/* PR Fork Badge */}
+            {task.sourceMeta?.branchInfo?.isFork && task.sourceMeta.branchInfo.headRepo && (
+              <span
+                className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] truncate max-w-[100px]"
+                title={`From fork: ${task.sourceMeta.branchInfo.headRepo}`}
+              >
+                <GitFork className="h-2 w-2 text-amber-600 shrink-0" />
+                <span className="truncate">fork</span>
+              </span>
+            )}
+
+            {/* PR Diff Stats */}
+            {task.sourceMeta?.branchInfo &&
+              (task.sourceMeta.branchInfo.additions !== undefined ||
+                task.sourceMeta.branchInfo.deletions !== undefined) && (
+                <span className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-slate-50 border border-slate-200 font-mono text-[9px]">
+                  <span className="text-emerald-600 font-medium">
+                    +{task.sourceMeta.branchInfo.additions || 0}
+                  </span>
+                  <span className="text-slate-300">/</span>
+                  <span className="text-rose-600 font-medium">
+                    -{task.sourceMeta.branchInfo.deletions || 0}
+                  </span>
+                </span>
+              )}
+
             {/* Assignee Avatars Stack */}
             {task.sourceMeta?.assignees && task.sourceMeta.assignees.length > 0 && (
               <div className="flex items-center -space-x-1 ml-auto shrink-0 pl-1">
@@ -368,6 +416,48 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 className="h-3.5 w-3.5 rounded-full object-cover"
               />
               <span>Opened by <strong className="text-slate-700">@{task.sourceMeta.author.login}</strong></span>
+            </div>
+          )}
+
+          {/* PR Branch Comparison Details */}
+          {isGitHub && task.sourceMeta?.branchInfo && (
+            <div className="rounded-lg bg-purple-50/70 border border-purple-200/60 p-2 text-[10.5px] text-purple-900 space-y-1">
+              <div className="flex items-center justify-between font-mono text-[10px]">
+                <span className="flex items-center space-x-1 truncate mr-1">
+                  <GitBranch className="h-3 w-3 text-purple-600 shrink-0" />
+                  <span className="font-semibold text-purple-800 truncate" title={task.sourceMeta.branchInfo.headRef}>
+                    {task.sourceMeta.branchInfo.headRef}
+                  </span>
+                  <span className="text-purple-400 shrink-0">into</span>
+                  <span className="font-semibold text-purple-800 truncate" title={task.sourceMeta.branchInfo.baseRef}>
+                    {task.sourceMeta.branchInfo.baseRef}
+                  </span>
+                </span>
+                {task.sourceMeta.branchInfo.isDraft && (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-sans font-bold shrink-0">
+                    Draft PR
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between text-[9.5px] text-purple-700/80 pt-1 border-t border-purple-200/40">
+                <span className="truncate">
+                  {task.sourceMeta.branchInfo.isFork
+                    ? `Fork: ${task.sourceMeta.branchInfo.headRepo}`
+                    : 'Same repository'}
+                </span>
+                <span className="shrink-0 ml-1">
+                  {task.sourceMeta.branchInfo.changedFiles !== undefined && (
+                    <span>{task.sourceMeta.branchInfo.changedFiles} files · </span>
+                  )}
+                  <span className="text-emerald-700 font-mono font-medium">
+                    +{task.sourceMeta.branchInfo.additions || 0}
+                  </span>
+                  {' / '}
+                  <span className="text-rose-700 font-mono font-medium">
+                    -{task.sourceMeta.branchInfo.deletions || 0}
+                  </span>
+                </span>
+              </div>
             </div>
           )}
 

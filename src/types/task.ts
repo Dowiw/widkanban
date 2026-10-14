@@ -24,6 +24,17 @@ export interface SubtaskItem {
   status: TaskStatus;
 }
 
+export interface PRBranchInfo {
+  headRef: string;          // e.g. "feat/smart-due-date"
+  baseRef: string;          // e.g. "main"
+  isFork?: boolean;         // true if head repo is an external fork
+  headRepo?: string;        // e.g. "contributor/widkanban"
+  isDraft?: boolean;        // true if draft PR
+  additions?: number;       // e.g. 142
+  deletions?: number;       // e.g. 38
+  changedFiles?: number;    // e.g. 4
+}
+
 export interface UnifiedTask {
   id: string;             // e.g., 'gh_102' or 'gt_abc123'
   title: string;
@@ -57,6 +68,7 @@ export interface UnifiedTask {
     author?: TaskUser;
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
+    branchInfo?: PRBranchInfo;
   };
 }
 

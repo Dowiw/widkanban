@@ -58,6 +58,24 @@ pub struct SubtaskItem {
     pub status: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct PRBranchInfo {
+    #[serde(rename = "headRef")]
+    pub head_ref: String,
+    #[serde(rename = "baseRef")]
+    pub base_ref: String,
+    #[serde(rename = "isFork")]
+    pub is_fork: Option<bool>,
+    #[serde(rename = "headRepo")]
+    pub head_repo: Option<String>,
+    #[serde(rename = "isDraft")]
+    pub is_draft: Option<bool>,
+    pub additions: Option<u64>,
+    pub deletions: Option<u64>,
+    #[serde(rename = "changedFiles")]
+    pub changed_files: Option<u64>,
+}
+
 // ─── UnifiedTask (mirrored for Rust serialization) ──────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -73,6 +91,8 @@ pub struct SourceMeta {
     pub milestone: Option<TaskMilestone>,
     pub author: Option<TaskUser>,
     pub assignees: Option<Vec<TaskUser>>,
+    #[serde(rename = "branchInfo")]
+    pub branch_info: Option<PRBranchInfo>,
     #[serde(rename = "listId")]
     pub list_id: Option<String>,
     #[serde(rename = "listTitle")]
@@ -174,7 +194,31 @@ struct GHMilestone {
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 struct GHPullRequestRef {
+    url: Option<String>,
     html_url: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GHRepoRef {
+    full_name: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+struct GHBranchRef {
+    r#ref: String,
+    label: Option<String>,
+    repo: Option<GHRepoRef>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GHPullDetail {
+    head: Option<GHBranchRef>,
+    base: Option<GHBranchRef>,
+    draft: Option<bool>,
+    additions: Option<u64>,
+    deletions: Option<u64>,
+    changed_files: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -530,6 +574,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 milestone: None,
                 author: None,
                 assignees: None,
+                branch_info: None,
                 list_id: Some(entry.list_id),
                 list_title: Some(entry.list_title),
                 notes: task.notes,
@@ -617,6 +662,66 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             due_on: m.due_on,
         });
 
+        // If this issue is a pull request with an API URL, fetch branch and diff comparison info
+        let mut branch_info: Option<PRBranchInfo> = None;
+        if let Some(ref pr_ref) = issue.pull_request {
+            if let Some(ref pr_url) = pr_ref.url {
+                let pr_resp = client
+                    .get(pr_url)
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .bearer_auth(&token)
+                    .send()
+                    .await;
+
+                if let Ok(resp) = pr_resp {
+                    if resp.status().is_success() {
+                        if let Ok(pr_detail) = resp.json::<GHPullDetail>().await {
+                            let head_ref = pr_detail
+                                .head
+                                .as_ref()
+                                .map(|h| h.r#ref.clone())
+                                .unwrap_or_default();
+                            let base_ref = pr_detail
+                                .base
+                                .as_ref()
+                                .map(|b| b.r#ref.clone())
+                                .unwrap_or_else(|| "main".to_string());
+
+                            let head_repo = pr_detail
+                                .head
+                                .as_ref()
+                                .and_then(|h| h.repo.as_ref())
+                                .and_then(|r| r.full_name.clone());
+                            let base_repo = pr_detail
+                                .base
+                                .as_ref()
+                                .and_then(|b| b.repo.as_ref())
+                                .and_then(|r| r.full_name.clone());
+
+                            let is_fork = match (&head_repo, &base_repo) {
+                                (Some(h), Some(b)) => Some(h != b),
+                                _ => None,
+                            };
+
+                            if !head_ref.is_empty() {
+                                branch_info = Some(PRBranchInfo {
+                                    head_ref,
+                                    base_ref,
+                                    is_fork,
+                                    head_repo,
+                                    is_draft: pr_detail.draft,
+                                    additions: pr_detail.additions,
+                                    deletions: pr_detail.deletions,
+                                    changed_files: pr_detail.changed_files,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         unified_tasks.push(UnifiedTask {
             id: format!("gh_{}", issue.id),
             title: issue.title,
@@ -634,6 +739,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 milestone,
                 author,
                 assignees,
+                branch_info,
                 list_id: None,
                 list_title: None,
                 notes: None,
@@ -916,5 +1022,23 @@ mod tests {
         assert!(is_leap(2024));
         assert!(!is_leap(1900));
         assert!(!is_leap(2023));
+    }
+
+    #[test]
+    fn test_pr_branch_info_serialization() {
+        let branch = PRBranchInfo {
+            head_ref: "feature/auth".to_string(),
+            base_ref: "main".to_string(),
+            is_fork: Some(true),
+            head_repo: Some("contributor/widkanban".to_string()),
+            is_draft: Some(false),
+            additions: Some(150),
+            deletions: Some(40),
+            changed_files: Some(5),
+        };
+        let serialized = serde_json::to_string(&branch).expect("Failed to serialize PRBranchInfo");
+        let deserialized: PRBranchInfo =
+            serde_json::from_str(&serialized).expect("Failed to deserialize PRBranchInfo");
+        assert_eq!(branch, deserialized);
     }
 }

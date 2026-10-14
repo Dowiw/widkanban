@@ -221,7 +221,15 @@ describe('useTaskStore', () => {
         issueNumber: 777,
         isPullRequest: true,
         commentsCount: 5,
-        labels: [{ name: 'feature', color: 'a2eeef' }],
+        branchInfo: {
+          headRef: 'feat/oauth',
+          baseRef: 'main',
+          isFork: false,
+          isDraft: false,
+          additions: 120,
+          deletions: 30,
+          changedFiles: 3,
+        },
       },
     };
 
@@ -232,6 +240,7 @@ describe('useTaskStore', () => {
 
     const tasks = useTaskStore.getState().tasks;
     expect(tasks.some((t) => t.id === 'gh_fresh_777')).toBe(true);
+    expect(tasks.find((t) => t.id === 'gh_fresh_777')?.sourceMeta.branchInfo?.headRef).toBe('feat/oauth');
     // Google tasks must still be present
     expect(tasks.some((t) => t.id === 'gt_201')).toBe(true);
   });
