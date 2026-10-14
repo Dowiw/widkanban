@@ -79,10 +79,14 @@ sudo apt-get install -y \
 
 ---
 
-## Documentation
+## Documentation & Contributing
 
 Comprehensive project documentation is available in the [`docs/`](./docs/) directory:
 
+- [Credentials Setup Guide](./docs/credentials-setup.md): Obtaining GitHub & Google Tasks tokens, including **ephemeral test tokens for contributors** (no Google Cloud project required).
 - [Architecture Specification](./docs/architecture.md): Data schema, security model, and Rust IPC bridge.
 - [Developer Notes](./docs/notes.md): System dependencies, frameless window behavior, and troubleshooting.
 - [Roadmap & TODOs](./docs/todos.md): Milestone progress and feature breakdown for upcoming phases.
+
+> [!TIP]
+> **Contributors Testing Live Sync**: You do not need to register a Google Cloud OAuth app to test Google Tasks integration. You can generate a 1-hour temporary test token in 60 seconds using the [Google OAuth Playground](https://developers.google.com/oauthplayground) with scope `https://www.googleapis.com/auth/tasks` as explained in the [Credentials Setup Guide](./docs/credentials-setup.md#%EF%B8%8F-contributor-quick-start-fast-testing-with-short-lived-keys).

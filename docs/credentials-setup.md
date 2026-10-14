@@ -9,10 +9,30 @@ This guide explains exactly what credentials WidKanban needs, why they are requi
 
 ## Summary of Required Credentials
 
-| Provider | Credential Type | Required For |
-|---|---|---|
-| **GitHub** | Personal Access Token (PAT) — classic or fine-grained | Fetching assigned issues & PRs, updating status via labels, closing issues |
-| **Google Tasks** | OAuth 2.0 Access Token (`ya29.…`) | Fetching task lists and items, syncing task completion status |
+| Provider | Credential Type | Lifespan / Mode | Required For |
+|---|---|---|---|
+| **GitHub** | Personal Access Token (PAT) | 7–90 days (configurable) | Fetching assigned issues & PRs, updating status via labels, closing issues |
+| **Google Tasks** | OAuth 2.0 Access Token (`ya29.…`) | 1 hour (ephemeral) or refreshed | Fetching task lists and items, syncing task completion status |
+
+---
+
+## 🛠️ Contributor Quick-Start: Fast Testing with Short-Lived Keys
+
+If you are a **contributor or developer** testing features, bug fixes, or PRs, **you do not need to set up a production Google Cloud project or create permanent credentials**:
+
+### 1. Google Tasks (1-hour Ephemeral Token — No Cloud Setup Required)
+- You can obtain a working token in under 60 seconds without creating any Google Cloud Console projects, OAuth consent screens, or client IDs.
+- Follow **[Option A: Google OAuth Playground](#option-a--google-oauth-playground-recommended-for-contributors--testing)** below.
+- This produces a temporary access token (`ya29.…`) that **automatically expires after 1 hour**.
+- It is ideal for local testing, debugging sync logic, and running manual acceptance tests without leaving long-lived credentials on your development machine.
+
+### 2. GitHub (Short-Lived & Scoped Test Token)
+- For testing GitHub integration, generate a fine-grained PAT with a **7-day expiration** and access restricted only to a test/sandbox repository.
+- Follow **[Fine-Grained PAT instructions](#how-to-create-a-fine-grained-pat-recommended)** below.
+
+### 3. Cleaning Up After Testing
+- In the widget header, click **Settings (⚙)** and click **"Disconnect"** on the provider.
+- This immediately deletes the token from your local `credentials.json` file.
 
 ---
 
@@ -85,7 +105,7 @@ WidKanban connects to the Google Tasks REST API using an **OAuth 2.0 access toke
 |---|---|
 | `https://www.googleapis.com/auth/tasks` | Full read/write access to your Google Tasks (required to mark tasks complete and update status) |
 
-### Option A — Google OAuth Playground *(easiest, for personal use)*
+### Option A — Google OAuth Playground *(Recommended for Contributors & Testing)*
 
 1. Open the [Google OAuth Playground](https://developers.google.com/oauthplayground).
 2. In the **Step 1** panel on the left, find **"Tasks API v1"** and select:
@@ -143,6 +163,6 @@ On Unix/macOS the file permissions are set to `600` (only your user account can 
 - In WidKanban Settings, click **"Disconnect GitHub"** to clear the stored token.
 - You should also delete the PAT from GitHub at https://github.com/settings/tokens to fully revoke API access.
 
-### Google Tasks *(Phase 3)*
+### Google Tasks
 - In WidKanban Settings, click **"Disconnect Google Tasks"**.
 - To fully revoke, visit https://myaccount.google.com/permissions and remove WidKanban from the list of connected apps.
