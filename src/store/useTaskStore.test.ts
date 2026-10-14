@@ -305,4 +305,133 @@ describe('useTaskStore', () => {
     const googleTasks = tasks.filter((t) => t.source === 'google_tasks');
     expect(googleTasks.length).toBeGreaterThan(0);
   });
+
+  it('fires update_github_issue_labels IPC when moving GitHub issue between todo and in_progress', () => {
+    mockInvoke.mockClear();
+    const { addTask, moveTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'GitHub label sync test',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/105',
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 105 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+
+    // Move to in_progress
+    moveTask(added.id, 'in_progress');
+
+    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
+      repo: 'org/widkanban',
+      issueNumber: 105,
+      targetLabel: 'in-progress',
+      opposingLabel: 'to-do',
+      postCommentFallback: false,
+    });
+
+    mockInvoke.mockClear();
+
+    // Move back to todo
+    moveTask(added.id, 'todo');
+
+    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
+      repo: 'org/widkanban',
+      issueNumber: 105,
+      targetLabel: 'to-do',
+      opposingLabel: 'in-progress',
+      postCommentFallback: false,
+    });
+  });
+
+  it('does NOT call update_github_issue_labels when moving GitHub issue to done (Done is strictly local)', () => {
+    mockInvoke.mockClear();
+    const { addTask, moveTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'GitHub done safety test',
+      source: 'github',
+      status: 'in_progress',
+      url: 'https://github.com/org/widkanban/issues/106',
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 106 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+
+    // Moving to done
+    moveTask(added.id, 'done');
+
+    // State updated locally
+    const task = useTaskStore.getState().tasks.find((t) => t.id === added.id);
+    expect(task?.status).toBe('done');
+
+    // Never calls GitHub writeback!
+    const githubLabelCalls = mockInvoke.mock.calls.filter(
+      (call) => call[0] === 'update_github_issue_labels'
+    );
+    expect(githubLabelCalls).toHaveLength(0);
+  });
+
+  it('does NOT call update_github_issue_labels when manageLabels is disabled', () => {
+    mockInvoke.mockClear();
+    const { addTask, moveTask, setGithubSyncSettings } = useTaskStore.getState();
+
+    setGithubSyncSettings({ manageLabels: false });
+
+    addTask({
+      title: 'GitHub manageLabels disabled test',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/107',
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 107 },
+    });
+
+    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    moveTask(added.id, 'in_progress');
+
+    const githubLabelCalls = mockInvoke.mock.calls.filter(
+      (call) => call[0] === 'update_github_issue_labels'
+    );
+    expect(githubLabelCalls).toHaveLength(0);
+  });
+
+  it('saveCredentials triggers isGithubSetupOpen on first GitHub connection', async () => {
+    mockInvoke.mockResolvedValueOnce({ has_github: true, has_google: false });
+
+    useTaskStore.setState({
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        postCommentsFallback: false,
+        hasPromptedSetup: false,
+      },
+      isGithubSetupOpen: false,
+    });
+
+    const { saveCredentials } = useTaskStore.getState();
+    await saveCredentials({ githubToken: 'ghp_sample123' });
+
+    expect(useTaskStore.getState().isGithubSetupOpen).toBe(true);
+  });
+
+  it('setupRepoLabels invokes setup_github_repo_labels command with configured labels', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      repo: 'org/widkanban',
+      actualTodoLabel: 'to-do',
+      actualInProgressLabel: 'in-progress',
+      createdLabels: ['to-do'],
+    });
+
+    const { setupRepoLabels } = useTaskStore.getState();
+    const res = await setupRepoLabels('org/widkanban');
+
+    expect(mockInvoke).toHaveBeenCalledWith('setup_github_repo_labels', {
+      repo: 'org/widkanban',
+      todoLabel: 'to-do',
+      inProgressLabel: 'in-progress',
+    });
+    expect(res?.createdLabels).toEqual(['to-do']);
+  });
 });

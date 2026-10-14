@@ -76,3 +76,19 @@ export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
 }
+
+export interface GitHubSyncSettings {
+  manageLabels: boolean;             // Master toggle for repo label management
+  todoLabel: string;                 // Default "to-do" (empty for no label)
+  inProgressLabel: string;           // Default "in-progress" (empty for no label)
+  postCommentsFallback: boolean;     // Opt-in comment fallback when labels cannot be applied
+  hasPromptedSetup: boolean;         // Tracks whether first-time setup dialog was shown
+}
+
+export interface RepoLabelsResult {
+  repo: string;
+  actualTodoLabel: string;
+  actualInProgressLabel: string;
+  createdLabels: string[];
+}
+

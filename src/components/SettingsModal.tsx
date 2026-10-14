@@ -11,13 +11,15 @@ import {
   Trash2,
   ExternalLink,
   ShieldCheck,
-  RefreshCw
+  RefreshCw,
+  Tag
 } from 'lucide-react';
 
 export const SettingsModal: React.FC = () => {
   const { 
     isSettingsOpen, 
     setSettingsOpen, 
+    setGithubSetupOpen,
     authStatus, 
     saveCredentials, 
     clearCredentials,
@@ -184,6 +186,22 @@ export const SettingsModal: React.FC = () => {
                 <ExternalLink className="h-2.5 w-2.5" />
               </a>
             </div>
+
+            {authStatus.has_github && (
+              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                <span className="text-[11px] text-slate-600 flex items-center space-x-1">
+                  <Tag className="h-3 w-3 text-slate-400" />
+                  <span>Issue Labels Sync</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGithubSetupOpen(true)}
+                  className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
+                >
+                  Configure Labels →
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Google Tasks OAuth Access Token Section */}

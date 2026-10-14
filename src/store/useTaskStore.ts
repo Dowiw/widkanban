@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import { UnifiedTask, TaskStatus, TaskSource, AuthStatus } from '../types/task';
+import {
+  UnifiedTask,
+  TaskStatus,
+  TaskSource,
+  AuthStatus,
+  GitHubSyncSettings,
+  RepoLabelsResult,
+} from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
 const safeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> => {
@@ -20,8 +27,10 @@ interface TaskState {
   isPinned: boolean;
   isAddTaskOpen: boolean;
   isSettingsOpen: boolean;
+  isGithubSetupOpen: boolean;
   hasCompletedOnboarding: boolean;
   authStatus: AuthStatus;
+  githubSyncSettings: GitHubSyncSettings;
 
   // Actions
   moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
@@ -32,7 +41,10 @@ interface TaskState {
   togglePin: () => void;
   setAddTaskOpen: (isOpen: boolean) => void;
   setSettingsOpen: (isOpen: boolean) => void;
+  setGithubSetupOpen: (isOpen: boolean) => void;
   setCompletedOnboarding: (completed: boolean) => void;
+  setGithubSyncSettings: (settings: Partial<GitHubSyncSettings>) => void;
+  setupRepoLabels: (repo: string) => Promise<RepoLabelsResult | null>;
   refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
@@ -50,10 +62,18 @@ export const useTaskStore = create<TaskState>()(
       isPinned: true,
       isAddTaskOpen: false,
       isSettingsOpen: false,
+      isGithubSetupOpen: false,
       hasCompletedOnboarding: false,
       authStatus: {
         has_github: false,
         has_google: false,
+      },
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        postCommentsFallback: false,
+        hasPromptedSetup: false,
       },
 
       moveTask: (taskId, targetStatus, targetIndex) => {
@@ -97,6 +117,39 @@ export const useTaskStore = create<TaskState>()(
             }
           });
         }
+
+        // --- Background write-back for GitHub Tasks (To-Do <-> In-Progress only; Done remains strictly local) ---
+        if (
+          task &&
+          task.source === 'github' &&
+          task.sourceMeta?.repo &&
+          task.sourceMeta?.issueNumber &&
+          (targetStatus === 'todo' || targetStatus === 'in_progress') &&
+          (task.status === 'todo' || task.status === 'in_progress')
+        ) {
+          const settings = get().githubSyncSettings;
+          if (settings.manageLabels) {
+            const targetLabel =
+              targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
+            const opposingLabel =
+              targetStatus === 'in_progress' ? settings.todoLabel : settings.inProgressLabel;
+
+            safeInvoke<void>('update_github_issue_labels', {
+              repo: task.sourceMeta.repo,
+              issueNumber: task.sourceMeta.issueNumber,
+              targetLabel: targetLabel.trim() || null,
+              opposingLabel: opposingLabel.trim() || null,
+              postCommentFallback: settings.postCommentsFallback,
+            }).then((res) => {
+              if (res === null) {
+                console.warn(
+                  `[Sync] Background label update failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
+                );
+                set({ tasks: prevTasks });
+              }
+            });
+          }
+        }
       },
 
       addTask: (newTaskData) => {
@@ -123,7 +176,21 @@ export const useTaskStore = create<TaskState>()(
       togglePin: () => set((state) => ({ isPinned: !state.isPinned })),
       setAddTaskOpen: (isOpen) => set({ isAddTaskOpen: isOpen }),
       setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setGithubSetupOpen: (isOpen) => set({ isGithubSetupOpen: isOpen }),
       setCompletedOnboarding: (completed) => set({ hasCompletedOnboarding: completed }),
+      setGithubSyncSettings: (settings) =>
+        set((state) => ({
+          githubSyncSettings: { ...state.githubSyncSettings, ...settings },
+        })),
+
+      setupRepoLabels: async (repo: string) => {
+        const settings = get().githubSyncSettings;
+        return await safeInvoke<RepoLabelsResult>('setup_github_repo_labels', {
+          repo,
+          todoLabel: settings.todoLabel,
+          inProgressLabel: settings.inProgressLabel,
+        });
+      },
 
       refreshTasks: async () => {
         const status = await get().checkAuthStatus();
@@ -168,7 +235,15 @@ export const useTaskStore = create<TaskState>()(
           googleToken: googleToken || null,
         });
         if (res) {
-          set({ authStatus: res, hasCompletedOnboarding: true });
+          const isFirstGithubConnect =
+            res.has_github && !get().githubSyncSettings.hasPromptedSetup;
+
+          set({
+            authStatus: res,
+            hasCompletedOnboarding: true,
+            isGithubSetupOpen: isFirstGithubConnect ? true : get().isGithubSetupOpen,
+          });
+
           const syncs: Promise<void>[] = [];
           if (res.has_google) syncs.push(get().fetchGoogleTasks());
           if (res.has_github) syncs.push(get().fetchGithubTasks());
@@ -209,6 +284,7 @@ export const useTaskStore = create<TaskState>()(
         filterSource: state.filterSource,
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
+        githubSyncSettings: state.githubSyncSettings,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
@@ -216,6 +292,12 @@ export const useTaskStore = create<TaskState>()(
           merged.tasks = merged.tasks.filter(
             (t) => !['gh_101', 'gh_102', 'gh_103'].includes(t.id)
           );
+        }
+        if ((persistedState as Partial<TaskState>)?.githubSyncSettings) {
+          merged.githubSyncSettings = {
+            ...currentState.githubSyncSettings,
+            ...((persistedState as Partial<TaskState>).githubSyncSettings || {}),
+          };
         }
         return merged;
       },

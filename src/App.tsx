@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { KanbanBoard } from './components/KanbanBoard';
 import { AddTaskModal } from './components/AddTaskModal';
 import { SettingsModal } from './components/SettingsModal';
+import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { useTaskStore } from './store/useTaskStore';
 
 export const App: React.FC = () => {
@@ -24,6 +25,7 @@ export const App: React.FC = () => {
       </main>
       <AddTaskModal />
       <SettingsModal />
+      <GitHubSetupModal />
     </div>
   );
 };

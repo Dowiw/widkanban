@@ -238,6 +238,66 @@ struct GHIssue {
     pull_request: Option<GHPullRequestRef>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoLabelsResult {
+    pub repo: String,
+    pub actual_todo_label: String,
+    pub actual_in_progress_label: String,
+    pub created_labels: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct CreateLabelPayload<'a> {
+    name: &'a str,
+    color: &'a str,
+    description: &'a str,
+}
+
+#[derive(Serialize)]
+struct AddLabelsPayload<'a> {
+    labels: Vec<&'a str>,
+}
+
+#[derive(Serialize)]
+struct CreateCommentPayload<'a> {
+    body: &'a str,
+}
+
+fn url_encode(input: &str) -> String {
+    let mut encoded = String::new();
+    for b in input.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    encoded
+}
+
+fn find_matching_label(existing: &[GHLabel], target: &str, synonyms: &[&str]) -> Option<String> {
+    let target_trim = target.trim();
+    if !target_trim.is_empty() {
+        for l in existing {
+            if l.name.eq_ignore_ascii_case(target_trim) {
+                return Some(l.name.clone());
+            }
+        }
+    }
+    for syn in synonyms {
+        for l in existing {
+            if l.name.eq_ignore_ascii_case(syn) {
+                return Some(l.name.clone());
+            }
+        }
+    }
+    None
+}
+
 // ─── Credential File Helpers ─────────────────────────────────────────────────
 
 fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -798,6 +858,241 @@ async fn update_google_task(
     Ok(())
 }
 
+/// Discover or create To-Do and In-Progress labels on a GitHub repository.
+#[tauri::command]
+async fn setup_github_repo_labels(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    todo_label: String,
+    in_progress_label: String,
+) -> Result<RepoLabelsResult, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // 1. Fetch existing labels for repository
+    let labels_url = format!("https://api.github.com/repos/{}/labels?per_page=100", repo);
+    let resp = client
+        .get(&labels_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch labels for {}: {}", repo, e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error fetching labels for {} ({}): {}", repo, status, body));
+    }
+
+    let existing_labels: Vec<GHLabel> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse labels response for {}: {}", repo, e))?;
+
+    let todo_synonyms = &["to-do", "todo", "to do"];
+    let in_progress_synonyms = &["in-progress", "in progress", "in_progress", "doing", "wip"];
+
+    let mut created_labels: Vec<String> = Vec::new();
+
+    // 2. Resolve To-Do label
+    let todo_trim = todo_label.trim();
+    let mut actual_todo_label = String::new();
+    if !todo_trim.is_empty() {
+        if let Some(matched) = find_matching_label(&existing_labels, todo_trim, todo_synonyms) {
+            actual_todo_label = matched;
+        } else {
+            let payload = CreateLabelPayload {
+                name: todo_trim,
+                color: "0075ca",
+                description: "Tasks ready to be worked on (managed by WidKanban)",
+            };
+            let create_resp = client
+                .post(format!("https://api.github.com/repos/{}/labels", repo))
+                .header("User-Agent", "WidKanban-Desktop")
+                .header("Accept", "application/vnd.github.v3+json")
+                .bearer_auth(&token)
+                .json(&payload)
+                .send()
+                .await;
+
+            match create_resp {
+                Ok(res) if res.status().is_success() => {
+                    created_labels.push(todo_trim.to_string());
+                    actual_todo_label = todo_trim.to_string();
+                }
+                Ok(res) if res.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                    // Already exists (concurrent creation or subtle case discrepancy)
+                    actual_todo_label = todo_trim.to_string();
+                }
+                Ok(res) => {
+                    let status = res.status();
+                    let body = res.text().await.unwrap_or_default();
+                    return Err(format!("Failed to create label '{}' on {}: {} - {}", todo_trim, repo, status, body));
+                }
+                Err(e) => return Err(format!("Network error creating label '{}': {}", todo_trim, e)),
+            }
+        }
+    }
+
+    // 3. Resolve In-Progress label
+    let in_progress_trim = in_progress_label.trim();
+    let mut actual_in_progress_label = String::new();
+    if !in_progress_trim.is_empty() {
+        if let Some(matched) = find_matching_label(&existing_labels, in_progress_trim, in_progress_synonyms) {
+            actual_in_progress_label = matched;
+        } else {
+            let payload = CreateLabelPayload {
+                name: in_progress_trim,
+                color: "d93f0b",
+                description: "Work currently in progress (managed by WidKanban)",
+            };
+            let create_resp = client
+                .post(format!("https://api.github.com/repos/{}/labels", repo))
+                .header("User-Agent", "WidKanban-Desktop")
+                .header("Accept", "application/vnd.github.v3+json")
+                .bearer_auth(&token)
+                .json(&payload)
+                .send()
+                .await;
+
+            match create_resp {
+                Ok(res) if res.status().is_success() => {
+                    created_labels.push(in_progress_trim.to_string());
+                    actual_in_progress_label = in_progress_trim.to_string();
+                }
+                Ok(res) if res.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                    actual_in_progress_label = in_progress_trim.to_string();
+                }
+                Ok(res) => {
+                    let status = res.status();
+                    let body = res.text().await.unwrap_or_default();
+                    return Err(format!("Failed to create label '{}' on {}: {} - {}", in_progress_trim, repo, status, body));
+                }
+                Err(e) => return Err(format!("Network error creating label '{}': {}", in_progress_trim, e)),
+            }
+        }
+    }
+
+    Ok(RepoLabelsResult {
+        repo,
+        actual_todo_label,
+        actual_in_progress_label,
+        created_labels,
+    })
+}
+
+/// Update labels on a GitHub issue or pull request when moved between To-Do and In-Progress.
+#[tauri::command]
+async fn update_github_issue_labels(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    issue_number: u64,
+    target_label: Option<String>,
+    opposing_label: Option<String>,
+    post_comment_fallback: bool,
+) -> Result<(), String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // 1. Remove opposing label if specified
+    if let Some(ref opp) = opposing_label {
+        let opp_trim = opp.trim();
+        if !opp_trim.is_empty() {
+            let delete_url = format!(
+                "https://api.github.com/repos/{}/issues/{}/labels/{}",
+                repo,
+                issue_number,
+                url_encode(opp_trim)
+            );
+            let _ = client
+                .delete(&delete_url)
+                .header("User-Agent", "WidKanban-Desktop")
+                .header("Accept", "application/vnd.github.v3+json")
+                .bearer_auth(&token)
+                .send()
+                .await;
+        }
+    }
+
+    // 2. Add target label if specified
+    let target_trim = target_label.as_deref().unwrap_or("").trim();
+    if !target_trim.is_empty() {
+        let add_url = format!("https://api.github.com/repos/{}/issues/{}/labels", repo, issue_number);
+        let payload = AddLabelsPayload {
+            labels: vec![target_trim],
+        };
+        let add_resp = client
+            .post(&add_url)
+            .header("User-Agent", "WidKanban-Desktop")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(&token)
+            .json(&payload)
+            .send()
+            .await;
+
+        let add_failed = match add_resp {
+            Ok(ref resp) => !resp.status().is_success(),
+            Err(_) => true,
+        };
+
+        if add_failed {
+            if post_comment_fallback {
+                // Attempt comment fallback
+                let comment_url = format!(
+                    "https://api.github.com/repos/{}/issues/{}/comments",
+                    repo, issue_number
+                );
+                let comment_body = format!(
+                    "Task status updated to **{}** via WidKanban widget.",
+                    target_trim
+                );
+                let comment_payload = CreateCommentPayload {
+                    body: &comment_body,
+                };
+                let comment_resp = client
+                    .post(&comment_url)
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .bearer_auth(&token)
+                    .json(&comment_payload)
+                    .send()
+                    .await;
+
+                if let Ok(c_resp) = comment_resp {
+                    if c_resp.status().is_success() {
+                        return Ok(());
+                    }
+                }
+            }
+
+            return Err(format!(
+                "Failed to apply label '{}' to {}#{}",
+                target_trim, repo, issue_number
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
 fn chrono_now_iso() -> String {
@@ -863,6 +1158,8 @@ pub fn run() {
             fetch_google_tasks,
             fetch_github_tasks,
             update_google_task,
+            setup_github_repo_labels,
+            update_github_issue_labels,
         ])
         .setup(|app| {
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
@@ -1041,4 +1338,65 @@ mod tests {
             serde_json::from_str(&serialized).expect("Failed to deserialize PRBranchInfo");
         assert_eq!(branch, deserialized);
     }
+
+    #[test]
+    fn test_url_encode() {
+        assert_eq!(url_encode("in-progress"), "in-progress");
+        assert_eq!(url_encode("To Do"), "To%20Do");
+        assert_eq!(url_encode("status:wip"), "status%3Awip");
+    }
+
+    #[test]
+    fn test_find_matching_label() {
+        let existing = vec![
+            GHLabel {
+                name: "TODO".to_string(),
+                color: "000".to_string(),
+                description: None,
+            },
+            GHLabel {
+                name: "In Progress".to_string(),
+                color: "111".to_string(),
+                description: None,
+            },
+        ];
+
+        let todo_synonyms = &["to-do", "todo", "to do"];
+        let in_progress_synonyms = &["in-progress", "in progress", "wip", "doing"];
+
+        // Should match existing "TODO" even though target is "to-do"
+        assert_eq!(
+            find_matching_label(&existing, "to-do", todo_synonyms),
+            Some("TODO".to_string())
+        );
+
+        // Should match existing "In Progress" with exact casing from repo
+        assert_eq!(
+            find_matching_label(&existing, "in-progress", in_progress_synonyms),
+            Some("In Progress".to_string())
+        );
+
+        // Should return None for unmatched
+        assert_eq!(
+            find_matching_label(&existing, "blocked", &["blocked", "waiting"]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_repo_labels_result_serialization() {
+        let res = RepoLabelsResult {
+            repo: "owner/repo".to_string(),
+            actual_todo_label: "TODO".to_string(),
+            actual_in_progress_label: "In Progress".to_string(),
+            created_labels: vec!["TODO".to_string()],
+        };
+        let serialized = serde_json::to_string(&res).expect("serialization failed");
+        assert!(serialized.contains("actualTodoLabel"));
+        assert!(serialized.contains("actualInProgressLabel"));
+        assert!(serialized.contains("createdLabels"));
+        let deserialized: RepoLabelsResult = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(res, deserialized);
+    }
 }
+
