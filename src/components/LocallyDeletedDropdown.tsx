@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
 import {
   Trash2,
@@ -19,10 +19,27 @@ export const LocallyDeletedDropdown: React.FC = () => {
     clearLocallyDeletedTasks,
   } = useTaskStore();
 
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close when clicking outside
+  useEffect(() => {
+    if (!isTrashDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setTrashDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isTrashDropdownOpen, setTrashDropdownOpen]);
+
   if (!isTrashDropdownOpen) return null;
 
   return (
-    <div className="absolute right-2 top-11 z-50 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-3 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+    <div 
+      ref={dropdownRef}
+      className="absolute left-0 top-8 z-50 w-72 max-w-[calc(100vw-24px)] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-3 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+    >
       {/* Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center space-x-1.5">
