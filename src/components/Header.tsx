@@ -59,7 +59,8 @@ export const Header: React.FC = () => {
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const extraToolsRef = useRef<HTMLDivElement>(null);
+  const extraToolsButtonRef = useRef<HTMLDivElement>(null);
+  const extraToolsRowRef = useRef<HTMLDivElement>(null);
 
   // Close search popover on outside click
   useEffect(() => {
@@ -85,9 +86,14 @@ export const Header: React.FC = () => {
   useEffect(() => {
     if (!showExtraTools || isToolsPinned) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (extraToolsRef.current && !extraToolsRef.current.contains(e.target as Node)) {
-        setShowExtraTools(false);
+      const target = e.target as Node;
+      if (
+        extraToolsButtonRef.current?.contains(target) ||
+        extraToolsRowRef.current?.contains(target)
+      ) {
+        return;
       }
+      setShowExtraTools(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -296,7 +302,7 @@ export const Header: React.FC = () => {
           </button>
 
           {/* More Actions (...) Button */}
-          <div ref={extraToolsRef} className="relative">
+          <div ref={extraToolsButtonRef} className="relative">
             <button
               type="button"
               onClick={() => setShowExtraTools(!showExtraTools)}
@@ -318,7 +324,10 @@ export const Header: React.FC = () => {
 
       {/* 3. Secondary Tools Row: Toggled by ... or Pinned open */}
       {(showExtraTools || isToolsPinned) && (
-        <div className="px-2.5 pb-2 pt-1 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-900/60 text-xs animate-in fade-in slide-in-from-top-1">
+        <div 
+          ref={extraToolsRowRef}
+          className="px-2.5 pb-2 pt-1 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-900/60 text-xs animate-in fade-in slide-in-from-top-1"
+        >
           <div className="flex items-center space-x-1 no-drag">
             {/* Refresh Sync */}
             <button
@@ -368,6 +377,7 @@ export const Header: React.FC = () => {
             {/* Hidden / Deleted Tasks */}
             <div className="relative">
               <button
+                data-trash-trigger="true"
                 type="button"
                 onClick={toggleTrashDropdown}
                 title={`Hidden / Deleted Tasks (${locallyDeletedTasks.length})`}

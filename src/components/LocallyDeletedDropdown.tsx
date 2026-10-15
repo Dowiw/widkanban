@@ -25,7 +25,11 @@ export const LocallyDeletedDropdown: React.FC = () => {
   useEffect(() => {
     if (!isTrashDropdownOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement;
+      if (target?.closest && target.closest('[data-trash-trigger]')) {
+        return;
+      }
+      if (dropdownRef.current && !dropdownRef.current.contains(target as Node)) {
         setTrashDropdownOpen(false);
       }
     };
