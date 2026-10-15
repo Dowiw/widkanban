@@ -22,7 +22,7 @@ export const LocallyDeletedDropdown: React.FC = () => {
   if (!isTrashDropdownOpen) return null;
 
   return (
-    <div className="absolute right-2 top-11 z-50 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-3 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+    <div className="absolute right-2 top-11 z-50 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-3 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-150">
       {/* Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center space-x-1.5">
@@ -57,7 +57,7 @@ export const LocallyDeletedDropdown: React.FC = () => {
             return (
               <div
                 key={task.id}
-                className="flex items-start justify-between p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-colors group"
+                className="flex items-start justify-between p-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors group"
               >
                 <div className="min-w-0 pr-2 space-y-0.5">
                   <div className="flex items-center space-x-1 text-[10px] text-slate-500 dark:text-slate-400">
@@ -90,7 +90,7 @@ export const LocallyDeletedDropdown: React.FC = () => {
                   type="button"
                   onClick={() => restoreLocallyDeletedTask(task.id)}
                   title="Restore to board"
-                  className="shrink-0 flex items-center space-x-1 p-1 px-1.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:border-indigo-200 dark:hover:border-indigo-500/50 hover:bg-indigo-50/50 dark:hover:bg-slate-650 shadow-2xs text-[10px] font-medium transition-all"
+                  className="shrink-0 flex items-center space-x-1 p-1 px-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-800 shadow-2xs text-[10px] font-semibold transition-all"
                 >
                   <RotateCcw className="h-2.5 w-2.5" />
                   <span>Restore</span>

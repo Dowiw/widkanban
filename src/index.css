@@ -76,8 +76,8 @@
 
 .dark .widget-glass {
   background: #0f172a;
-  border-color: #1e293b;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border-color: #243247;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
 }
 
 /* Card container styling */
@@ -94,15 +94,15 @@
 }
 
 .dark .card-glass {
-  background: #1e293b;
-  border-color: #334155;
-  color: #f1f5f9;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: #182234;
+  border-color: #2e3e57;
+  color: #f8fafc;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
 }
 
 .dark .card-glass:hover {
-  background: #243247;
-  border-color: #475569;
+  background: #1f2c42;
+  border-color: #435878;
 }
 
 /* High-speed instant drag preview overlay */

@@ -8,6 +8,10 @@ export default {
   theme: {
     extend: {
       colors: {
+        slate: {
+          750: '#243247',
+          850: '#151f32',
+        },
         github: {
           DEFAULT: '#2da44e',
           dark: '#238636',

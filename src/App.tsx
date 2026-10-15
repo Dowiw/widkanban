@@ -81,7 +81,7 @@ export const App: React.FC = () => {
       style={rootStyle}
       className={`flex flex-col h-screen w-screen overflow-hidden rounded-widget border transition-colors duration-150 shadow-xl ${fontClass} ${
         isDark
-          ? 'bg-slate-900 border-slate-700/80 text-slate-100'
+          ? 'bg-slate-950 border-slate-750 text-slate-100'
           : 'bg-white border-slate-200 text-slate-800'
       }`}
     >

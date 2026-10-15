@@ -119,12 +119,12 @@ export const GitHubSetupModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl p-4 space-y-3.5 text-slate-800 dark:text-slate-100 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-4 space-y-3.5 text-slate-800 dark:text-slate-100 max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-slate-100 dark:border-white/10 pb-3">
+        <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
-            <div className="p-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white shadow-sm border border-transparent dark:border-white/10">
+            <div className="p-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white shadow-sm border border-transparent dark:border-slate-700">
               <Github className="h-4 w-4" />
             </div>
             <div>
@@ -146,11 +146,11 @@ export const GitHubSetupModal: React.FC = () => {
         </div>
 
         {/* Master Toggle */}
-        <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-slate-800/40">
+        <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850">
           <div className="flex items-center space-x-2">
             <Tag className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             <div>
-              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">Manage Issue Labels</div>
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">Manage Issue Labels</div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400">
                 Update labels when moving between To Do & In Progress
               </div>
@@ -160,20 +160,20 @@ export const GitHubSetupModal: React.FC = () => {
             type="checkbox"
             checked={manageLabels}
             onChange={(e) => setManageLabels(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
           />
         </div>
 
         {/* Label Mapping Inputs */}
         {manageLabels && (
-          <div className="space-y-2 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-slate-800/30 p-2.5 text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300 block text-[11px]">
+          <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-2.5 text-xs">
+            <span className="font-semibold text-slate-800 dark:text-slate-200 block text-[11px]">
               Column Labels (leave blank to omit)
             </span>
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+                <label className="block text-[10px] font-medium text-slate-600 dark:text-slate-400 mb-0.5">
                   To Do Label
                 </label>
                 <input
@@ -181,12 +181,12 @@ export const GitHubSetupModal: React.FC = () => {
                   value={todoLabel}
                   onChange={(e) => setTodoLabel(e.target.value)}
                   placeholder="e.g. to-do"
-                  className="w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-white/10 py-1 px-2 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1 px-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+                <label className="block text-[10px] font-medium text-slate-600 dark:text-slate-400 mb-0.5">
                   In Progress Label
                 </label>
                 <input
@@ -194,29 +194,29 @@ export const GitHubSetupModal: React.FC = () => {
                   value={inProgressLabel}
                   onChange={(e) => setInProgressLabel(e.target.value)}
                   placeholder="e.g. in-progress"
-                  className="w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-white/10 py-1 px-2 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1 px-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
             </div>
 
             {/* Comment Fallback Opt-In */}
-            <div className="pt-1 border-t border-slate-200/60 dark:border-white/10 flex items-start space-x-2">
+            <div className="pt-1 border-t border-slate-200 dark:border-slate-750 flex items-start space-x-2">
               <input
                 type="checkbox"
                 id="comment-fallback"
                 checked={postCommentsFallback}
                 onChange={(e) => setPostCommentsFallback(e.target.checked)}
-                className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
               />
-              <label htmlFor="comment-fallback" className="text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer leading-tight">
-                <span className="font-medium text-slate-700 dark:text-slate-300">Comment fallback:</span> Post a comment if label modification fails due to repo permissions.
+              <label htmlFor="comment-fallback" className="text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer leading-tight">
+                <span className="font-semibold text-slate-800 dark:text-slate-200">Comment fallback:</span> Post a comment if label modification fails due to repo permissions.
               </label>
             </div>
           </div>
         )}
 
         {/* Protection Note */}
-        <div className="flex items-center space-x-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-500/20 p-2 text-[11px] text-emerald-800 dark:text-emerald-300">
+        <div className="flex items-center space-x-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/80 p-2 text-[11px] text-emerald-800 dark:text-emerald-300">
           <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <span>
             <strong>Done column is protected:</strong> Moving tasks to Done never alters GitHub issue status or labels.
@@ -226,7 +226,7 @@ export const GitHubSetupModal: React.FC = () => {
         {/* Discovered Repositories */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1">
+            <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-1">
               <FolderGit2 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
               <span>Assigned Repositories ({discoveredRepos.length})</span>
             </span>
@@ -239,17 +239,17 @@ export const GitHubSetupModal: React.FC = () => {
                 return (
                   <div
                     key={repo}
-                    className="flex items-center justify-between p-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800/60 text-xs"
+                    className="flex items-center justify-between p-1.5 rounded-lg border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-xs"
                   >
-                    <span className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate mr-2">
+                    <span className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate mr-2 font-medium">
                       {repo}
                     </span>
                     {res ? (
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 flex items-center space-x-1 ${
                           res.status === 'success'
-                            ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
-                            : 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300'
+                            ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+                            : 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60'
                         }`}
                         title={res.message}
                       >
@@ -266,26 +266,26 @@ export const GitHubSetupModal: React.FC = () => {
                         )}
                       </span>
                     ) : (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Ready</span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-400 font-medium">Ready</span>
                     )}
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="p-2 rounded-lg border border-dashed border-slate-200 dark:border-white/10 text-center text-[11px] text-slate-400 dark:text-slate-500">
+            <div className="p-2 rounded-lg border border-dashed border-slate-200 dark:border-slate-750 text-center text-[11px] text-slate-500 dark:text-slate-400">
               No repositories discovered yet. Settings will automatically apply to future synced issues.
             </div>
           )}
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-white/10">
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
           <button
             type="button"
             onClick={handleSaveSettingsOnly}
             disabled={isProcessing}
-            className="px-3 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition-colors"
+            className="px-3 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition-colors"
           >
             Skip / Keep Local Only
           </button>
