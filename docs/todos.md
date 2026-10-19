@@ -78,6 +78,7 @@ This document tracks completed capabilities, active milestones, and planned feat
 
 ## Future Ideas & Enhancements
 
+- **Microsoft 365 & Teams Integration** ([#3](https://github.com/Dowiw/widkanban/issues/3)): Support for Teams for Education Assignments, Microsoft Planner ("Assigned to Me"), Microsoft To Do, and Outlook Flagged Emails across personal and school/organization accounts.
 - **GitLab & Jira Integrations**: Optional adapters following the same `UnifiedTask` normalization schema.
 - **Custom Board Columns**: Allowing user-defined workflow columns beyond the default 3 columns.
 - **Offline Mode & Queue**: Queuing write-back actions during offline network states and replaying on reconnect.
