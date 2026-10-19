@@ -74,6 +74,12 @@ This document tracks completed capabilities, active milestones, and planned feat
 ### In-App OAuth Loopback Flow
 - [ ] Built-in local HTTP callback server (`http://localhost:<port>/callback`) for seamless Google sign-in without needing the OAuth Playground.
 
+### Cross-Platform OS Autostart & Persistence ([#4](https://github.com/Dowiw/widkanban/issues/4))
+- [ ] Cross-platform launch at startup (`tauri-plugin-autostart`) for Windows (Registry), macOS (LaunchAgent), and Linux (XDG Autostart).
+- [ ] User onboarding prompt asking for consent to start on boot (`[Launch on Startup]` / `[Not Now]`).
+- [ ] Settings switches for "Launch on Startup" and optional "Start Minimized to System Tray".
+- [ ] Remember and restore last dragged window placement and size on boot.
+
 ---
 
 ## Future Ideas & Enhancements
