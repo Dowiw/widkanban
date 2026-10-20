@@ -14,9 +14,10 @@ import { useTaskStore } from '../store/useTaskStore';
 import { UnifiedTask, TaskStatus } from '../types/task';
 import { Column } from './Column';
 import { TaskCard } from './TaskCard';
+import { groupTasksWithLinkedPRs } from '../utils/githubLinking';
 
 export const KanbanBoard: React.FC = () => {
-  const { tasks, moveTask, searchQuery, filterSource } = useTaskStore();
+  const { tasks, moveTask, searchQuery, filterSource, groupLinkedPRs } = useTaskStore();
   const [activeTask, setActiveTask] = useState<UnifiedTask | null>(null);
 
   // MouseSensor provides significantly higher FPS and zero input latency in Tauri/WebKit
@@ -31,7 +32,9 @@ export const KanbanBoard: React.FC = () => {
     })
   );
 
-  const filteredTasks = tasks.filter((task) => {
+  const groupedTasks = groupTasksWithLinkedPRs(tasks, groupLinkedPRs);
+
+  const filteredTasks = groupedTasks.filter((task) => {
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSource = filterSource === 'all' || task.source === filterSource;
     return matchesSearch && matchesSource;

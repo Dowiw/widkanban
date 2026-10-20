@@ -73,6 +73,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   } = useTaskStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
+  const [isPrDrawerOpen, setIsPrDrawerOpen] = useState(false);
 
   const {
     attributes,
@@ -386,6 +387,32 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 </span>
               )}
 
+            {/* Linked PR Chip */}
+            {task.sourceMeta?.linkedPR && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPrDrawerOpen(!isPrDrawerOpen);
+                }}
+                className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[9.5px] font-medium border shadow-2xs transition-all ${
+                  task.sourceMeta.linkedPR.reviewStatus === 'merged'
+                    ? 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800'
+                    : task.sourceMeta.linkedPR.reviewStatus === 'draft'
+                    ? 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300'
+                    : 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300'
+                }`}
+                title={`Linked PR #${task.sourceMeta.linkedPR.number}: Click to toggle PR drawer`}
+              >
+                <GitPullRequest className="h-2.5 w-2.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                <span className="font-semibold">PR #{task.sourceMeta.linkedPR.number}</span>
+                <span className="opacity-75 uppercase text-[8.5px]">
+                  {task.sourceMeta.linkedPR.reviewStatus || 'PR'}
+                </span>
+                <span>{isPrDrawerOpen ? '▴' : '▾'}</span>
+              </button>
+            )}
+
             {/* Assignee Avatars Stack */}
             {task.sourceMeta?.assignees && task.sourceMeta.assignees.length > 0 && (
               <div className="flex items-center -space-x-1 ml-auto shrink-0 pl-1">
@@ -403,6 +430,60 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           </>
         )}
       </div>
+
+      {/* --- EXPANDABLE LINKED PR DRAWER --- */}
+      {isPrDrawerOpen && task.sourceMeta?.linkedPR && (
+        <div className="mt-2.5 p-2 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/60 space-y-1.5 text-[11px] animate-in fade-in duration-150">
+          <div className="flex items-center justify-between pb-1 border-b border-purple-200/50 dark:border-purple-800/40">
+            <div className="flex items-center space-x-1.5 min-w-0">
+              <GitPullRequest className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+              <span className="font-semibold text-purple-900 dark:text-purple-200 truncate">
+                PR #{task.sourceMeta.linkedPR.number}: {task.sourceMeta.linkedPR.title}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => handleOpenUrl(e, task.sourceMeta?.linkedPR?.url)}
+              className="text-purple-600 dark:text-purple-400 hover:underline flex items-center space-x-0.5 text-[10px] shrink-0 ml-1"
+            >
+              <span>Open</span>
+              <ExternalLink className="h-2.5 w-2.5" />
+            </button>
+          </div>
+
+          {/* Branch Refs and Diff Stats */}
+          {task.sourceMeta.linkedPR.branchInfo && (
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800/80 font-mono text-[9.5px]">
+                <GitBranch className="h-2.5 w-2.5 text-purple-600 shrink-0" />
+                <span>{task.sourceMeta.linkedPR.branchInfo.headRef}</span>
+                <span className="text-purple-400">→</span>
+                <span>{task.sourceMeta.linkedPR.branchInfo.baseRef}</span>
+              </span>
+
+              {(task.sourceMeta.linkedPR.branchInfo.additions !== undefined ||
+                task.sourceMeta.linkedPR.branchInfo.deletions !== undefined) && (
+                <span className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-white dark:bg-slate-800 border border-purple-200 font-mono text-[9px]">
+                  <span className="text-emerald-600 font-semibold">
+                    +{task.sourceMeta.linkedPR.branchInfo.additions || 0}
+                  </span>
+                  <span className="text-slate-300">/</span>
+                  <span className="text-rose-600 font-semibold">
+                    -{task.sourceMeta.linkedPR.branchInfo.deletions || 0}
+                  </span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* PR Description Body */}
+          {task.sourceMeta.linkedPR.description && (
+            <p className="text-[10.5px] text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed whitespace-pre-wrap pt-0.5">
+              {task.sourceMeta.linkedPR.description}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* --- SUBTASKS DROPDOWN ACCORDION --- */}
       {isSubtasksOpen && task.sourceMeta?.subtasks && task.sourceMeta.subtasks.length > 0 && (

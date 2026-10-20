@@ -44,6 +44,10 @@ export const SettingsModal: React.FC = () => {
     isPinned,
     setWindowSizePreset,
     resetWindowPositionAndSize,
+    githubSyncSettings,
+    setGithubSyncSettings,
+    groupLinkedPRs,
+    setGroupLinkedPRs,
   } = useTaskStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
@@ -302,6 +306,37 @@ export const SettingsModal: React.FC = () => {
                     </a>
                   </div>
                 </div>
+
+                {/* GitHub Workflow Options */}
+                {authStatus.has_github && (
+                  <div className="pt-2.5 mt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                        When moving an Issue to Done:
+                      </label>
+                      <select
+                        value={githubSyncSettings.doneAction}
+                        onChange={(e) => setGithubSyncSettings({ doneAction: e.target.value as any })}
+                        className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="close">Always Close Issue on GitHub (Completed)</option>
+                        <option value="label">Apply 'Done' Label Only</option>
+                        <option value="local_only">Mark Done Locally Only</option>
+                        <option value="ask">Always Ask with Prompt</option>
+                      </select>
+                    </div>
+
+                    <label className="flex items-center space-x-2 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer pt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={groupLinkedPRs}
+                        onChange={(e) => setGroupLinkedPRs(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
+                      />
+                      <span>Group linked Pull Requests into primary Issue cards</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* Google Tasks OAuth Section */}

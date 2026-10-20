@@ -12,6 +12,7 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  GitHubDoneAction,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -96,6 +97,22 @@ interface TaskState {
     repo: string,
     issueNumber: number
   ) => Promise<{ success: boolean; error?: string }>;
+  setGithubIssueStateOnRemote: (
+    repo: string,
+    issueNumber: number,
+    state: 'open' | 'closed',
+    stateReason?: 'completed' | 'reopened' | 'not_planned'
+  ) => Promise<{ success: boolean; error?: string }>;
+  groupLinkedPRs: boolean;
+  setGroupLinkedPRs: (group: boolean) => void;
+  githubDoneModalTask: UnifiedTask | null;
+  openGithubDoneModal: (task: UnifiedTask) => void;
+  closeGithubDoneModal: () => void;
+  executeGitHubDoneAction: (
+    task: UnifiedTask,
+    action: GitHubDoneAction,
+    remember: boolean
+  ) => Promise<void>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -133,6 +150,8 @@ export const useTaskStore = create<TaskState>()(
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
@@ -141,6 +160,12 @@ export const useTaskStore = create<TaskState>()(
       deletePreference: null,
       hasSeenLocallyDeletedTip: false,
       isTrashDropdownOpen: false,
+
+      // GitHub Done Modal & PR Grouping
+      groupLinkedPRs: true,
+      githubDoneModalTask: null,
+      openGithubDoneModal: (task) => set({ githubDoneModalTask: task }),
+      closeGithubDoneModal: () => set({ githubDoneModalTask: null }),
 
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
@@ -160,18 +185,17 @@ export const useTaskStore = create<TaskState>()(
           const syncSettings = state.githubSyncSettings;
           if (
             movedTask.source === 'github' &&
-            syncSettings.manageLabels &&
-            (targetStatus === 'todo' || targetStatus === 'in_progress')
+            syncSettings.manageLabels
           ) {
             const currentLabels = movedTask.sourceMeta?.labels || [];
             const todoTrim = syncSettings.todoLabel.trim().toLowerCase();
             const inProgTrim = syncSettings.inProgressLabel.trim().toLowerCase();
+            const doneTrim = (syncSettings.doneLabel || 'done').trim().toLowerCase();
 
             let newLabels = [...currentLabels];
             if (targetStatus === 'in_progress') {
-              if (todoTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
-              }
+              if (todoTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
+              if (doneTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== doneTrim);
               if (inProgTrim && !newLabels.some((l) => l.name.toLowerCase() === inProgTrim)) {
                 newLabels.push({
                   name: syncSettings.inProgressLabel.trim(),
@@ -180,14 +204,23 @@ export const useTaskStore = create<TaskState>()(
                 });
               }
             } else if (targetStatus === 'todo') {
-              if (inProgTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
-              }
+              if (inProgTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
+              if (doneTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== doneTrim);
               if (todoTrim && !newLabels.some((l) => l.name.toLowerCase() === todoTrim)) {
                 newLabels.push({
                   name: syncSettings.todoLabel.trim(),
                   color: '0075ca',
                   description: 'Tasks ready to be worked on (managed by WidKanban)',
+                });
+              }
+            } else if (targetStatus === 'done') {
+              if (inProgTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
+              if (todoTrim) newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
+              if (syncSettings.doneAction === 'label' && doneTrim && !newLabels.some((l) => l.name.toLowerCase() === doneTrim)) {
+                newLabels.push({
+                  name: syncSettings.doneLabel || 'done',
+                  color: '0e8a16',
+                  description: 'Completed task (managed by WidKanban)',
                 });
               }
             }
@@ -226,36 +259,86 @@ export const useTaskStore = create<TaskState>()(
           });
         }
 
-        // --- Background write-back for GitHub Tasks (To-Do <-> In-Progress only; Done remains strictly local) ---
+        // --- Background write-back for GitHub Tasks ---
         if (
           task &&
           task.source === 'github' &&
           task.sourceMeta?.repo &&
-          task.sourceMeta?.issueNumber &&
-          (targetStatus === 'todo' || targetStatus === 'in_progress') &&
-          (task.status === 'todo' || task.status === 'in_progress')
+          task.sourceMeta?.issueNumber
         ) {
           const settings = get().githubSyncSettings;
-          if (settings.manageLabels) {
-            const targetLabel =
-              targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
-            const opposingLabel =
-              targetStatus === 'in_progress' ? settings.todoLabel : settings.inProgressLabel;
+          const repo = task.sourceMeta.repo;
+          const issueNumber = task.sourceMeta.issueNumber;
 
-            safeInvokeWithResult<void>('update_github_issue_labels', {
-              repo: task.sourceMeta.repo,
-              issueNumber: task.sourceMeta.issueNumber,
-              targetLabel: targetLabel.trim() || null,
-              opposingLabel: opposingLabel.trim() || null,
-              postCommentFallback: settings.postCommentsFallback,
-            }).then((res) => {
-              if (!res.success) {
-                console.warn(
-                  `[Sync] Background label update failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
-                );
-                set({ tasks: prevTasks });
+          // Case A: Moving to Done
+          if (targetStatus === 'done' && task.status !== 'done') {
+            if (settings.doneAction === 'ask') {
+              get().openGithubDoneModal(task);
+            } else if (settings.doneAction === 'close') {
+              get().setGithubIssueStateOnRemote(repo, issueNumber, 'closed', 'completed');
+              if (settings.manageLabels && settings.inProgressLabel) {
+                safeInvokeWithResult('update_github_issue_labels', {
+                  repo,
+                  issueNumber,
+                  targetLabel: null,
+                  opposingLabel: settings.inProgressLabel.trim(),
+                  postCommentFallback: false,
+                });
               }
-            });
+            } else if (settings.doneAction === 'label') {
+              const doneLabel = settings.doneLabel || 'done';
+              safeInvokeWithResult('update_github_issue_labels', {
+                repo,
+                issueNumber,
+                targetLabel: doneLabel,
+                opposingLabel: settings.inProgressLabel.trim(),
+                postCommentFallback: false,
+              });
+            }
+            // If local_only: no remote API call
+          }
+
+          // Case B: Moving FROM Done back to To-Do or In-Progress (Reopening)
+          else if (task.status === 'done' && (targetStatus === 'todo' || targetStatus === 'in_progress')) {
+            get().setGithubIssueStateOnRemote(repo, issueNumber, 'open', 'reopened');
+            if (settings.manageLabels) {
+              const targetLabel = targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
+              safeInvokeWithResult('update_github_issue_labels', {
+                repo,
+                issueNumber,
+                targetLabel: targetLabel.trim() || null,
+                opposingLabel: settings.doneLabel || 'done',
+                postCommentFallback: settings.postCommentsFallback,
+              });
+            }
+          }
+
+          // Case C: Moving between To-Do and In-Progress
+          else if (
+            (targetStatus === 'todo' || targetStatus === 'in_progress') &&
+            (task.status === 'todo' || task.status === 'in_progress')
+          ) {
+            if (settings.manageLabels) {
+              const targetLabel =
+                targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
+              const opposingLabel =
+                targetStatus === 'in_progress' ? settings.todoLabel : settings.inProgressLabel;
+
+              safeInvokeWithResult<void>('update_github_issue_labels', {
+                repo,
+                issueNumber,
+                targetLabel: targetLabel.trim() || null,
+                opposingLabel: opposingLabel.trim() || null,
+                postCommentFallback: settings.postCommentsFallback,
+              }).then((res) => {
+                if (!res.success) {
+                  console.warn(
+                    `[Sync] Background label update failed for ${repo}#${issueNumber}. Reverting...`
+                  );
+                  set({ tasks: prevTasks });
+                }
+              });
+            }
           }
         }
       },
@@ -498,6 +581,61 @@ export const useTaskStore = create<TaskState>()(
         });
       },
 
+      setGroupLinkedPRs: (group) => set({ groupLinkedPRs: group }),
+
+      setGithubIssueStateOnRemote: async (repo, issueNumber, state, stateReason) => {
+        return await safeInvokeWithResult('set_github_issue_state', {
+          repo,
+          issueNumber,
+          state,
+          stateReason: stateReason || null,
+        });
+      },
+
+      executeGitHubDoneAction: async (task, action, remember) => {
+        if (remember) {
+          set((state) => ({
+            githubSyncSettings: {
+              ...state.githubSyncSettings,
+              doneAction: action,
+            },
+          }));
+        }
+        set({ githubDoneModalTask: null });
+
+        if (action === 'local_only') {
+          return;
+        }
+
+        const repo = task.sourceMeta?.repo;
+        const issueNumber = task.sourceMeta?.issueNumber;
+        if (!repo || !issueNumber) return;
+
+        const settings = get().githubSyncSettings;
+
+        if (action === 'close') {
+          await get().setGithubIssueStateOnRemote(repo, issueNumber, 'closed', 'completed');
+          if (settings.manageLabels && settings.inProgressLabel) {
+            await safeInvokeWithResult('update_github_issue_labels', {
+              repo,
+              issueNumber,
+              targetLabel: null,
+              opposingLabel: settings.inProgressLabel.trim(),
+              postCommentFallback: false,
+            });
+          }
+        } else if (action === 'label') {
+          const doneLabel = settings.doneLabel || 'done';
+          await safeInvokeWithResult('update_github_issue_labels', {
+            repo,
+            issueNumber,
+            targetLabel: doneLabel,
+            opposingLabel: settings.inProgressLabel.trim(),
+            postCommentFallback: false,
+          });
+        }
+      },
+
       fetchGithubTasks: async () => {
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
         if (!fetched) return;
@@ -579,6 +717,7 @@ export const useTaskStore = create<TaskState>()(
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
+        groupLinkedPRs: state.groupLinkedPRs,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };

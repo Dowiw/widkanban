@@ -95,16 +95,16 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Header warning indicator when rate limits drop below 10% or tokens are near expiration (< 24h).
 
 ### GitHub Issue & PR Deadlines via 'Widkanban:' Tag ([#18](https://github.com/Dowiw/widkanban/issues/18))
-- [ ] Parse `Widkanban: deadline` tags from issue and PR description bodies into `sourceMeta.dueDate`.
-- [ ] Interactive date/time picker writing back to GitHub description bodies with visible markdown and machine HTML comment.
+- [x] Parse `Widkanban: deadline` tags from issue and PR description bodies into `sourceMeta.dueDate`.
+- [x] Interactive date/time picker writing back to GitHub description bodies with visible markdown and machine HTML comment.
 
 ### Configurable GitHub Done Action ([#19](https://github.com/Dowiw/widkanban/issues/19))
-- [ ] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
-- [ ] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
+- [x] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
+- [x] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
 
 ### GitHub PR-to-Issue Linking & Board De-cluttering ([#20](https://github.com/Dowiw/widkanban/issues/20))
-- [ ] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
-- [ ] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
+- [x] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
+- [x] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
 
 ### Multi-Column Board Configuration & Action Triggers ([#21](https://github.com/Dowiw/widkanban/issues/21))
 - [ ] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
@@ -112,8 +112,8 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Reverse routing rules mapping incoming external tasks into custom columns.
 
 ### Filter and Sort by Deadline ([#22](https://github.com/Dowiw/widkanban/issues/22))
-- [ ] Header dropdown controls for deadline presets (`Overdue`, `Today`, `This Week`, `Earliest First`).
-- [ ] Dynamic color-coded urgency badges on cards (red for overdue, amber for <24h).
+- [x] Header dropdown controls for deadline presets (`Overdue`, `Today`, `This Week`, `Earliest First`).
+- [x] Dynamic color-coded urgency badges on cards (red for overdue, amber for <24h).
 
 ### Interactive Google Tasks Subtasks ([#23](https://github.com/Dowiw/widkanban/issues/23))
 - [ ] In-card checkbox completion with immediate 60fps local update and Google Tasks API write-back.

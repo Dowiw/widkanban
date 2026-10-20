@@ -30,9 +30,23 @@ export interface PRBranchInfo {
   isFork?: boolean;         // true if head repo is an external fork
   headRepo?: string;        // e.g. "contributor/widkanban"
   isDraft?: boolean;        // true if draft PR
+  isMerged?: boolean;       // true if merged PR
   additions?: number;       // e.g. 142
   deletions?: number;       // e.g. 38
   changedFiles?: number;    // e.g. 4
+}
+
+export interface LinkedPRInfo {
+  id: string; // e.g. "gh_456"
+  number: number;
+  title: string;
+  url: string;
+  branchInfo?: PRBranchInfo;
+  reviewStatus?: 'draft' | 'review_requested' | 'approved' | 'changes_requested' | 'merged';
+  description?: string;
+  ciStatus?: 'success' | 'failure' | 'pending';
+  author?: TaskUser;
+  commentsCount?: number;
 }
 
 export interface UnifiedTask {
@@ -69,6 +83,8 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;
+    linkedPR?: LinkedPRInfo;
+    linkedIssueNumber?: number;
   };
 }
 
@@ -77,10 +93,14 @@ export interface AuthStatus {
   has_google: boolean;
 }
 
+export type GitHubDoneAction = 'close' | 'label' | 'local_only' | 'ask';
+
 export interface GitHubSyncSettings {
   manageLabels: boolean;             // Master toggle for repo label management
   todoLabel: string;                 // Default "to-do" (empty for no label)
   inProgressLabel: string;           // Default "in-progress" (empty for no label)
+  doneLabel: string;                 // Default "done"
+  doneAction: GitHubDoneAction;       // Default "ask"
   postCommentsFallback: boolean;     // Opt-in comment fallback when labels cannot be applied
   hasPromptedSetup: boolean;         // Tracks whether first-time setup dialog was shown
 }
