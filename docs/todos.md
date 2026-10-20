@@ -107,9 +107,9 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
 
 ### Multi-Column Board Configuration & Action Triggers ([#21](https://github.com/Dowiw/widkanban/issues/21))
-- [ ] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
-- [ ] Configurable integration action triggers per column (GitHub labels/state, PR review state, Google/Microsoft statuses).
-- [ ] Reverse routing rules mapping incoming external tasks into custom columns.
+- [x] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
+- [x] Configurable integration action triggers per column (GitHub labels/state, PR review state, Google/Microsoft statuses).
+- [x] Reverse routing rules mapping incoming external tasks into custom columns.
 
 ### Filter and Sort by Deadline ([#22](https://github.com/Dowiw/widkanban/issues/22))
 - [ ] Header dropdown controls for deadline presets (`Overdue`, `Today`, `This Week`, `Earliest First`).
