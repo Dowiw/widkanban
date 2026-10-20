@@ -87,6 +87,36 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Expandable "API Quota & Token Health" drawer inside each provider card in Settings modal.
 - [ ] Header warning indicator when rate limits drop below 10% or tokens are near expiration (< 24h).
 
+### GitHub Issue & PR Deadlines via 'Widkanban:' Tag ([#18](https://github.com/Dowiw/widkanban/issues/18))
+- [ ] Parse `Widkanban: deadline` tags from issue and PR description bodies into `sourceMeta.dueDate`.
+- [ ] Interactive date/time picker writing back to GitHub description bodies with visible markdown and machine HTML comment.
+
+### Configurable GitHub Done Action ([#19](https://github.com/Dowiw/widkanban/issues/19))
+- [ ] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
+- [ ] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
+
+### GitHub PR-to-Issue Linking & Board De-cluttering ([#20](https://github.com/Dowiw/widkanban/issues/20))
+- [ ] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
+- [ ] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
+
+### Multi-Column Board Configuration & Action Triggers ([#21](https://github.com/Dowiw/widkanban/issues/21))
+- [ ] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
+- [ ] Configurable integration action triggers per column (GitHub labels/state, PR review state, Google/Microsoft statuses).
+- [ ] Reverse routing rules mapping incoming external tasks into custom columns.
+
+### Filter and Sort by Deadline ([#22](https://github.com/Dowiw/widkanban/issues/22))
+- [ ] Header dropdown controls for deadline presets (`Overdue`, `Today`, `This Week`, `Earliest First`).
+- [ ] Dynamic color-coded urgency badges on cards (red for overdue, amber for <24h).
+
+### Interactive Google Tasks Subtasks ([#23](https://github.com/Dowiw/widkanban/issues/23))
+- [ ] In-card checkbox completion with immediate 60fps local update and Google Tasks API write-back.
+- [ ] In-card subtask creation (`POST ...?parent=...`) and hover deletion.
+
+### Blackboard Learn LMS Integration ([#24](https://github.com/Dowiw/widkanban/issues/24))
+- [ ] Ingest Blackboard assignments, assessments, and calendar due dates (`GET /learn/api/public/v1/...`).
+- [ ] Settings connection card for institution domain and personal token.
+- [ ] Dedicated Blackboard filter tab and direct assignment submission links.
+
 ### Native Desktop Notifications
 - [ ] System notifications when new issues or tasks are assigned to the user.
 
@@ -108,16 +138,11 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
 - [ ] Add `.env.example` template with dummy keys and update contributor onboarding guides.
 
-
-
 ---
 
 ## Future Ideas & Enhancements
 
-- **Microsoft 365 & Teams Integration** ([#3](https://github.com/Dowiw/widkanban/issues/3)): Support for Teams for Education Assignments, Microsoft Planner ("Assigned to Me"), Microsoft To Do, and Outlook Flagged Emails across personal and school/organization accounts.
-- **Desktop Widget Layer Mode (Always on Bottom)** ([#5](https://github.com/Dowiw/widkanban/issues/5)): Support for true desktop wallpaper pinning where the widget stays behind active windows (`HWND_BOTTOM`, `kCGDesktopWindowLevel`, and `_NET_WM_STATE_BELOW`) with functional window movement and border resizing locks.
 - **GitLab & Jira Integrations**: Optional adapters following the same `UnifiedTask` normalization schema.
-- **Custom Board Columns**: Allowing user-defined workflow columns beyond the default 3 columns.
 - **Offline Mode & Queue**: Queuing write-back actions during offline network states and replaying on reconnect.
 
 ---
