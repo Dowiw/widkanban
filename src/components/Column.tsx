@@ -1,34 +1,68 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { UnifiedTask, TaskStatus } from '../types/task';
+import { UnifiedTask, TaskStatus, BoardColumn, ColumnColor } from '../types/task';
 import { useTaskStore } from '../store/useTaskStore';
 import { TaskCard } from './TaskCard';
 
 interface ColumnProps {
-  status: TaskStatus;
-  title: string;
+  column?: BoardColumn;
+  status?: TaskStatus;
+  title?: string;
   tasks: UnifiedTask[];
 }
 
-export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
+export const Column: React.FC<ColumnProps> = ({
+  column,
+  status: propStatus,
+  title: propTitle,
+  tasks,
+}) => {
   const { customization } = useTaskStore();
+  const colStatus = column ? column.id : propStatus || 'todo';
+  const colTitle = column ? column.title : propTitle || 'To Do';
+  const colColor = column ? column.color : undefined;
+
   const { setNodeRef, isOver } = useDroppable({
-    id: status,
+    id: colStatus,
     data: {
       type: 'Column',
-      status,
+      status: colStatus,
     },
   });
 
   const getHeaderColor = () => {
-    switch (status) {
-      case 'todo':
-        return 'bg-sky-500 dark:bg-sky-600';
-      case 'in_progress':
+    const c: ColumnColor =
+      colColor ||
+      (colStatus === 'todo'
+        ? 'sky'
+        : colStatus === 'in_progress'
+        ? 'rose'
+        : colStatus === 'done'
+        ? 'emerald'
+        : 'slate');
+
+    switch (c) {
+      case 'slate':
+        return 'bg-slate-600 dark:bg-slate-700';
+      case 'indigo':
+        return 'bg-indigo-600 dark:bg-indigo-700';
+      case 'amber':
+        return 'bg-amber-600 dark:bg-amber-700';
+      case 'purple':
+        return 'bg-purple-600 dark:bg-purple-700';
+      case 'rose':
         return 'bg-rose-500 dark:bg-rose-600';
-      case 'done':
+      case 'cyan':
+        return 'bg-cyan-600 dark:bg-cyan-700';
+      case 'emerald':
         return 'bg-emerald-500 dark:bg-emerald-600';
+      case 'sky':
+        return 'bg-sky-500 dark:bg-sky-600';
+      case 'blue':
+        return 'bg-blue-600 dark:bg-blue-700';
+      default:
+        return 'bg-slate-600 dark:bg-slate-700';
     }
   };
 
@@ -61,7 +95,7 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
       >
         <div className="flex items-center space-x-2">
           <h2 className={`${headerFontSizeClass} font-semibold tracking-wide uppercase`}>
-            {title}
+            {colTitle}
           </h2>
         </div>
         <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-black/15 text-white/95">

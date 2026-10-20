@@ -1,5 +1,5 @@
 export type TaskSource = 'github' | 'google_tasks';
-export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | (string & {});
 
 export interface GitHubLabel {
   name: string;
@@ -133,4 +133,160 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   defaultHeight: 680,
   rememberWindowPlacement: true,
 };
+
+export type ColumnColor =
+  | 'slate'
+  | 'indigo'
+  | 'amber'
+  | 'purple'
+  | 'rose'
+  | 'cyan'
+  | 'emerald'
+  | 'sky'
+  | 'blue';
+
+export interface ColumnActionTrigger {
+  githubAddLabel?: string;
+  githubRemoveLabel?: string;
+  githubState?: 'open' | 'closed';
+  googleStatus?: 'needsAction' | 'completed';
+  microsoftStatus?: 'notStarted' | 'inProgress' | 'completed';
+}
+
+export interface ColumnReverseRoutingRule {
+  githubLabels?: string[];
+  googleStatus?: 'needsAction' | 'completed';
+  microsoftStatus?: string;
+}
+
+export interface BoardColumn {
+  id: string;
+  title: string;
+  color: ColumnColor;
+  isSystem?: boolean;
+  triggers?: ColumnActionTrigger;
+  routingRules?: ColumnReverseRoutingRule;
+}
+
+export const DEFAULT_COLUMNS: BoardColumn[] = [
+  {
+    id: 'todo',
+    title: 'To Do',
+    color: 'sky',
+    isSystem: true,
+    routingRules: {
+      githubLabels: ['to-do', 'todo', 'backlog'],
+      googleStatus: 'needsAction',
+    },
+  },
+  {
+    id: 'in_progress',
+    title: 'In Progress',
+    color: 'rose',
+    isSystem: true,
+    routingRules: {
+      githubLabels: ['in-progress', 'in progress', 'wip', 'doing'],
+    },
+  },
+  {
+    id: 'done',
+    title: 'Done',
+    color: 'emerald',
+    isSystem: true,
+    routingRules: {
+      githubLabels: ['done', 'closed'],
+      googleStatus: 'completed',
+    },
+  },
+];
+
+export const COLUMN_PRESETS: { name: string; description: string; columns: BoardColumn[] }[] = [
+  {
+    name: 'Default 3-Column',
+    description: 'Standard Kanban workflow (To Do, In Progress, Done)',
+    columns: DEFAULT_COLUMNS,
+  },
+  {
+    name: 'Developer Workflow',
+    description: 'Backlog, To Do, In Progress, Review, and Done',
+    columns: [
+      {
+        id: 'backlog',
+        title: 'Backlog',
+        color: 'slate',
+        triggers: { githubAddLabel: 'backlog', githubRemoveLabel: 'to-do' },
+        routingRules: { githubLabels: ['backlog'] },
+      },
+      {
+        id: 'todo',
+        title: 'To Do',
+        color: 'sky',
+        triggers: { githubAddLabel: 'to-do', githubRemoveLabel: 'in-progress', googleStatus: 'needsAction' },
+        routingRules: { githubLabels: ['to-do', 'todo'] },
+      },
+      {
+        id: 'in_progress',
+        title: 'In Progress',
+        color: 'rose',
+        triggers: { githubAddLabel: 'in-progress', githubRemoveLabel: 'to-do', googleStatus: 'needsAction' },
+        routingRules: { githubLabels: ['in-progress', 'wip'] },
+      },
+      {
+        id: 'review',
+        title: 'In Review',
+        color: 'purple',
+        triggers: { githubAddLabel: 'needs-review', githubRemoveLabel: 'in-progress' },
+        routingRules: { githubLabels: ['needs-review', 'in-review', 'review'] },
+      },
+      {
+        id: 'done',
+        title: 'Done',
+        color: 'emerald',
+        triggers: { githubState: 'closed', googleStatus: 'completed' },
+        routingRules: { githubLabels: ['done'], googleStatus: 'completed' },
+      },
+    ],
+  },
+  {
+    name: 'Team Agile',
+    description: 'Backlog, Ready, Active, QA, and Done',
+    columns: [
+      {
+        id: 'backlog',
+        title: 'Backlog',
+        color: 'slate',
+        triggers: { githubAddLabel: 'backlog' },
+        routingRules: { githubLabels: ['backlog'] },
+      },
+      {
+        id: 'ready',
+        title: 'Ready',
+        color: 'cyan',
+        triggers: { githubAddLabel: 'ready', githubRemoveLabel: 'backlog' },
+        routingRules: { githubLabels: ['ready', 'sprint-ready'] },
+      },
+      {
+        id: 'active',
+        title: 'Active',
+        color: 'amber',
+        triggers: { githubAddLabel: 'in-progress', googleStatus: 'needsAction' },
+        routingRules: { githubLabels: ['in-progress', 'active'] },
+      },
+      {
+        id: 'qa',
+        title: 'QA / Testing',
+        color: 'indigo',
+        triggers: { githubAddLabel: 'qa-ready', githubRemoveLabel: 'in-progress' },
+        routingRules: { githubLabels: ['qa', 'testing', 'qa-ready'] },
+      },
+      {
+        id: 'done',
+        title: 'Done',
+        color: 'emerald',
+        triggers: { githubState: 'closed', googleStatus: 'completed' },
+        routingRules: { githubLabels: ['done'], googleStatus: 'completed' },
+      },
+    ],
+  },
+];
 
