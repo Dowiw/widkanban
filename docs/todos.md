@@ -60,8 +60,32 @@ This document tracks completed capabilities, active milestones, and planned feat
 
 ## Upcoming & Planned Features
 
-### Background Tokio Polling Loop
-- [ ] Periodic background sync engine (~3-minute cadence) running on async threads to refresh assigned issues and tasks automatically.
+### Background Tokio Polling Loop & Auto-Sync Engine ([#10](https://github.com/Dowiw/widkanban/issues/10))
+- [ ] User onboarding consent prompt upon connecting accounts: "Enable automatic background sync?".
+- [ ] Periodic background polling loop (configurable in Settings: 1m, 3m, 5m, 15m, or manual).
+- [ ] Remote change detection with in-app banner and native OS desktop notifications (`tauri-plugin-notification`).
+
+### GitHub Flavored Markdown (GFM) Parsing ([#7](https://github.com/Dowiw/widkanban/issues/7))
+- [ ] Standard GFM rendering for task descriptions and issue bodies (`react-markdown` + `remark-gfm`).
+- [ ] Support headings, lists, code blocks, tables, blockquotes, and task checklists (`- [ ]`, `- [x]`).
+- [ ] Safe external link delegation opening in the user's default browser via `@tauri-apps/plugin-opener`.
+- [ ] HTML sanitization via `rehype-sanitize` to protect frameless desktop webview.
+
+### Universal Font Family Synchronization ([#8](https://github.com/Dowiw/widkanban/issues/8))
+- [ ] Ensure user-selected font family (`Outfit`, `GNU Unifont`, `System UI`, `Coding Mono`) cascades across all UI text (headers, app title, task descriptions, IDs, badges, modals).
+- [ ] Remove hardcoded font overrides in `TaskCard.tsx` (`font-sans`), `Header.tsx` (`font-unifont`), and metadata tags.
+- [ ] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
+
+### Production Add Task Workflow ([#9](https://github.com/Dowiw/widkanban/issues/9))
+- [ ] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.
+- [ ] Support production fields: Title, Provider (GitHub / Google Tasks), Status column, target repo/list, and description notes.
+- [ ] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
+
+### API Rate Limit & Token Expiration Tracking ([#11](https://github.com/Dowiw/widkanban/issues/11))
+- [ ] GitHub PAT rate limit header tracking (`x-ratelimit-*`) and expiration date tracking (`github-authentication-token-expiration`).
+- [ ] Google Tasks OAuth token lifetime inspection via tokeninfo (`expires_in`).
+- [ ] Expandable "API Quota & Token Health" drawer inside each provider card in Settings modal.
+- [ ] Header warning indicator when rate limits drop below 10% or tokens are near expiration (< 24h).
 
 ### Native Desktop Notifications
 - [ ] System notifications when new issues or tasks are assigned to the user.
@@ -83,6 +107,7 @@ This document tracks completed capabilities, active milestones, and planned feat
 ### Developer Credential Overrides via `.env` ([#6](https://github.com/Dowiw/widkanban/issues/6))
 - [ ] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
 - [ ] Add `.env.example` template with dummy keys and update contributor onboarding guides.
+
 
 
 ---
