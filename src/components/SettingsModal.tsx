@@ -22,9 +22,14 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Type
+  Type,
+  Pin,
+  Power,
+  Layers,
+  Lock,
+  Unlock,
 } from 'lucide-react';
-import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
+import { FontFamilyOption, CardDensity, ThemeMode, PinMode } from '../types/task';
 
 type SettingsTab = 'integrations' | 'appearance' | 'window' | 'advanced';
 
@@ -42,8 +47,13 @@ export const SettingsModal: React.FC = () => {
     customization,
     setCustomization,
     isPinned,
+    setPinMode,
     setWindowSizePreset,
     resetWindowPositionAndSize,
+    startupSettings,
+    enableAutostart,
+    disableAutostart,
+    setStartupSettings,
   } = useTaskStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
@@ -56,6 +66,7 @@ export const SettingsModal: React.FC = () => {
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
+  const [isTogglingAutostart, setIsTogglingAutostart] = useState(false);
 
   if (!isSettingsOpen) return null;
 
@@ -561,6 +572,172 @@ export const SettingsModal: React.FC = () => {
           {activeTab === 'window' && (
             <div className="space-y-4">
               
+              {/* Desktop Widget Layer & Pin Mode */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Pin className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      Desktop Pin & Layer Mode
+                    </span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center space-x-1 ${
+                      isPinned
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60'
+                        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    {isPinned ? <Lock className="h-2.5 w-2.5" /> : <Unlock className="h-2.5 w-2.5" />}
+                    <span>{isPinned ? 'Movement & Resizing Locked' : 'Unlocked (Free Drag & Resize)'}</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 pt-1">
+                  {[
+                    {
+                      id: 'always-on-top' as PinMode,
+                      title: 'Always on Top (Foreground)',
+                      desc: 'Floats persistently in front of all other application windows.',
+                      icon: Pin,
+                    },
+                    {
+                      id: 'desktop-layer' as PinMode,
+                      title: 'Pin to Desktop Layer (Always on Bottom)',
+                      desc: 'Sits behind active windows on the wallpaper layer (ideal widget mode).',
+                      icon: Layers,
+                    },
+                    {
+                      id: 'normal' as PinMode,
+                      title: 'Standard Window Mode',
+                      desc: 'Standard OS window z-order and focus behavior.',
+                      icon: Monitor,
+                    },
+                  ].map((mode) => {
+                    const Icon = mode.icon;
+                    const isSelected = (customization.pinMode || 'always-on-top') === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setPinMode(mode.id)}
+                        className={`p-2.5 rounded-xl border text-left flex items-start space-x-3 transition-all ${
+                          isSelected
+                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/70 dark:border-indigo-500 ring-2 ring-indigo-500/30'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        <div
+                          className={`p-1.5 rounded-lg mt-0.5 ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`text-xs font-semibold ${
+                                isSelected
+                                  ? 'text-indigo-900 dark:text-indigo-200'
+                                  : 'text-slate-800 dark:text-slate-200'
+                              }`}
+                            >
+                              {mode.title}
+                            </span>
+                            {isSelected && (
+                              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center space-x-0.5">
+                                <Check className="h-3 w-3" />
+                                <span>Active</span>
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                            {mode.desc}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* System Startup & Behavior */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Power className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      System Startup & Launch
+                    </span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      startupSettings.autostartEnabled
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+                        : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    {startupSettings.autostartEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+
+                <div className="space-y-2.5 pt-1">
+                  {/* Launch on Startup Toggle */}
+                  <label className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                    <div className="flex flex-col pr-3">
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Launch WidKanban at System Startup
+                      </span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Native OS startup registration (Windows Registry HKCU, macOS LaunchAgent, Linux XDG).
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={startupSettings.autostartEnabled}
+                      disabled={isTogglingAutostart}
+                      onChange={async (e) => {
+                        setIsTogglingAutostart(true);
+                        if (e.target.checked) {
+                          await enableAutostart(startupSettings.startMinimized);
+                        } else {
+                          await disableAutostart();
+                        }
+                        setIsTogglingAutostart(false);
+                      }}
+                      className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500/30 h-4 w-4 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Start Minimized to Tray */}
+                  <label className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                    <div className="flex flex-col pr-3">
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Start Minimized to System Tray
+                      </span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Launches silently in the background tray at startup without stealing focus.
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={startupSettings.startMinimized}
+                      onChange={async (e) => {
+                        const nextVal = e.target.checked;
+                        setStartupSettings({ startMinimized: nextVal });
+                        if (startupSettings.autostartEnabled) {
+                          await enableAutostart(nextVal);
+                        }
+                      }}
+                      className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500/30 h-4 w-4 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
               {/* Window Placement & Resizing Behavior Info */}
               <div className="rounded-xl border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/70 dark:bg-indigo-950/40 p-3 space-y-1.5 text-xs text-indigo-950 dark:text-indigo-200">
                 <div className="flex items-center space-x-1.5 font-bold">
@@ -573,7 +750,7 @@ export const SettingsModal: React.FC = () => {
                 </p>
                 <div className="pt-1 flex items-center space-x-2 text-[10px]">
                   <span className={`px-2 py-0.5 rounded font-bold ${isPinned ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60' : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'}`}>
-                    Current: {isPinned ? 'Pinned (Resizing Locked)' : 'Unpinned (Resizing Allowed)'}
+                    Current: {isPinned ? 'Pinned (Movement & Resizing Locked)' : 'Unpinned (Resizing Allowed)'}
                   </span>
                 </div>
               </div>

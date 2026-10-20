@@ -12,6 +12,9 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  PinMode,
+  StartupSettings,
+  DEFAULT_STARTUP_SETTINGS,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -57,6 +60,10 @@ interface TaskState {
   authStatus: AuthStatus;
   githubSyncSettings: GitHubSyncSettings;
 
+  // Autostart & System Launch
+  startupSettings: StartupSettings;
+  isStartupPromptOpen: boolean;
+
   // Local trash & deletion modal state
   locallyDeletedTasks: UnifiedTask[];
   deleteModalTask: UnifiedTask | null;
@@ -69,10 +76,18 @@ interface TaskState {
 
   // Actions
   setCustomization: (settings: Partial<WidgetCustomizationSettings>) => void;
+  setPinMode: (mode: PinMode) => Promise<void>;
   toggleTheme: () => void;
   setWindowSizePreset: (preset: 'compact' | 'wide' | 'expanded') => Promise<void>;
   resetWindowPositionAndSize: () => Promise<void>;
   syncWindowResizable: (resizable: boolean) => Promise<void>;
+
+  // Startup actions
+  setStartupPromptOpen: (isOpen: boolean) => void;
+  setStartupSettings: (settings: Partial<StartupSettings>) => void;
+  checkAutostartStatus: () => Promise<boolean>;
+  enableAutostart: (startMinimized?: boolean) => Promise<boolean>;
+  disableAutostart: () => Promise<boolean>;
 
   moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
   addTask: (task: Omit<UnifiedTask, 'id' | 'updatedAt'>) => void;
@@ -136,6 +151,8 @@ export const useTaskStore = create<TaskState>()(
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
+      startupSettings: DEFAULT_STARTUP_SETTINGS,
+      isStartupPromptOpen: false,
       locallyDeletedTasks: [],
       deleteModalTask: null,
       deletePreference: null,
@@ -335,14 +352,77 @@ export const useTaskStore = create<TaskState>()(
 
       setSearchQuery: (query) => set({ searchQuery: query }),
       setFilterSource: (source) => set({ filterSource: source }),
-      togglePin: () => {
+      setPinMode: async (mode: PinMode) => {
+        set((state) => ({
+          customization: { ...state.customization, pinMode: mode },
+        }));
+        if (get().isPinned) {
+          await safeInvoke('set_window_pin_mode', { mode });
+        }
+      },
+      togglePin: async () => {
         const nextPinned = !get().isPinned;
         set({ isPinned: nextPinned });
-        safeInvoke('set_window_resizable', { resizable: !nextPinned });
-        safeInvoke('toggle_always_on_top');
+        if (nextPinned) {
+          const currentMode = get().customization.pinMode || 'always-on-top';
+          await safeInvoke('set_window_pin_mode', { mode: currentMode });
+        } else {
+          await safeInvoke('set_window_pin_mode', { mode: 'normal' });
+        }
       },
       syncWindowResizable: async (resizable: boolean) => {
         await safeInvoke('set_window_resizable', { resizable });
+      },
+      setStartupPromptOpen: (isOpen) => set({ isStartupPromptOpen: isOpen }),
+      setStartupSettings: (settings) =>
+        set((state) => ({
+          startupSettings: { ...state.startupSettings, ...settings },
+        })),
+      checkAutostartStatus: async () => {
+        const res = await safeInvokeWithResult<boolean>('is_autostart_enabled');
+        if (res.success && res.data !== undefined) {
+          const isEnabled = res.data ?? false;
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: isEnabled,
+            },
+          }));
+          return isEnabled;
+        }
+        return false;
+      },
+      enableAutostart: async (startMinimized) => {
+        const minimized = startMinimized ?? get().startupSettings.startMinimized;
+        const res = await safeInvokeWithResult<void>('enable_autostart', {
+          startMinimized: minimized,
+        });
+        if (res.success) {
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: true,
+              startMinimized: minimized,
+              hasPrompted: true,
+            },
+          }));
+          return true;
+        }
+        return false;
+      },
+      disableAutostart: async () => {
+        const res = await safeInvokeWithResult<void>('disable_autostart');
+        if (res.success) {
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: false,
+              hasPrompted: true,
+            },
+          }));
+          return true;
+        }
+        return false;
       },
       setCustomization: (settings) =>
         set((state) => ({
@@ -579,6 +659,7 @@ export const useTaskStore = create<TaskState>()(
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
+        startupSettings: state.startupSettings,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
@@ -606,6 +687,12 @@ export const useTaskStore = create<TaskState>()(
           merged.customization = {
             ...DEFAULT_CUSTOMIZATION_SETTINGS,
             ...((persistedState as Partial<TaskState>).customization || {}),
+          };
+        }
+        if ((persistedState as Partial<TaskState>)?.startupSettings) {
+          merged.startupSettings = {
+            ...DEFAULT_STARTUP_SETTINGS,
+            ...((persistedState as Partial<TaskState>).startupSettings || {}),
           };
         }
         return merged;

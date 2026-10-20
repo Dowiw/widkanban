@@ -5,6 +5,7 @@ import { AddTaskModal } from './components/AddTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { DeleteTaskModal } from './components/DeleteTaskModal';
+import { StartupPromptModal } from './components/StartupPromptModal';
 import { useTaskStore } from './store/useTaskStore';
 
 export const App: React.FC = () => {
@@ -15,6 +16,9 @@ export const App: React.FC = () => {
     customization,
     isPinned,
     syncWindowResizable,
+    startupSettings,
+    setStartupPromptOpen,
+    checkAutostartStatus,
   } = useTaskStore();
 
   const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
@@ -46,7 +50,7 @@ export const App: React.FC = () => {
     }
   }, [isDark]);
 
-  // Initial resizability sync based on pin state
+  // Initial resizability & pin mode sync based on pin state
   useEffect(() => {
     syncWindowResizable(!isPinned);
   }, [isPinned, syncWindowResizable]);
@@ -55,9 +59,19 @@ export const App: React.FC = () => {
     checkAuthStatus().then((status) => {
       if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
         setSettingsOpen(true);
+      } else if ((status.has_github || status.has_google) && !startupSettings.hasPrompted) {
+        setStartupPromptOpen(true);
       }
     });
-  }, [checkAuthStatus, hasCompletedOnboarding, setSettingsOpen]);
+    checkAutostartStatus();
+  }, [
+    checkAuthStatus,
+    hasCompletedOnboarding,
+    setSettingsOpen,
+    startupSettings.hasPrompted,
+    setStartupPromptOpen,
+    checkAutostartStatus,
+  ]);
 
   const fontClass =
     customization.fontFamily === 'unifont'
@@ -93,6 +107,7 @@ export const App: React.FC = () => {
       <SettingsModal />
       <GitHubSetupModal />
       <DeleteTaskModal />
+      <StartupPromptModal />
     </div>
   );
 };
