@@ -66,15 +66,15 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Remote change detection with in-app banner and native OS desktop notifications (`tauri-plugin-notification`).
 
 ### GitHub Flavored Markdown (GFM) Parsing ([#7](https://github.com/Dowiw/widkanban/issues/7))
-- [ ] Standard GFM rendering for task descriptions and issue bodies (`react-markdown` + `remark-gfm`).
-- [ ] Support headings, lists, code blocks, tables, blockquotes, and task checklists (`- [ ]`, `- [x]`).
-- [ ] Safe external link delegation opening in the user's default browser via `@tauri-apps/plugin-opener`.
-- [ ] HTML sanitization via `rehype-sanitize` to protect frameless desktop webview.
+- [x] Standard GFM rendering for task descriptions and issue bodies (`react-markdown` + `remark-gfm`).
+- [x] Support headings, lists, code blocks, tables, blockquotes, and task checklists (`- [ ]`, `- [x]`).
+- [x] Safe external link delegation opening in the user's default browser via `@tauri-apps/plugin-opener`.
+- [x] HTML sanitization via `rehype-sanitize` to protect frameless desktop webview.
 
 ### Universal Font Family Synchronization ([#8](https://github.com/Dowiw/widkanban/issues/8))
-- [ ] Ensure user-selected font family (`Outfit`, `GNU Unifont`, `System UI`, `Coding Mono`) cascades across all UI text (headers, app title, task descriptions, IDs, badges, modals).
-- [ ] Remove hardcoded font overrides in `TaskCard.tsx` (`font-sans`), `Header.tsx` (`font-unifont`), and metadata tags.
-- [ ] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
+- [x] Ensure user-selected font family (`Outfit`, `GNU Unifont`, `System UI`, `Coding Mono`) cascades across all UI text (headers, app title, task descriptions, IDs, badges, modals).
+- [x] Remove hardcoded font overrides in `TaskCard.tsx` (`font-sans`), `Header.tsx` (`font-unifont`), and metadata tags.
+- [x] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
 
 ### Production Add Task Workflow ([#9](https://github.com/Dowiw/widkanban/issues/9))
 - [ ] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.

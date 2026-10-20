@@ -146,7 +146,7 @@ export const Header: React.FC = () => {
             alt="WidKanban" 
             className="h-3.5 w-3.5 rounded object-contain pointer-events-none" 
           />
-          <span className="font-unifont text-[11px] font-semibold tracking-wider text-slate-700 dark:text-slate-300 truncate">
+          <span className="text-[11px] font-semibold tracking-wider text-slate-700 dark:text-slate-300 truncate">
             WidKanban
           </span>
         </div>
@@ -199,7 +199,7 @@ export const Header: React.FC = () => {
           >
             <Github className="h-3 w-3 text-emerald-500 dark:text-emerald-400 shrink-0" />
             <span>GitHub</span>
-            <span className="text-[10px] font-mono opacity-75">({ghCount})</span>
+            <span className="text-[10px] opacity-75">({ghCount})</span>
           </button>
 
           <button
@@ -213,7 +213,7 @@ export const Header: React.FC = () => {
           >
             <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
             <span>Google</span>
-            <span className="text-[10px] font-mono opacity-75">({gtCount})</span>
+            <span className="text-[10px] opacity-75">({gtCount})</span>
           </button>
         </div>
 

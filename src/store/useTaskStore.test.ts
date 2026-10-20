@@ -682,6 +682,16 @@ describe('useTaskStore', () => {
       expect(state.customization.columnMinWidth).toBe(260);
     });
 
+    it('updates font family across all supported options (outfit, unifont, system, mono)', () => {
+      const { setCustomization } = useTaskStore.getState();
+      const fonts: ('outfit' | 'unifont' | 'system' | 'mono')[] = ['outfit', 'unifont', 'system', 'mono'];
+
+      for (const font of fonts) {
+        setCustomization({ fontFamily: font });
+        expect(useTaskStore.getState().customization.fontFamily).toBe(font);
+      }
+    });
+
     it('cycles theme through system -> light -> dark -> system via toggleTheme', () => {
       const { toggleTheme } = useTaskStore.getState();
       expect(useTaskStore.getState().customization.theme).toBe('system');
