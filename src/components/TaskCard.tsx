@@ -20,7 +20,8 @@ import {
   Check,
   Tag,
   GitBranch,
-  GitFork
+  GitFork,
+  GraduationCap
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -94,6 +95,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   };
 
   const isGitHub = task.source === 'github';
+  const isBlackboard = task.source === 'blackboard';
   const smartDue = getSmartDueDate(task.sourceMeta?.dueDate);
 
   const handleOpenUrl = (e: React.MouseEvent, urlToOpen?: string) => {
@@ -171,7 +173,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           </button>
 
           {/* Provider Badge */}
-          {isGitHub ? (
+          {isBlackboard ? (
+            <span
+              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/60 truncate"
+              title={task.sourceMeta?.courseName || 'Blackboard Learn'}
+            >
+              <GraduationCap className="h-2.5 w-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="truncate">{task.sourceMeta?.courseCode || task.sourceMeta?.courseName || 'Blackboard'}</span>
+            </span>
+          ) : isGitHub ? (
             <span
               className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border truncate ${
                 task.sourceMeta?.isPullRequest
@@ -243,7 +253,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
       {/* Quick Micro-Badges Row */}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[10px]">
         {/* --- GOOGLE TASKS MICRO-BADGES --- */}
-        {!isGitHub && (
+        {!isGitHub && !isBlackboard && (
           <>
             {/* Smart Due Date */}
             {smartDue && (
@@ -293,6 +303,51 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 <span>
                   {task.sourceMeta.subtaskCount} subtask{task.sourceMeta.subtaskCount === 1 ? '' : 's'} {isSubtasksOpen ? '▴' : '▾'}
                 </span>
+              </button>
+            )}
+          </>
+        )}
+
+        {/* --- BLACKBOARD MICRO-BADGES --- */}
+        {isBlackboard && (
+          <>
+            {/* Smart Due Date */}
+            {smartDue && (
+              <span
+                className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded font-medium border ${
+                  smartDue.urgency === 'overdue'
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : smartDue.urgency === 'today'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                }`}
+              >
+                <Calendar className="h-2.5 w-2.5" />
+                <span>{smartDue.label}</span>
+              </span>
+            )}
+
+            {/* Course Code / Name Chip */}
+            {task.sourceMeta?.courseName && (
+              <span
+                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-medium truncate max-w-[140px]"
+                title={task.sourceMeta.courseName}
+              >
+                <GraduationCap className="h-2.5 w-2.5 text-amber-600 shrink-0" />
+                <span className="truncate">{task.sourceMeta.courseCode || task.sourceMeta.courseName}</span>
+              </span>
+            )}
+
+            {/* Submission Web Link */}
+            {(task.sourceMeta?.submissionUrl || task.url) && (
+              <button
+                type="button"
+                onClick={(e) => handleOpenUrl(e, task.sourceMeta?.submissionUrl || task.url)}
+                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 font-medium transition-colors"
+                title="Open assignment submission portal"
+              >
+                <ExternalLink className="h-2.5 w-2.5 text-amber-700" />
+                <span>Submit</span>
               </button>
             )}
           </>
@@ -506,6 +561,36 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           {(task.description || task.sourceMeta?.notes) && (
             <div className="rounded-lg bg-slate-50/90 border border-slate-200/60 p-2 text-[11px] text-slate-700 max-h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text font-sans">
               {task.description || task.sourceMeta?.notes}
+            </div>
+          )}
+
+          {/* Blackboard Course Details */}
+          {isBlackboard && (
+            <div className="space-y-1.5 text-[10.5px]">
+              {task.sourceMeta?.courseName && (
+                <div className="flex items-center justify-between text-slate-500">
+                  <span>Course: <strong className="text-slate-700 dark:text-slate-200">{task.sourceMeta.courseName}</strong></span>
+                  {task.sourceMeta?.courseCode && (
+                    <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-[9.5px]">
+                      {task.sourceMeta.courseCode}
+                    </span>
+                  )}
+                </div>
+              )}
+              {(task.sourceMeta?.submissionUrl || task.url) && (
+                <div className="pt-0.5">
+                  <a
+                    href={task.sourceMeta?.submissionUrl || task.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center space-x-1 text-amber-600 dark:text-amber-400 hover:text-amber-700 font-medium hover:underline text-[10px]"
+                  >
+                    <ExternalLink className="h-2.5 w-2.5" />
+                    <span>Launch Blackboard Submission Portal</span>
+                  </a>
+                </div>
+              )}
             </div>
           )}
 

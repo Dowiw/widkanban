@@ -12,12 +12,16 @@ use tauri::{
 pub struct StoredCredentials {
     pub github_token: Option<String>,
     pub google_token: Option<String>,
+    pub blackboard_domain: Option<String>,
+    pub blackboard_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
+    pub has_blackboard: bool,
+    pub blackboard_domain: Option<String>,
 }
 
 // ─── Provider Specific Detailed Models ──────────────────────────────────────
@@ -108,6 +112,20 @@ pub struct SourceMeta {
     pub subtask_count: Option<usize>,
     pub subtasks: Option<Vec<SubtaskItem>>,
     pub links: Option<Vec<TaskLink>>,
+    // Blackboard LMS fields
+    #[serde(rename = "courseName")]
+    pub course_name: Option<String>,
+    #[serde(rename = "courseId")]
+    pub course_id: Option<String>,
+    #[serde(rename = "courseCode")]
+    pub course_code: Option<String>,
+    #[serde(rename = "submissionUrl")]
+    pub submission_url: Option<String>,
+    #[serde(rename = "isGraded")]
+    pub is_graded: Option<bool>,
+    pub score: Option<f64>,
+    #[serde(rename = "totalPoints")]
+    pub total_points: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -262,6 +280,29 @@ struct AddLabelsPayload<'a> {
 #[derive(Serialize)]
 struct CreateCommentPayload<'a> {
     body: &'a str,
+}
+
+// ─── Blackboard Learn LMS API Types ──────────────────────────────────────────
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
+pub struct BBCalendarItem {
+    pub id: String,
+    #[serde(rename = "calendarId")]
+    pub calendar_id: Option<String>,
+    #[serde(rename = "calendarName")]
+    pub calendar_name: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub attemptable: Option<bool>,
+    pub modified: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
+pub struct BBCalendarResponse {
+    pub results: Option<Vec<BBCalendarItem>>,
+    pub items: Option<Vec<BBCalendarItem>>,
 }
 
 fn url_encode(input: &str) -> String {
@@ -419,9 +460,14 @@ fn close_app(app_handle: tauri::AppHandle) {
 #[tauri::command]
 fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
     let creds = read_credentials(&app_handle);
+    let has_blackboard = creds.blackboard_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+        && creds.blackboard_domain.as_ref().map_or(false, |d| !d.trim().is_empty());
+
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
         has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_blackboard,
+        blackboard_domain: creds.blackboard_domain,
     })
 }
 
@@ -430,29 +476,36 @@ fn save_credentials(
     app_handle: tauri::AppHandle,
     github_token: Option<String>,
     google_token: Option<String>,
+    blackboard_domain: Option<String>,
+    blackboard_token: Option<String>,
 ) -> Result<AuthStatus, String> {
     let mut creds = read_credentials(&app_handle);
     if let Some(gh) = github_token {
         let trimmed = gh.trim().to_string();
-        if trimmed.is_empty() {
-            creds.github_token = None;
-        } else {
-            creds.github_token = Some(trimmed);
-        }
+        creds.github_token = if trimmed.is_empty() { None } else { Some(trimmed) };
     }
     if let Some(gt) = google_token {
         let trimmed = gt.trim().to_string();
-        if trimmed.is_empty() {
-            creds.google_token = None;
-        } else {
-            creds.google_token = Some(trimmed);
-        }
+        creds.google_token = if trimmed.is_empty() { None } else { Some(trimmed) };
+    }
+    if let Some(bb_dom) = blackboard_domain {
+        let trimmed = bb_dom.trim().to_string();
+        creds.blackboard_domain = if trimmed.is_empty() { None } else { Some(trimmed) };
+    }
+    if let Some(bb_tok) = blackboard_token {
+        let trimmed = bb_tok.trim().to_string();
+        creds.blackboard_token = if trimmed.is_empty() { None } else { Some(trimmed) };
     }
     write_credentials(&app_handle, &creds)?;
+
+    let has_blackboard = creds.blackboard_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+        && creds.blackboard_domain.as_ref().map_or(false, |d| !d.trim().is_empty());
 
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
         has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_blackboard,
+        blackboard_domain: creds.blackboard_domain,
     })
 }
 
@@ -465,17 +518,109 @@ fn clear_credentials(
     match provider.as_deref() {
         Some("github") => creds.github_token = None,
         Some("google") => creds.google_token = None,
+        Some("blackboard") => {
+            creds.blackboard_token = None;
+            creds.blackboard_domain = None;
+        }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
+            creds.blackboard_token = None;
+            creds.blackboard_domain = None;
         }
     }
     write_credentials(&app_handle, &creds)?;
 
+    let has_blackboard = creds.blackboard_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+        && creds.blackboard_domain.as_ref().map_or(false, |d| !d.trim().is_empty());
+
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
         has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_blackboard,
+        blackboard_domain: creds.blackboard_domain,
     })
+}
+
+/// Fetch course assignments, assessments, and calendar due dates from Blackboard Learn LMS
+#[tauri::command]
+async fn fetch_blackboard_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
+    let creds = read_credentials(&app_handle);
+    let token = match creds.blackboard_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        Some(t) => t.trim().to_string(),
+        None => return Ok(vec![]),
+    };
+
+    let raw_domain = match creds.blackboard_domain.as_ref().filter(|d| !d.trim().is_empty()) {
+        Some(d) => d.trim().to_string(),
+        None => return Ok(vec![]),
+    };
+
+    let domain = raw_domain
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let url = format!("https://{}/learn/api/public/v1/calendars/items", domain);
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/json")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Blackboard Learn ({}): {}", domain, e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Blackboard API error (calendars) {}: {}", status, body));
+    }
+
+    let parsed: BBCalendarResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Blackboard calendar response: {}", e))?;
+
+    let items = parsed.results.or(parsed.items).unwrap_or_default();
+    let mut tasks = Vec::new();
+
+    for item in items {
+        let submission_url = format!(
+            "https://{}/webapps/calendar/launch/attempt/{}",
+            domain, item.id
+        );
+        let due_date = item.end.clone().or_else(|| item.start.clone());
+        let title = item
+            .title
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| "Blackboard Assignment".to_string());
+        let updated_at = item.modified.unwrap_or_else(chrono_now_iso);
+
+        tasks.push(UnifiedTask {
+            id: format!("bb_{}", item.id),
+            title,
+            source: "blackboard".to_string(),
+            status: "todo".to_string(),
+            url: submission_url.clone(),
+            updated_at,
+            description: item.description,
+            source_meta: SourceMeta {
+                course_name: item.calendar_name,
+                course_id: item.calendar_id,
+                due_date,
+                submission_url: Some(submission_url),
+                ..Default::default()
+            },
+        });
+    }
+
+    Ok(tasks)
 }
 
 /// Fetch all Google Tasks across all task lists for the authenticated user,
@@ -644,6 +789,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count,
                 subtasks,
                 links,
+                ..Default::default()
             },
         });
     }
@@ -809,6 +955,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count: None,
                 subtasks: None,
                 links: None,
+                ..Default::default()
             },
         });
     }
@@ -1404,6 +1551,7 @@ pub fn run() {
             clear_credentials,
             fetch_google_tasks,
             fetch_github_tasks,
+            fetch_blackboard_tasks,
             update_google_task,
             setup_github_repo_labels,
             update_github_issue_labels,
@@ -1496,6 +1644,8 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
+            blackboard_domain: Some("blackboard.university.edu".to_string()),
+            blackboard_token: Some("bb_test_token_123".to_string()),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -1509,13 +1659,50 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123".to_string()),
             google_token: Some("   ".to_string()),
+            blackboard_domain: Some("univ.blackboard.com".to_string()),
+            blackboard_token: Some("tok123".to_string()),
         };
+        let has_blackboard = creds.blackboard_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && creds.blackboard_domain.as_ref().map_or(false, |d| !d.trim().is_empty());
+
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_blackboard,
+            blackboard_domain: creds.blackboard_domain.clone(),
         };
         assert!(status.has_github);
         assert!(!status.has_google);
+        assert!(status.has_blackboard);
+        assert_eq!(status.blackboard_domain, Some("univ.blackboard.com".to_string()));
+    }
+
+    #[test]
+    fn test_blackboard_calendar_response_deserialization() {
+        let raw_json = r#"{
+            "results": [
+                {
+                    "id": "_4567_1",
+                    "calendarId": "_9999_1",
+                    "calendarName": "CS 350 Data Structures",
+                    "title": "Assignment 2: Red-Black Trees",
+                    "description": "Implement insert and fixup routines",
+                    "start": "2026-10-30T23:59:00.000Z",
+                    "end": "2026-10-30T23:59:00.000Z",
+                    "attemptable": true,
+                    "modified": "2026-10-21T10:00:00.000Z"
+                }
+            ]
+        }"#;
+
+        let parsed: BBCalendarResponse = serde_json::from_str(raw_json).expect("failed to parse BBCalendarResponse");
+        let items = parsed.results.expect("results should be Some");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.id, "_4567_1");
+        assert_eq!(item.calendar_name.as_deref(), Some("CS 350 Data Structures"));
+        assert_eq!(item.title.as_deref(), Some("Assignment 2: Red-Black Trees"));
+        assert_eq!(item.end.as_deref(), Some("2026-10-30T23:59:00.000Z"));
     }
 
     #[test]
