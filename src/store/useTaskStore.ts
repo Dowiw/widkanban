@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import {
   UnifiedTask,
+  SubtaskItem,
   TaskStatus,
   TaskSource,
   AuthStatus,
@@ -109,6 +110,9 @@ interface TaskState {
   refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
+  toggleGoogleSubtask: (parentTaskId: string, subtaskId: string) => Promise<void>;
+  createGoogleSubtask: (parentTaskId: string, title: string) => Promise<SubtaskItem | null>;
+  deleteGoogleSubtask: (parentTaskId: string, subtaskId: string) => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
   saveCredentials: (creds: { githubToken?: string; googleToken?: string }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
@@ -331,6 +335,155 @@ export const useTaskStore = create<TaskState>()(
           repo,
           issueNumber,
         });
+      },
+
+      toggleGoogleSubtask: async (parentTaskId: string, subtaskId: string) => {
+        const prevTasks = get().tasks;
+        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
+        if (!parentTask || !parentTask.sourceMeta?.subtasks) return;
+
+        const targetSubtask = parentTask.sourceMeta.subtasks.find((st) => st.id === subtaskId);
+        if (!targetSubtask) return;
+
+        const newStatus: TaskStatus = targetSubtask.status === 'done' ? 'todo' : 'done';
+
+        // 1. Optimistic 60fps update
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
+            const updatedSubtasks = task.sourceMeta.subtasks.map((st) =>
+              st.id === subtaskId ? { ...st, status: newStatus } : st
+            );
+            return {
+              ...task,
+              sourceMeta: {
+                ...task.sourceMeta,
+                subtasks: updatedSubtasks,
+              },
+            };
+          }),
+        }));
+
+        // 2. Background write-back for Google Tasks
+        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
+          const rawSubtaskId = subtaskId.replace(/^gt_/, '');
+          const res = await safeInvokeWithResult<void>('update_google_subtask', {
+            taskId: rawSubtaskId,
+            listId: parentTask.sourceMeta.listId,
+            newStatus,
+          });
+
+          if (!res.success) {
+            console.warn(`[Sync] Failed to update Google subtask ${rawSubtaskId}. Reverting...`);
+            set({ tasks: prevTasks });
+          }
+        }
+      },
+
+      createGoogleSubtask: async (parentTaskId: string, title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+
+        const prevTasks = get().tasks;
+        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
+        if (!parentTask) return null;
+
+        const tempId = `gt_tmp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const optimisticSubtask: SubtaskItem = {
+          id: tempId,
+          title: trimmed,
+          status: 'todo',
+        };
+
+        // 1. Optimistic update
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== parentTaskId) return task;
+            const existingSubtasks = task.sourceMeta?.subtasks || [];
+            const updatedSubtasks = [...existingSubtasks, optimisticSubtask];
+            return {
+              ...task,
+              sourceMeta: {
+                ...task.sourceMeta,
+                hasSubtasks: true,
+                subtaskCount: updatedSubtasks.length,
+                subtasks: updatedSubtasks,
+              },
+            };
+          }),
+        }));
+
+        // 2. Background write-back for Google Tasks
+        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
+          const rawParentId = parentTask.id.replace(/^gt_/, '');
+          const res = await safeInvokeWithResult<SubtaskItem>('create_google_subtask', {
+            listId: parentTask.sourceMeta.listId,
+            parentId: rawParentId,
+            title: trimmed,
+          });
+
+          if (res.success && res.data) {
+            const confirmedSubtask = res.data;
+            set((state) => ({
+              tasks: state.tasks.map((task) => {
+                if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
+                return {
+                  ...task,
+                  sourceMeta: {
+                    ...task.sourceMeta,
+                    subtasks: task.sourceMeta.subtasks.map((st) =>
+                      st.id === tempId ? confirmedSubtask : st
+                    ),
+                  },
+                };
+              }),
+            }));
+            return confirmedSubtask;
+          } else {
+            console.warn(`[Sync] Failed to create Google subtask. Reverting...`);
+            set({ tasks: prevTasks });
+            return null;
+          }
+        }
+
+        return optimisticSubtask;
+      },
+
+      deleteGoogleSubtask: async (parentTaskId: string, subtaskId: string) => {
+        const prevTasks = get().tasks;
+        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
+        if (!parentTask || !parentTask.sourceMeta?.subtasks) return;
+
+        // 1. Optimistic removal
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
+            const updatedSubtasks = task.sourceMeta.subtasks.filter((st) => st.id !== subtaskId);
+            return {
+              ...task,
+              sourceMeta: {
+                ...task.sourceMeta,
+                hasSubtasks: updatedSubtasks.length > 0,
+                subtaskCount: updatedSubtasks.length,
+                subtasks: updatedSubtasks,
+              },
+            };
+          }),
+        }));
+
+        // 2. Background write-back for Google Tasks
+        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
+          const rawSubtaskId = subtaskId.replace(/^gt_/, '');
+          const res = await safeInvokeWithResult<void>('delete_google_subtask', {
+            listId: parentTask.sourceMeta.listId,
+            subtaskId: rawSubtaskId,
+          });
+
+          if (!res.success) {
+            console.warn(`[Sync] Failed to delete Google subtask ${rawSubtaskId}. Reverting...`);
+            set({ tasks: prevTasks });
+          }
+        }
       },
 
       setSearchQuery: (query) => set({ searchQuery: query }),

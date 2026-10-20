@@ -116,8 +116,8 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Dynamic color-coded urgency badges on cards (red for overdue, amber for <24h).
 
 ### Interactive Google Tasks Subtasks ([#23](https://github.com/Dowiw/widkanban/issues/23))
-- [ ] In-card checkbox completion with immediate 60fps local update and Google Tasks API write-back.
-- [ ] In-card subtask creation (`POST ...?parent=...`) and hover deletion.
+- [x] In-card checkbox completion with immediate 60fps local update and Google Tasks API write-back.
+- [x] In-card subtask creation (`POST ...?parent=...`) and hover deletion.
 
 ### Blackboard Learn LMS Integration ([#24](https://github.com/Dowiw/widkanban/issues/24))
 - [ ] Ingest Blackboard assignments, assessments, and calendar due dates (`GET /learn/api/public/v1/...`).

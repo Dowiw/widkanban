@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
-import { TaskSource, TaskStatus } from '../types/task';
+import { TaskSource, TaskStatus, SubtaskItem } from '../types/task';
 import { X, Github, CheckSquare, Plus } from 'lucide-react';
 
 export const AddTaskModal: React.FC = () => {
@@ -10,8 +10,21 @@ export const AddTaskModal: React.FC = () => {
   const [source, setSource] = useState<TaskSource>('github');
   const [status, setStatus] = useState<TaskStatus>('todo');
   const [metaInfo, setMetaInfo] = useState('');
+  const [initialSubtasks, setInitialSubtasks] = useState<string[]>([]);
+  const [newSubtaskInput, setNewSubtaskInput] = useState('');
 
   if (!isAddTaskOpen) return null;
+
+  const handleAddInitialSubtask = () => {
+    const trimmed = newSubtaskInput.trim();
+    if (!trimmed) return;
+    setInitialSubtasks((prev) => [...prev, trimmed]);
+    setNewSubtaskInput('');
+  };
+
+  const handleRemoveInitialSubtask = (idx: number) => {
+    setInitialSubtasks((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +44,12 @@ export const AddTaskModal: React.FC = () => {
         },
       });
     } else {
+      const subtaskItems: SubtaskItem[] = initialSubtasks.map((stTitle, idx) => ({
+        id: `gt_sub_init_${Date.now()}_${idx}`,
+        title: stTitle,
+        status: 'todo',
+      }));
+
       addTask({
         title: title.trim(),
         source: 'google_tasks',
@@ -40,12 +59,17 @@ export const AddTaskModal: React.FC = () => {
           listId: metaInfo.trim() || 'personal',
           listTitle: metaInfo.trim() || 'Personal',
           dueDate: new Date().toISOString(),
+          hasSubtasks: subtaskItems.length > 0,
+          subtaskCount: subtaskItems.length,
+          subtasks: subtaskItems,
         },
       });
     }
 
     setTitle('');
     setMetaInfo('');
+    setInitialSubtasks([]);
+    setNewSubtaskInput('');
     setAddTaskOpen(false);
   };
 
@@ -141,6 +165,63 @@ export const AddTaskModal: React.FC = () => {
               className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
+
+          {/* Subtasks for Google Tasks */}
+          {source === 'google_tasks' && (
+            <div className="space-y-1.5 pt-1 border-t border-slate-150 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <label className="text-slate-600 dark:text-slate-300 font-medium">Initial Subtasks (optional)</label>
+                <span className="text-[10px] text-slate-400">{initialSubtasks.length} added</span>
+              </div>
+
+              {/* Queued subtasks */}
+              {initialSubtasks.length > 0 && (
+                <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
+                  {initialSubtasks.map((st, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-[11px] px-2 py-1 rounded bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700"
+                    >
+                      <span className="truncate text-slate-700 dark:text-slate-200">{st}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveInitialSubtask(idx)}
+                        className="text-slate-400 hover:text-rose-500 p-0.5 rounded transition-colors shrink-0 ml-1"
+                        title="Remove subtask"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Input row */}
+              <div className="flex items-center space-x-1.5">
+                <input
+                  type="text"
+                  placeholder="Subtask title..."
+                  value={newSubtaskInput}
+                  onChange={(e) => setNewSubtaskInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddInitialSubtask();
+                    }
+                  }}
+                  className="flex-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 p-1.5 text-slate-800 dark:text-slate-100 placeholder-slate-400 text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddInitialSubtask}
+                  disabled={!newSubtaskInput.trim()}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-40 text-xs font-medium transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 dark:border-slate-800">
