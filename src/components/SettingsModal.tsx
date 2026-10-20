@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
 import { 
   X, 
@@ -22,11 +22,15 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Type
+  Type,
+  Clock,
+  Bell,
+  Activity,
+  AlertTriangle,
 } from 'lucide-react';
 import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
 
-type SettingsTab = 'integrations' | 'appearance' | 'window' | 'advanced';
+type SettingsTab = 'integrations' | 'sync' | 'appearance' | 'window' | 'advanced';
 
 export const SettingsModal: React.FC = () => {
   const { 
@@ -44,6 +48,11 @@ export const SettingsModal: React.FC = () => {
     isPinned,
     setWindowSizePreset,
     resetWindowPositionAndSize,
+    autoSyncSettings,
+    setAutoSyncSettings,
+    apiHealth,
+    fetchApiHealth,
+    refreshTasks,
   } = useTaskStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
@@ -55,7 +64,14 @@ export const SettingsModal: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'sync') {
+      fetchApiHealth();
+    }
+  }, [activeTab, fetchApiHealth]);
 
   if (!isSettingsOpen) return null;
 
@@ -162,6 +178,19 @@ export const SettingsModal: React.FC = () => {
           >
             <KeyRound className="h-3.5 w-3.5" />
             <span>Integrations</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('sync')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+              activeTab === 'sync'
+                ? 'bg-indigo-600 text-white shadow-xs dark:bg-indigo-600 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Auto-Sync & Quota</span>
           </button>
 
           <button
@@ -408,7 +437,274 @@ export const SettingsModal: React.FC = () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════════ */}
-          {/* TAB 2: APPEARANCE */}
+          {/* TAB: AUTO-SYNC & API HEALTH */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {activeTab === 'sync' && (
+            <div className="space-y-4">
+              {/* Auto-Sync & Polling Engine */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 dark:border-slate-750">
+                  <div className="flex items-center space-x-2">
+                    <RefreshCw className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        Background Auto-Sync
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Periodically query remote providers for new issues and tasks
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAutoSyncSettings({
+                        enabled: !autoSyncSettings.enabled,
+                        hasPrompted: true,
+                      })
+                    }
+                    className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
+                      autoSyncSettings.enabled
+                        ? 'bg-indigo-600 justify-end'
+                        : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    }`}
+                  >
+                    <div className="h-4 w-4 rounded-full bg-white shadow-xs" />
+                  </button>
+                </div>
+
+                {/* Polling Frequency Grid */}
+                <div>
+                  <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+                    <Clock className="h-3 w-3 text-indigo-500" />
+                    <span>Polling Frequency</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 1, label: '1 minute' },
+                      { value: 3, label: '3 minutes (Recommended)' },
+                      { value: 5, label: '5 minutes' },
+                      { value: 15, label: '15 minutes' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setAutoSyncSettings({ intervalMinutes: opt.value })}
+                        className={`py-1.5 px-2.5 text-xs rounded-lg border text-left transition-all ${
+                          autoSyncSettings.intervalMinutes === opt.value
+                            ? 'border-indigo-500 bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-semibold shadow-2xs'
+                            : 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notifications checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-slate-200/80 dark:border-slate-750">
+                  <input
+                    type="checkbox"
+                    checked={autoSyncSettings.notifyOnNewTasks}
+                    onChange={(e) =>
+                      setAutoSyncSettings({ notifyOnNewTasks: e.target.checked })
+                    }
+                    className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1.5 select-none">
+                    <Bell className="h-3 w-3 text-indigo-500" />
+                    <span>Show native desktop notification when new tasks are detected</span>
+                  </span>
+                </label>
+
+                {/* Manual Refresh Now */}
+                <div className="pt-1 flex items-center justify-between border-t border-slate-200/80 dark:border-slate-750 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Status: {autoSyncSettings.enabled ? 'Active background polling' : 'Manual only'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsManualSyncing(true);
+                      await refreshTasks();
+                      setIsManualSyncing(false);
+                    }}
+                    disabled={isManualSyncing}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                    <span>Sync Now</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* API Quota & Token Health */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
+                <div className="flex items-center space-x-2 pb-2 border-b border-slate-200/80 dark:border-slate-750">
+                  <Activity className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      API Quota & Token Health
+                    </h4>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Real-time rate limit headers and token expiration metadata
+                    </p>
+                  </div>
+                </div>
+
+                {/* GitHub Quota Card */}
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5">
+                      <Github className="h-3.5 w-3.5 text-slate-800 dark:text-slate-100" />
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        GitHub API Quota
+                      </span>
+                    </div>
+                    {authStatus.has_github ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                        {apiHealth.github.isRateLimited ? 'Throttled (0 Left)' : 'Active'}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
+                        Disconnected
+                      </span>
+                    )}
+                  </div>
+
+                  {authStatus.has_github ? (
+                    <div className="space-y-1.5 text-[11px]">
+                      {/* Visual Progress Bar */}
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pb-1">
+                          <span>Hourly Request Quota</span>
+                          <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
+                            {apiHealth.github.rateLimitRemaining ?? 5000} /{' '}
+                            {apiHealth.github.rateLimitLimit ?? 5000}
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-750 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              apiHealth.github.isRateLimited
+                                ? 'bg-rose-500'
+                                : (apiHealth.github.rateLimitRemaining ?? 5000) /
+                                    (apiHealth.github.rateLimitLimit ?? 5000) <
+                                  0.2
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500'
+                            }`}
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  2,
+                                  Math.round(
+                                    ((apiHealth.github.rateLimitRemaining ?? 5000) /
+                                      (apiHealth.github.rateLimitLimit ?? 5000)) *
+                                      100
+                                  )
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Reset Timestamp */}
+                      {apiHealth.github.rateLimitReset && (
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                          <span>Quota Reset</span>
+                          <span>
+                            in{' '}
+                            {Math.max(
+                              0,
+                              Math.round(
+                                (apiHealth.github.rateLimitReset - Date.now() / 1000) / 60
+                              )
+                            )}{' '}
+                            mins (
+                            {new Date(
+                              apiHealth.github.rateLimitReset * 1000
+                            ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            )
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Token Expiration Alert */}
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>Token Expiration:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {apiHealth.github.tokenExpiresAt
+                            ? apiHealth.github.tokenExpiresAt
+                            : 'No expiration set'}
+                        </span>
+                      </div>
+
+                      {apiHealth.github.isExpiringSoon && (
+                        <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] flex items-center gap-1.5">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>PAT expires within 7 days. Generate a new token to prevent interruption.</span>
+                        </div>
+                      )}
+
+                      <div className="pt-1 text-right">
+                        <a
+                          href="https://github.com/settings/tokens"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 font-medium"
+                        >
+                          <span>Manage Personal Access Tokens</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400">
+                      Connect your GitHub Personal Access Token in Integrations to view quota details.
+                    </p>
+                  )}
+                </div>
+
+                {/* Google Tasks Card */}
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5">
+                    <CheckSquare className="h-3.5 w-3.5 text-blue-500" />
+                    <div>
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 block">
+                        Google Tasks Connection
+                      </span>
+                      <span className="text-[10px] text-slate-400">OAuth 2.0 Loopback</span>
+                    </div>
+                  </div>
+                  {authStatus.has_google ? (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
+                      Disconnected
+                    </span>
+                  )}
+                </div>
+
+                {/* Rate-Limit Backoff Notice */}
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-100/60 dark:bg-slate-800/50 p-2 rounded-lg border border-slate-200/60 dark:border-slate-750">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>
+                    Smart Rate-Limit Back-Off: Polling automatically pauses whenever GitHub hourly
+                    quota is exhausted, resuming once the reset window arrives.
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* TAB 3: APPEARANCE */}
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'appearance' && (
             <div className="space-y-4">

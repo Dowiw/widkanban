@@ -40,6 +40,9 @@ export const Header: React.FC = () => {
     dismissLocallyDeletedTip,
     customization,
     toggleTheme,
+    apiHealth,
+    syncBanner,
+    setSyncBanner,
   } = useTaskStore();
 
   const [showSearch, setShowSearch] = useState(false);
@@ -98,6 +101,48 @@ export const Header: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showExtraTools, isToolsPinned]);
+
+  // Auto-dismiss syncBanner after 6 seconds
+  useEffect(() => {
+    if (!syncBanner) return;
+    const timer = setTimeout(() => setSyncBanner(null), 6000);
+    return () => clearTimeout(timer);
+  }, [syncBanner, setSyncBanner]);
+
+  // Compute overall API health state
+  let healthColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30';
+  let healthDot = 'bg-emerald-500';
+  let healthStatusText = 'API Quota Healthy';
+
+  const gh = apiHealth?.github;
+  const gg = apiHealth?.google;
+
+  const isRateLimited = gh?.isRateLimited;
+  const isExpiredOrError = gh?.errorMessage || gg?.errorMessage;
+  const isExpiringSoon = gh?.isExpiringSoon || gg?.isExpiringSoon;
+
+  const ghRemaining = gh?.rateLimitRemaining;
+  const ghLimit = gh?.rateLimitLimit;
+  const isLowQuota =
+    ghRemaining !== undefined && ghLimit !== undefined && ghLimit > 0 && ghRemaining / ghLimit < 0.2;
+
+  if (isRateLimited || (gh?.connected && isExpiredOrError)) {
+    healthColor = 'text-rose-500 bg-rose-500/10 border-rose-500/30';
+    healthDot = 'bg-rose-500 animate-pulse';
+    healthStatusText = isRateLimited
+      ? 'GitHub Rate Limit Reached (Backing off)'
+      : 'Token or API Error Detected';
+  } else if (isLowQuota || isExpiringSoon) {
+    healthColor = 'text-amber-500 bg-amber-500/10 border-amber-500/30';
+    healthDot = 'bg-amber-500';
+    healthStatusText = isExpiringSoon
+      ? 'Token Expiring Soon (Within 7 days)'
+      : `Low Quota: ${ghRemaining} / ${ghLimit} requests remaining`;
+  } else if (!authStatus.has_github && !authStatus.has_google) {
+    healthColor = 'text-slate-400 bg-slate-500/10 border-slate-500/20';
+    healthDot = 'bg-slate-400';
+    healthStatusText = 'No Accounts Connected';
+  }
 
   const ghCount = tasks.filter((t) => t.source === 'github').length;
   const gtCount = tasks.filter((t) => t.source === 'google_tasks').length;
@@ -342,6 +387,44 @@ export const Header: React.FC = () => {
               <span>Sync</span>
             </button>
 
+            {/* API Health & Quota Pill */}
+            {(authStatus.has_github || authStatus.has_google) && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                title={`${healthStatusText}\n• GitHub: ${
+                  ghRemaining !== undefined
+                    ? `${ghRemaining} / ${ghLimit} requests remaining`
+                    : authStatus.has_github
+                    ? 'Connected'
+                    : 'Not configured'
+                }${
+                  gh?.rateLimitReset
+                    ? ` (Resets in ${Math.max(
+                        0,
+                        Math.round((gh.rateLimitReset - Date.now() / 1000) / 60)
+                      )}m)`
+                    : ''
+                }\n• Google Tasks: ${
+                  authStatus.has_google
+                    ? gg?.connected
+                      ? 'Active'
+                      : 'Error'
+                    : 'Not configured'
+                }\nClick to view API Health in Settings.`}
+                className={`px-1.5 py-0.5 rounded-md border flex items-center space-x-1 text-[10px] font-medium transition-colors ${healthColor}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${healthDot}`} />
+                <span>
+                  {isRateLimited
+                    ? 'Throttled'
+                    : ghRemaining !== undefined
+                    ? `${ghRemaining}`
+                    : 'API OK'}
+                </span>
+              </button>
+            )}
+
             {/* Quick Theme Toggle */}
             <button
               type="button"
@@ -445,6 +528,24 @@ export const Header: React.FC = () => {
             className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-200/60 hover:bg-amber-200 dark:bg-amber-800/60 dark:hover:bg-amber-700 text-amber-900 dark:text-amber-100 transition-colors"
           >
             Got it
+          </button>
+        </div>
+      )}
+
+      {/* 5. In-App Sync Banner */}
+      {syncBanner && (
+        <div className="mx-2.5 my-1 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[11px] flex items-center justify-between animate-in fade-in slide-in-from-top-1">
+          <span className="flex items-center gap-1.5 truncate">
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping shrink-0" />
+            <span className="truncate">{syncBanner}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSyncBanner(null)}
+            className="text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 p-0.5 rounded transition-colors ml-2 shrink-0"
+            title="Dismiss"
+          >
+            <X className="h-3 w-3" />
           </button>
         </div>
       )}

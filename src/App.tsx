@@ -5,6 +5,7 @@ import { AddTaskModal } from './components/AddTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { DeleteTaskModal } from './components/DeleteTaskModal';
+import { AutoSyncPromptModal } from './components/AutoSyncPromptModal';
 import { useTaskStore } from './store/useTaskStore';
 
 export const App: React.FC = () => {
@@ -15,6 +16,10 @@ export const App: React.FC = () => {
     customization,
     isPinned,
     syncWindowResizable,
+    autoSyncSettings,
+    setAutoSyncPromptOpen,
+    refreshTasksWithDiff,
+    fetchApiHealth,
   } = useTaskStore();
 
   const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
@@ -55,9 +60,31 @@ export const App: React.FC = () => {
     checkAuthStatus().then((status) => {
       if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
         setSettingsOpen(true);
+      } else if ((status.has_github || status.has_google) && !autoSyncSettings.hasPrompted) {
+        setAutoSyncPromptOpen(true);
       }
     });
-  }, [checkAuthStatus, hasCompletedOnboarding, setSettingsOpen]);
+    fetchApiHealth();
+  }, [
+    checkAuthStatus,
+    hasCompletedOnboarding,
+    setSettingsOpen,
+    autoSyncSettings.hasPrompted,
+    setAutoSyncPromptOpen,
+    fetchApiHealth,
+  ]);
+
+  // Periodic Auto-Sync Polling Engine
+  useEffect(() => {
+    if (!autoSyncSettings.enabled) return;
+
+    const intervalMs = Math.max(1, autoSyncSettings.intervalMinutes) * 60 * 1000;
+    const timer = setInterval(() => {
+      refreshTasksWithDiff();
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [autoSyncSettings.enabled, autoSyncSettings.intervalMinutes, refreshTasksWithDiff]);
 
   const fontClass =
     customization.fontFamily === 'unifont'
@@ -93,6 +120,7 @@ export const App: React.FC = () => {
       <SettingsModal />
       <GitHubSetupModal />
       <DeleteTaskModal />
+      <AutoSyncPromptModal />
     </div>
   );
 };

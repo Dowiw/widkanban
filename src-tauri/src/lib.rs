@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -18,6 +20,39 @@ pub struct StoredCredentials {
 pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealth {
+    pub connected: bool,
+    pub rate_limit_remaining: Option<u32>,
+    pub rate_limit_limit: Option<u32>,
+    pub rate_limit_reset: Option<u64>,
+    pub token_expires_at: Option<String>,
+    pub is_expiring_soon: Option<bool>,
+    pub is_rate_limited: Option<bool>,
+    pub last_checked: Option<u64>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiHealthState {
+    pub github: ProviderHealth,
+    pub google: ProviderHealth,
+}
+
+fn current_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn get_health_store() -> &'static Mutex<ApiHealthState> {
+    static STORE: std::sync::OnceLock<Mutex<ApiHealthState>> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(ApiHealthState::default()))
 }
 
 // ─── Provider Specific Detailed Models ──────────────────────────────────────
@@ -400,6 +435,52 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, String> {
+    let creds = read_credentials(&app_handle);
+    let mut health = get_health_store().lock().map(|h| h.clone()).unwrap_or_default();
+
+    if health.github.last_checked.is_none() {
+        health.github.connected = creds.github_token.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
+    }
+    if health.google.last_checked.is_none() {
+        health.google.connected = creds.google_token.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
+    }
+
+    Ok(health)
+}
+
+#[tauri::command]
+fn send_desktop_notification(title: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_title = title.replace('\'', "''").replace('"', "`\"");
+        let escaped_body = body.replace('\'', "''").replace('"', "`\"");
+        let script = format!(
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
+             $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); \
+             $textNodes = $template.GetElementsByTagName('text'); \
+             $textNodes.Item(0).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $textNodes.Item(1).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('WidKanban'); \
+             $notification = [Windows.UI.Notifications.ToastNotification]::new($template); \
+             $notifier.Show($notification);",
+            escaped_title,
+            escaped_body
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("notify-send")
+            .args([&title, &body])
+            .spawn();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn toggle_always_on_top(window: tauri::Window) -> Result<bool, String> {
     let is_on_top = window.is_always_on_top().unwrap_or(false);
     window.set_always_on_top(!is_on_top).map_err(|e| e.to_string())?;
@@ -432,7 +513,7 @@ fn save_credentials(
     google_token: Option<String>,
 ) -> Result<AuthStatus, String> {
     let mut creds = read_credentials(&app_handle);
-    if let Some(gh) = github_token {
+    if let Some(gh) = github_token.as_ref() {
         let trimmed = gh.trim().to_string();
         if trimmed.is_empty() {
             creds.github_token = None;
@@ -440,7 +521,7 @@ fn save_credentials(
             creds.github_token = Some(trimmed);
         }
     }
-    if let Some(gt) = google_token {
+    if let Some(gt) = google_token.as_ref() {
         let trimmed = gt.trim().to_string();
         if trimmed.is_empty() {
             creds.google_token = None;
@@ -449,6 +530,17 @@ fn save_credentials(
         }
     }
     write_credentials(&app_handle, &creds)?;
+
+    if let Ok(mut health) = get_health_store().lock() {
+        if github_token.is_some() {
+            health.github.connected = creds.github_token.is_some();
+            health.github.error_message = None;
+        }
+        if google_token.is_some() {
+            health.google.connected = creds.google_token.is_some();
+            health.google.error_message = None;
+        }
+    }
 
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
@@ -472,6 +564,15 @@ fn clear_credentials(
     }
     write_credentials(&app_handle, &creds)?;
 
+    if let Ok(mut health) = get_health_store().lock() {
+        if provider.as_deref() == Some("github") || provider.is_none() {
+            health.github = ProviderHealth::default();
+        }
+        if provider.as_deref() == Some("google") || provider.is_none() {
+            health.google = ProviderHealth::default();
+        }
+    }
+
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
         has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
@@ -486,7 +587,13 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
     let token = creds
         .google_token
         .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+        .ok_or_else(|| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.google.connected = false;
+                health.google.error_message = Some("Google Tasks token not configured".to_string());
+            }
+            "Google Tasks token not configured".to_string()
+        })?;
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -499,7 +606,33 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch task lists: {}", e))?;
+        .map_err(|e| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.google.connected = false;
+                health.google.error_message = Some(format!("Network error: {}", e));
+            }
+            format!("Failed to fetch task lists: {}", e)
+        })?;
+
+    let lists_status = lists_resp.status();
+    let now = current_epoch_seconds();
+    if let Ok(mut health) = get_health_store().lock() {
+        health.google = ProviderHealth {
+            connected: lists_status.is_success(),
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: None,
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: if lists_status.is_success() {
+                None
+            } else {
+                Some(format!("HTTP {}", lists_status))
+            },
+        };
+    }
 
     if !lists_resp.status().is_success() {
         let status = lists_resp.status();
@@ -658,7 +791,13 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
     let token = creds
         .github_token
         .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
+        .ok_or_else(|| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.github.connected = false;
+                health.github.error_message = Some("GitHub token not configured".to_string());
+            }
+            "GitHub token not configured".to_string()
+        })?;
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -672,7 +811,55 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch GitHub issues: {}", e))?;
+        .map_err(|e| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.github.connected = false;
+                health.github.error_message = Some(format!("Network error: {}", e));
+            }
+            format!("Failed to fetch GitHub issues: {}", e)
+        })?;
+
+    let rate_limit_limit = resp
+        .headers()
+        .get("x-ratelimit-limit")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+    let rate_limit_remaining = resp
+        .headers()
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+    let rate_limit_reset = resp
+        .headers()
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    let token_expires_at = resp
+        .headers()
+        .get("github-authentication-token-expiration")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+    let now = current_epoch_seconds();
+
+    if let Ok(mut health) = get_health_store().lock() {
+        health.github = ProviderHealth {
+            connected: resp.status().is_success(),
+            rate_limit_remaining,
+            rate_limit_limit,
+            rate_limit_reset,
+            token_expires_at,
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(is_rate_limited),
+            last_checked: Some(now),
+            error_message: if resp.status().is_success() {
+                None
+            } else {
+                Some(format!("HTTP {}", resp.status()))
+            },
+        };
+    }
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1393,6 +1580,8 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_api_health,
+            send_desktop_notification,
             toggle_always_on_top,
             minimize_window,
             close_app,
@@ -1673,6 +1862,42 @@ mod tests {
         assert!(serialized.contains("variables"));
         assert!(serialized.contains("foo"));
     }
+
+    #[test]
+    fn test_api_health_state_serialization() {
+        let health = ApiHealthState {
+            github: ProviderHealth {
+                connected: true,
+                rate_limit_remaining: Some(4950),
+                rate_limit_limit: Some(5000),
+                rate_limit_reset: Some(1792529000),
+                token_expires_at: Some("2026-11-20 00:00:00 UTC".to_string()),
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: Some(1792520000),
+                error_message: None,
+            },
+            google: ProviderHealth {
+                connected: false,
+                rate_limit_remaining: None,
+                rate_limit_limit: None,
+                rate_limit_reset: None,
+                token_expires_at: None,
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: None,
+                error_message: Some("Google Tasks token not configured".to_string()),
+            },
+        };
+        let serialized = serde_json::to_string(&health).expect("serialization failed");
+        assert!(serialized.contains("rateLimitRemaining"));
+        assert!(serialized.contains("4950"));
+        assert!(serialized.contains("tokenExpiresAt"));
+        assert!(serialized.contains("errorMessage"));
+        let deserialized: ApiHealthState = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(health, deserialized);
+    }
 }
+
 
 

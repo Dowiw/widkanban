@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useTaskStore } from './useTaskStore';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
-import { UnifiedTask } from '../types/task';
+import { UnifiedTask, DEFAULT_AUTOSYNC_SETTINGS, DEFAULT_API_HEALTH_STATE } from '../types/task';
 
 // Access the mocked invoke so we can control its return value per-test
 import { invoke } from '@tauri-apps/api/core';
@@ -13,6 +13,7 @@ describe('useTaskStore', () => {
     localStorage.clear();
 
     // Reset the invoke mock to default (returns null → safeInvoke returns null)
+    mockInvoke.mockClear();
     mockInvoke.mockResolvedValue(null);
 
     // Reset store state before each test
@@ -25,6 +26,10 @@ describe('useTaskStore', () => {
       isSettingsOpen: false,
       hasCompletedOnboarding: false,
       authStatus: { has_github: false, has_google: false },
+      autoSyncSettings: DEFAULT_AUTOSYNC_SETTINGS,
+      isAutoSyncPromptOpen: false,
+      apiHealth: DEFAULT_API_HEALTH_STATE,
+      syncBanner: null,
     });
   });
 
@@ -737,6 +742,152 @@ describe('useTaskStore', () => {
       expect(mockInvoke).toHaveBeenCalledWith('reset_window_geometry', undefined);
       expect(useTaskStore.getState().customization.defaultWidth).toBe(380);
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
+    });
+  });
+
+  describe('Auto-Sync & API Health Tracking', () => {
+    it('initializes with default autoSyncSettings and apiHealth', () => {
+      const state = useTaskStore.getState();
+      expect(state.autoSyncSettings.enabled).toBe(false);
+      expect(state.autoSyncSettings.intervalMinutes).toBe(3);
+      expect(state.autoSyncSettings.notifyOnNewTasks).toBe(true);
+      expect(state.autoSyncSettings.hasPrompted).toBe(false);
+      expect(state.isAutoSyncPromptOpen).toBe(false);
+      expect(state.apiHealth.github.connected).toBe(false);
+      expect(state.syncBanner).toBeNull();
+    });
+
+    it('updates autoSyncSettings with partial updates', () => {
+      const { setAutoSyncSettings } = useTaskStore.getState();
+      setAutoSyncSettings({ enabled: true, intervalMinutes: 5 });
+
+      const state = useTaskStore.getState();
+      expect(state.autoSyncSettings.enabled).toBe(true);
+      expect(state.autoSyncSettings.intervalMinutes).toBe(5);
+      expect(state.autoSyncSettings.notifyOnNewTasks).toBe(true); // preserved
+    });
+
+    it('controls auto-sync prompt modal open and sync banner', () => {
+      const { setAutoSyncPromptOpen, setSyncBanner } = useTaskStore.getState();
+      setAutoSyncPromptOpen(true);
+      expect(useTaskStore.getState().isAutoSyncPromptOpen).toBe(true);
+
+      setSyncBanner('2 new tasks detected');
+      expect(useTaskStore.getState().syncBanner).toBe('2 new tasks detected');
+
+      setSyncBanner(null);
+      expect(useTaskStore.getState().syncBanner).toBeNull();
+    });
+
+    it('fetches api health and detects token expiring soon', async () => {
+      const futureDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_api_health') {
+          return {
+            github: {
+              connected: true,
+              rateLimitRemaining: 4800,
+              rateLimitLimit: 5000,
+              rateLimitReset: Math.floor(Date.now() / 1000) + 1800,
+              tokenExpiresAt: futureDate,
+              isExpiringSoon: false,
+              isRateLimited: false,
+            },
+            google: {
+              connected: true,
+            },
+          };
+        }
+        return null;
+      });
+
+      const { fetchApiHealth } = useTaskStore.getState();
+      const res = await fetchApiHealth();
+
+      expect(mockInvoke).toHaveBeenCalledWith('get_api_health', undefined);
+      expect(res?.github.rateLimitRemaining).toBe(4800);
+      expect(res?.github.isExpiringSoon).toBe(true); // accurately flagged because 3 days <= 7 days
+      expect(useTaskStore.getState().apiHealth.github.rateLimitRemaining).toBe(4800);
+    });
+
+    it('refreshTasksWithDiff detects new tasks, sets banner, and triggers notification', async () => {
+      const initialTask: UnifiedTask = {
+        id: 'gh_initial',
+        title: 'Initial Issue',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/issues/1',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+
+      const newTask: UnifiedTask = {
+        id: 'gh_new_99',
+        title: 'Brand New Assigned Issue',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/issues/99',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+
+      useTaskStore.setState({
+        tasks: [initialTask],
+        autoSyncSettings: {
+          enabled: true,
+          intervalMinutes: 3,
+          notifyOnNewTasks: true,
+          hasPrompted: true,
+        },
+        authStatus: { has_github: true, has_google: false },
+      });
+
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_auth_status') return { has_github: true, has_google: false };
+        if (cmd === 'fetch_github_tasks') return [initialTask, newTask];
+        if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: false } };
+        if (cmd === 'send_desktop_notification') return null;
+        return null;
+      });
+
+      const { refreshTasksWithDiff } = useTaskStore.getState();
+      const diffResult = await refreshTasksWithDiff();
+
+      expect(diffResult.addedCount).toBe(1);
+      expect(diffResult.newTasks[0].id).toBe('gh_new_99');
+      expect(useTaskStore.getState().syncBanner).toBe('New task synced: Brand New Assigned Issue');
+      expect(mockInvoke).toHaveBeenCalledWith('send_desktop_notification', {
+        title: 'WidKanban: New Task Assigned',
+        body: 'Brand New Assigned Issue',
+      });
+    });
+
+    it('skips GitHub fetch during refresh when rate limited', async () => {
+      useTaskStore.setState({
+        authStatus: { has_github: true, has_google: false },
+        apiHealth: {
+          github: {
+            connected: true,
+            isRateLimited: true,
+            rateLimitReset: Math.floor(Date.now() / 1000) + 3600, // 1 hour in the future
+          },
+          google: { connected: false },
+        },
+      });
+
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_auth_status') return { has_github: true, has_google: false };
+        if (cmd === 'get_api_health') return useTaskStore.getState().apiHealth;
+        return null;
+      });
+
+      mockInvoke.mockClear();
+
+      const { refreshTasksWithDiff } = useTaskStore.getState();
+      await refreshTasksWithDiff();
+
+      // fetch_github_tasks should NOT have been called because it is rate limited!
+      expect(mockInvoke).not.toHaveBeenCalledWith('fetch_github_tasks', undefined);
     });
   });
 });
