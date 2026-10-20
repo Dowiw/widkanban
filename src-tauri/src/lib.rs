@@ -1465,6 +1465,9 @@ pub fn run() {
 
             if let Some(icon) = app.default_window_icon() {
                 builder = builder.icon(icon.clone());
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_icon(icon.clone());
+                }
             }
 
             let _tray = builder.build(app)?;
