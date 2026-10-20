@@ -108,6 +108,8 @@ pub struct SourceMeta {
     pub subtask_count: Option<usize>,
     pub subtasks: Option<Vec<SubtaskItem>>,
     pub links: Option<Vec<TaskLink>>,
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -116,6 +118,8 @@ pub struct UnifiedTask {
     pub title: String,
     pub source: String,      // "github" | "google_tasks"
     pub status: String,      // "todo" | "in_progress" | "done"
+    #[serde(default)]
+    pub priority: Option<String>,
     pub url: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
@@ -622,6 +626,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title,
             source: "google_tasks".to_string(),
             status,
+            priority: None,
             url,
             updated_at,
             description: task.notes.clone(),
@@ -644,6 +649,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count,
                 subtasks,
                 links,
+                priority: None,
             },
         });
     }
@@ -787,6 +793,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title: issue.title,
             source: "github".to_string(),
             status,
+            priority: None,
             url: issue.html_url,
             updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
             description: issue.body,
@@ -809,6 +816,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count: None,
                 subtasks: None,
                 links: None,
+                priority: None,
             },
         });
     }

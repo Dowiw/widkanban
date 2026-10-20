@@ -261,7 +261,12 @@ export const useTaskStore = create<TaskState>()(
       },
 
       addTask: (newTaskData) => {
-        const id = `${newTaskData.source === 'github' ? 'gh' : 'gt'}_${Date.now()}`;
+        const rawUuid =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+            : Date.now().toString(36);
+        const prefix = newTaskData.source === 'github' ? 'gh' : 'gt';
+        const id = `${prefix}_${rawUuid}`;
         const task: UnifiedTask = {
           ...newTaskData,
           id,

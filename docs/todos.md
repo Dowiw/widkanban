@@ -77,9 +77,9 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
 
 ### Production Add Task Workflow ([#9](https://github.com/Dowiw/widkanban/issues/9))
-- [ ] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.
-- [ ] Support production fields: Title, Provider (GitHub / Google Tasks), Status column, target repo/list, and description notes.
-- [ ] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
+- [x] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.
+- [x] Support production fields: Title, Provider (GitHub / Google Tasks), Status column, target repo/list, and description notes.
+- [x] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
 
 ### API Rate Limit & Token Expiration Tracking ([#11](https://github.com/Dowiw/widkanban/issues/11))
 - [ ] GitHub PAT rate limit header tracking (`x-ratelimit-*`) and expiration date tracking (`github-authentication-token-expiration`).
