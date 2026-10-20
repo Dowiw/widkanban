@@ -739,4 +739,95 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('Smart container discovery and permissions (Batch 4)', () => {
+    beforeEach(() => {
+      mockInvoke.mockClear();
+    });
+
+    it('fetchAvailableContainers populates repos, google lists, microsoft lists, and roles', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'fetch_user_github_repos') {
+          return [
+            { name: 'Dowiw/widkanban', isOwner: true },
+            { name: 'microsoft/vscode', isOwner: false },
+          ];
+        }
+        if (cmd === 'fetch_google_task_lists') {
+          return [
+            { id: 'g_list_1', title: 'Personal Tasks' },
+            { id: 'g_list_2', title: 'Work' },
+          ];
+        }
+        if (cmd === 'fetch_microsoft_todo_lists') {
+          return [
+            { id: 'ms_list_1', title: 'Daily Tasks', isOwner: true },
+          ];
+        }
+        if (cmd === 'get_organization_roles') {
+          return {
+            teamsRole: 'student',
+            blackboardRole: 'student',
+          };
+        }
+        return null;
+      });
+
+      const { fetchAvailableContainers } = useTaskStore.getState();
+      await fetchAvailableContainers();
+
+      const state = useTaskStore.getState();
+      expect(state.availableRepos).toHaveLength(2);
+      expect(state.availableRepos[0].name).toBe('Dowiw/widkanban');
+      expect(state.availableGoogleLists).toHaveLength(2);
+      expect(state.availableMicrosoftLists).toHaveLength(1);
+      expect(state.organizationRoles.teamsRole).toBe('student');
+      expect(state.organizationRoles.blackboardRole).toBe('student');
+    });
+
+    it('createGoogleTaskList invokes IPC and appends newly created list', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        id: 'new_g_list_123',
+        title: 'Sprint Planning',
+      });
+
+      const { createGoogleTaskList } = useTaskStore.getState();
+      const created = await createGoogleTaskList('Sprint Planning');
+
+      expect(created).toBeDefined();
+      expect(created?.id).toBe('new_g_list_123');
+      expect(mockInvoke).toHaveBeenCalledWith('create_google_task_list', {
+        title: 'Sprint Planning',
+      });
+
+      const lists = useTaskStore.getState().availableGoogleLists;
+      expect(lists.some((l) => l.id === 'new_g_list_123')).toBe(true);
+    });
+
+    it('createMicrosoftTodoList invokes IPC and appends newly created list', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        id: 'new_ms_list_456',
+        title: 'Project Roadmap',
+        isOwner: true,
+      });
+
+      const { createMicrosoftTodoList } = useTaskStore.getState();
+      const created = await createMicrosoftTodoList('Project Roadmap');
+
+      expect(created).toBeDefined();
+      expect(created?.id).toBe('new_ms_list_456');
+      expect(mockInvoke).toHaveBeenCalledWith('create_microsoft_todo_list', {
+        title: 'Project Roadmap',
+      });
+
+      const lists = useTaskStore.getState().availableMicrosoftLists;
+      expect(lists.some((l) => l.id === 'new_ms_list_456')).toBe(true);
+    });
+
+    it('setLastUsedRepo updates lastUsedRepo in store', () => {
+      const { setLastUsedRepo } = useTaskStore.getState();
+      setLastUsedRepo('facebook/react');
+      expect(useTaskStore.getState().lastUsedRepo).toBe('facebook/react');
+    });
+  });
 });

@@ -1,4 +1,4 @@
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft' | 'teams' | 'blackboard';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export interface GitHubLabel {
@@ -133,4 +133,25 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   defaultHeight: 680,
   rememberWindowPlacement: true,
 };
+
+export interface RepoSummary {
+  name: string;
+  isOwner: boolean;
+}
+
+export interface GoogleTaskListSummary {
+  id: string;
+  title: string;
+}
+
+export interface MSToDoListSummary {
+  id: string;
+  title: string;
+  isOwner: boolean;
+}
+
+export interface OrganizationRoles {
+  teamsRole: 'student' | 'instructor';
+  blackboardRole: 'student' | 'instructor';
+}
 

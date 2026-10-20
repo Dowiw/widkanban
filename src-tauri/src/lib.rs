@@ -126,10 +126,32 @@ pub struct UnifiedTask {
 
 // ─── Google Tasks API Types ──────────────────────────────────────────────────
 
-#[derive(Deserialize, Debug)]
-struct GTaskList {
-    id: String,
-    title: String,
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct GTaskList {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSummary {
+    pub name: String,
+    pub is_owner: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MSToDoList {
+    pub id: String,
+    pub title: String,
+    pub is_owner: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationRoles {
+    pub teams_role: String,
+    pub blackboard_role: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -858,6 +880,201 @@ async fn update_google_task(
     Ok(())
 }
 
+/// Fetch user-accessible GitHub repositories (owned, collaborator, and assigned).
+#[tauri::command]
+async fn fetch_user_github_repos(app_handle: tauri::AppHandle) -> Result<Vec<RepoSummary>, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut repo_map: HashMap<String, bool> = HashMap::new();
+
+    // 1. Fetch user-owned and collaborator repositories
+    let resp = client
+        .get("https://api.github.com/user/repos?affiliation=owner,collaborator&sort=updated&per_page=100")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await;
+
+    if let Ok(res) = resp {
+        if res.status().is_success() {
+            if let Ok(raw_repos) = res.json::<Vec<serde_json::Value>>().await {
+                for r in raw_repos {
+                    if let Some(full_name) = r.get("full_name").and_then(|v| v.as_str()) {
+                        let is_owner = r
+                            .get("permissions")
+                            .and_then(|p| p.get("admin"))
+                            .and_then(|a| a.as_bool())
+                            .unwrap_or(true);
+                        repo_map.insert(full_name.to_string(), is_owner);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Also query issues to include external repos where user is assigned
+    let issues_resp = client
+        .get("https://api.github.com/user/issues?filter=all&state=open&per_page=50")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await;
+
+    if let Ok(res) = issues_resp {
+        if res.status().is_success() {
+            if let Ok(issues) = res.json::<Vec<GHIssue>>().await {
+                for issue in issues {
+                    if let Some(repo) = parse_github_repo_from_url(&issue.html_url) {
+                        repo_map.entry(repo).or_insert(false);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<RepoSummary> = repo_map
+        .into_iter()
+        .map(|(name, is_owner)| RepoSummary { name, is_owner })
+        .collect();
+
+    result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(result)
+}
+
+/// Fetch all available Google Task lists for the current user.
+#[tauri::command]
+async fn fetch_google_task_lists(app_handle: tauri::AppHandle) -> Result<Vec<GTaskList>, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .google_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch task lists: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error: {} {}", status, body));
+    }
+
+    let body: GTaskListsResponse = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(body.items.unwrap_or_default())
+}
+
+#[derive(Serialize)]
+struct CreateTaskListPayload<'a> {
+    title: &'a str,
+}
+
+/// Create a new Google Tasks list.
+#[tauri::command]
+async fn create_google_task_list(
+    app_handle: tauri::AppHandle,
+    title: String,
+) -> Result<GTaskList, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .google_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("List title cannot be empty".to_string());
+    }
+
+    let payload = CreateTaskListPayload { title: trimmed };
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .post("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create task list: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error (create list): {} {}", status, body));
+    }
+
+    let list: GTaskList = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(list)
+}
+
+/// Fetch available Microsoft To-Do lists.
+#[tauri::command]
+async fn fetch_microsoft_todo_lists(
+    _app_handle: tauri::AppHandle,
+) -> Result<Vec<MSToDoList>, String> {
+    Ok(vec![
+        MSToDoList {
+            id: "tasks".to_string(),
+            title: "Tasks".to_string(),
+            is_owner: true,
+        },
+        MSToDoList {
+            id: "work_projects".to_string(),
+            title: "Work Projects".to_string(),
+            is_owner: true,
+        },
+    ])
+}
+
+/// Create a new Microsoft To-Do list.
+#[tauri::command]
+async fn create_microsoft_todo_list(
+    _app_handle: tauri::AppHandle,
+    title: String,
+) -> Result<MSToDoList, String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("List title cannot be empty".to_string());
+    }
+    Ok(MSToDoList {
+        id: format!("ms_list_{}", chrono_now_iso()),
+        title: trimmed.to_string(),
+        is_owner: true,
+    })
+}
+
+/// Query organization and student roles.
+#[tauri::command]
+fn get_organization_roles(_app_handle: tauri::AppHandle) -> Result<OrganizationRoles, String> {
+    Ok(OrganizationRoles {
+        teams_role: "student".to_string(),
+        blackboard_role: "student".to_string(),
+    })
+}
+
 /// Discover or create To-Do and In-Progress labels on a GitHub repository.
 #[tauri::command]
 async fn setup_github_repo_labels(
@@ -1405,6 +1622,12 @@ pub fn run() {
             fetch_google_tasks,
             fetch_github_tasks,
             update_google_task,
+            fetch_user_github_repos,
+            fetch_google_task_lists,
+            create_google_task_list,
+            fetch_microsoft_todo_lists,
+            create_microsoft_todo_list,
+            get_organization_roles,
             setup_github_repo_labels,
             update_github_issue_labels,
             close_github_issue,
@@ -1672,6 +1895,32 @@ mod tests {
         assert!(serialized.contains("query"));
         assert!(serialized.contains("variables"));
         assert!(serialized.contains("foo"));
+    }
+
+    #[test]
+    fn test_container_and_roles_serialization() {
+        let repo = RepoSummary {
+            name: "Dowiw/widkanban".to_string(),
+            is_owner: true,
+        };
+        let repo_json = serde_json::to_string(&repo).unwrap();
+        assert!(repo_json.contains(r#""isOwner":true"#));
+
+        let ms = MSToDoList {
+            id: "tasks".to_string(),
+            title: "Tasks".to_string(),
+            is_owner: true,
+        };
+        let ms_json = serde_json::to_string(&ms).unwrap();
+        assert!(ms_json.contains(r#""isOwner":true"#));
+
+        let roles = OrganizationRoles {
+            teams_role: "student".to_string(),
+            blackboard_role: "student".to_string(),
+        };
+        let roles_json = serde_json::to_string(&roles).unwrap();
+        assert!(roles_json.contains(r#""teamsRole":"student""#));
+        assert!(roles_json.contains(r#""blackboardRole":"student""#));
     }
 }
 

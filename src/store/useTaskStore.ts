@@ -12,6 +12,10 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  RepoSummary,
+  GoogleTaskListSummary,
+  MSToDoListSummary,
+  OrganizationRoles,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -112,6 +116,17 @@ interface TaskState {
   checkAuthStatus: () => Promise<AuthStatus>;
   saveCredentials: (creds: { githubToken?: string; googleToken?: string }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
+
+  // Smart Container Discovery & Permissions
+  availableRepos: RepoSummary[];
+  availableGoogleLists: GoogleTaskListSummary[];
+  availableMicrosoftLists: MSToDoListSummary[];
+  lastUsedRepo: string;
+  organizationRoles: OrganizationRoles;
+  setLastUsedRepo: (repo: string) => void;
+  fetchAvailableContainers: () => Promise<void>;
+  createGoogleTaskList: (title: string) => Promise<GoogleTaskListSummary | null>;
+  createMicrosoftTodoList: (title: string) => Promise<MSToDoListSummary | null>;
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -144,6 +159,25 @@ export const useTaskStore = create<TaskState>()(
 
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
+
+      // Smart Container Discovery & Permissions
+      availableRepos: [
+        { name: 'Dowiw/widkanban', isOwner: true },
+        { name: 'org/project-dashboard', isOwner: false },
+      ],
+      availableGoogleLists: [
+        { id: 'personal', title: 'Personal Tasks' },
+        { id: 'work', title: 'Work & Projects' },
+      ],
+      availableMicrosoftLists: [
+        { id: 'tasks', title: 'Tasks', isOwner: true },
+        { id: 'work_projects', title: 'Work Projects', isOwner: true },
+      ],
+      lastUsedRepo: 'Dowiw/widkanban',
+      organizationRoles: {
+        teamsRole: 'student',
+        blackboardRole: 'student',
+      },
 
       moveTask: (taskId, targetStatus, targetIndex) => {
         // --- Optimistic UI update ---
@@ -485,6 +519,7 @@ export const useTaskStore = create<TaskState>()(
         const promises: Promise<void>[] = [];
         if (status.has_google) promises.push(get().fetchGoogleTasks());
         if (status.has_github) promises.push(get().fetchGithubTasks());
+        promises.push(get().fetchAvailableContainers());
         await Promise.all(promises);
       },
 
@@ -565,6 +600,70 @@ export const useTaskStore = create<TaskState>()(
         }
         return false;
       },
+
+      setLastUsedRepo: (repo) => set({ lastUsedRepo: repo }),
+
+      fetchAvailableContainers: async () => {
+        // 1. Fetch GitHub repos
+        const ghRes = await safeInvokeWithResult<RepoSummary[]>('fetch_user_github_repos');
+        if (ghRes.success && ghRes.data && ghRes.data.length > 0) {
+          set({ availableRepos: ghRes.data });
+        }
+
+        // 2. Fetch Google lists
+        const gRes = await safeInvokeWithResult<GoogleTaskListSummary[]>('fetch_google_task_lists');
+        if (gRes.success && gRes.data && gRes.data.length > 0) {
+          set({ availableGoogleLists: gRes.data });
+        }
+
+        // 3. Fetch Microsoft lists
+        const msRes = await safeInvokeWithResult<MSToDoListSummary[]>('fetch_microsoft_todo_lists');
+        if (msRes.success && msRes.data && msRes.data.length > 0) {
+          set({ availableMicrosoftLists: msRes.data });
+        }
+
+        // 4. Fetch organization roles
+        const rolesRes = await safeInvokeWithResult<OrganizationRoles>('get_organization_roles');
+        if (rolesRes.success && rolesRes.data) {
+          set({ organizationRoles: rolesRes.data });
+        }
+      },
+
+      createGoogleTaskList: async (title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+
+        const res = await safeInvokeWithResult<GoogleTaskListSummary>('create_google_task_list', {
+          title: trimmed,
+        });
+
+        const newList: GoogleTaskListSummary = res.success && res.data
+          ? res.data
+          : { id: `gt_list_${Date.now()}`, title: trimmed };
+
+        set((state) => ({
+          availableGoogleLists: [...state.availableGoogleLists, newList],
+        }));
+        return newList;
+      },
+
+      createMicrosoftTodoList: async (title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+
+        const res = await safeInvokeWithResult<MSToDoListSummary>('create_microsoft_todo_list', {
+          title: trimmed,
+        });
+
+        const newList: MSToDoListSummary = res.success && res.data
+          ? res.data
+          : { id: `ms_list_${Date.now()}`, title: trimmed, isOwner: true };
+
+        set((state) => ({
+          availableMicrosoftLists: [...state.availableMicrosoftLists, newList],
+        }));
+        return newList;
+      },
     }),
     {
       name: 'widkanban-store',
@@ -579,6 +678,7 @@ export const useTaskStore = create<TaskState>()(
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
+        lastUsedRepo: state.lastUsedRepo,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };

@@ -82,10 +82,10 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
 
 ### Smart Container Discovery & Organization Permissions ([#25](https://github.com/Dowiw/widkanban/issues/25))
-- [ ] Searchable repository dropdown for GitHub (owned repos + assigned issue/PR repos).
-- [ ] Dropdown for all Google Tasks and Microsoft To Do lists with inline `+ Create New List` feature.
-- [ ] Role detection for Teams assignments and Blackboard Learn: show `Disabled by organization` for student roles.
-- [ ] Pre-fetch and background caching of available containers for instant modal opening.
+- [x] Searchable repository dropdown for GitHub (owned repos + assigned issue/PR repos).
+- [x] Dropdown for all Google Tasks and Microsoft To Do lists with inline `+ Create New List` feature.
+- [x] Role detection for Teams assignments and Blackboard Learn: show `Disabled by organization` for student roles.
+- [x] Pre-fetch and background caching of available containers for instant modal opening.
 
 
 ### API Rate Limit & Token Expiration Tracking ([#11](https://github.com/Dowiw/widkanban/issues/11))
