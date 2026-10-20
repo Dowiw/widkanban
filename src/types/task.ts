@@ -75,6 +75,8 @@ export interface UnifiedTask {
 export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
+  github_from_env?: boolean;
+  google_from_env?: boolean;
 }
 
 export interface GitHubSyncSettings {

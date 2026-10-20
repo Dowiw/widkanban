@@ -416,6 +416,23 @@ describe('useTaskStore', () => {
     expect(useTaskStore.getState().isGithubSetupOpen).toBe(true);
   });
 
+  it('checkAuthStatus updates store with env indicator flags', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      has_github: true,
+      has_google: true,
+      github_from_env: true,
+      google_from_env: false,
+    });
+
+    const { checkAuthStatus } = useTaskStore.getState();
+    const status = await checkAuthStatus();
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_auth_status', undefined);
+    expect(status.github_from_env).toBe(true);
+    expect(status.google_from_env).toBe(false);
+    expect(useTaskStore.getState().authStatus.github_from_env).toBe(true);
+  });
+
   it('setupRepoLabels invokes setup_github_repo_labels command with configured labels', async () => {
     mockInvoke.mockResolvedValueOnce({
       repo: 'org/widkanban',
