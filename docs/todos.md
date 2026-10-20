@@ -120,9 +120,9 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] In-card subtask creation (`POST ...?parent=...`) and hover deletion.
 
 ### Blackboard Learn LMS Integration ([#24](https://github.com/Dowiw/widkanban/issues/24))
-- [ ] Ingest Blackboard assignments, assessments, and calendar due dates (`GET /learn/api/public/v1/...`).
-- [ ] Settings connection card for institution domain and personal token.
-- [ ] Dedicated Blackboard filter tab and direct assignment submission links.
+- [x] Ingest Blackboard assignments, assessments, and calendar due dates (`GET /learn/api/public/v1/...`).
+- [x] Settings connection card for institution domain and personal token.
+- [x] Dedicated Blackboard filter tab and direct assignment submission links.
 
 ### Native Desktop Notifications
 - [ ] System notifications when new issues or tasks are assigned to the user.
