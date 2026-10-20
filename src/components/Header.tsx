@@ -19,6 +19,7 @@ import {
   Ellipsis
 } from 'lucide-react';
 import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
+import { DeadlineFilterDropdown } from './DeadlineFilterDropdown';
 
 export const Header: React.FC = () => {
   const { 
@@ -277,6 +278,9 @@ export const Header: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Deadline Filter & Sort Dropdown */}
+          <DeadlineFilterDropdown />
 
           {/* Add Mock Task Button */}
           <button

@@ -739,4 +739,76 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('deadline tracking and priority filtering (Batch 1)', () => {
+    it('sets deadline filter and sort options in store', () => {
+      const { setDeadlineFilter, setDeadlineSort } = useTaskStore.getState();
+
+      setDeadlineFilter('overdue');
+      expect(useTaskStore.getState().deadlineFilter).toBe('overdue');
+
+      setDeadlineSort('soonest');
+      expect(useTaskStore.getState().deadlineSort).toBe('soonest');
+    });
+
+    it('optimistically updates task deadline and invokes update_github_deadline IPC', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const { addTask, updateGitHubDeadline } = useTaskStore.getState();
+
+      addTask({
+        title: 'Review authentication RFC',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/widkanban/issues/42',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 42, isPullRequest: true },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Review authentication RFC')!;
+      const dueIso = '2026-10-25T18:00:00.000Z';
+
+      const res = await updateGitHubDeadline(task.id, 'org/widkanban', 42, true, dueIso, 'review');
+      expect(res.success).toBe(true);
+
+      const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
+      expect(updated.sourceMeta?.dueDate).toBe(dueIso);
+      expect(updated.sourceMeta?.deadlineType).toBe('review');
+
+      expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
+        repo: 'org/widkanban',
+        issueNumber: 42,
+        isPr: true,
+        dueDate: dueIso,
+        deadlineType: 'review',
+      });
+    });
+
+    it('clears task deadline on remote and optimistically updates store', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const { addTask, updateGitHubDeadline } = useTaskStore.getState();
+
+      addTask({
+        title: 'Test issue with due date',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/widkanban/issues/99',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 99, dueDate: '2026-10-25T00:00:00Z' },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Test issue with due date')!;
+      const res = await updateGitHubDeadline(task.id, 'org/widkanban', 99, false, null);
+      expect(res.success).toBe(true);
+
+      const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
+      expect(updated.sourceMeta?.dueDate).toBeUndefined();
+
+      expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
+        repo: 'org/widkanban',
+        issueNumber: 99,
+        isPr: false,
+        dueDate: null,
+        deadlineType: null,
+      });
+    });
+  });
 });
+
