@@ -363,7 +363,15 @@ export const Header: React.FC = () => {
             <button
               type="button"
               onClick={handleTogglePin}
-              title={isPinned ? 'Always on top (Active - Resizing Locked)' : 'Always on top (Inactive - Resizing Enabled)'}
+              title={
+                isPinned
+                  ? `Pinned to ${
+                      customization.pinMode === 'desktop-layer'
+                        ? 'Desktop Layer'
+                        : 'Always on Top'
+                    } (Movement & Resizing Locked)`
+                  : 'Unpinned (Movement & Resizing Enabled)'
+              }
               className={`px-2 py-1 rounded-md transition-colors flex items-center space-x-1 text-[11px] font-medium ${
                 isPinned 
                   ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/70 dark:text-indigo-400 border border-indigo-200/70 dark:border-indigo-800/60' 
@@ -371,7 +379,13 @@ export const Header: React.FC = () => {
               }`}
             >
               <Pin className={`h-3 w-3 ${isPinned ? 'fill-indigo-600 dark:fill-indigo-400' : ''}`} />
-              <span>{isPinned ? 'Pinned' : 'Pin'}</span>
+              <span>
+                {isPinned
+                  ? customization.pinMode === 'desktop-layer'
+                    ? 'Desktop'
+                    : 'Pinned'
+                  : 'Pin'}
+              </span>
             </button>
 
             {/* Hidden / Deleted Tasks */}

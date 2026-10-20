@@ -99,23 +99,25 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Built-in local HTTP callback server (`http://localhost:<port>/callback`) for seamless Google sign-in without needing the OAuth Playground.
 
 ### Cross-Platform OS Autostart & Persistence ([#4](https://github.com/Dowiw/widkanban/issues/4))
-- [ ] Cross-platform launch at startup (`tauri-plugin-autostart`) for Windows (Registry), macOS (LaunchAgent), and Linux (XDG Autostart).
-- [ ] User onboarding prompt asking for consent to start on boot (`[Launch on Startup]` / `[Not Now]`).
-- [ ] Settings switches for "Launch on Startup" and optional "Start Minimized to System Tray".
-- [ ] Remember and restore last dragged window placement and size on boot.
+- [x] Cross-platform launch at startup for Windows (Registry HKCU), macOS (LaunchAgent), and Linux (XDG Autostart).
+- [x] User onboarding prompt asking for consent to start on boot (`[Launch on Startup]` / `[Not Now]`).
+- [x] Settings switches for "Launch on Startup" and optional "Start Minimized to System Tray".
+- [x] Remember and restore last dragged window placement and size on boot.
+
+### Desktop Widget Layer Mode (Always on Bottom) ([#5](https://github.com/Dowiw/widkanban/issues/5))
+- [x] Support for true desktop wallpaper pinning where the widget stays behind active windows (`HWND_BOTTOM`, `kCGDesktopWindowLevel`, and `_NET_WM_STATE_BELOW`).
+- [x] Functional movement and resizing locks (`data-tauri-drag-region` disabled and native `set_window_resizable(false)`).
+- [x] Seamless switching between Always on Top, Desktop Layer, and Standard Window modes in Settings and System Tray.
 
 ### Developer Credential Overrides via `.env` ([#6](https://github.com/Dowiw/widkanban/issues/6))
 - [ ] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
 - [ ] Add `.env.example` template with dummy keys and update contributor onboarding guides.
-
-
 
 ---
 
 ## Future Ideas & Enhancements
 
 - **Microsoft 365 & Teams Integration** ([#3](https://github.com/Dowiw/widkanban/issues/3)): Support for Teams for Education Assignments, Microsoft Planner ("Assigned to Me"), Microsoft To Do, and Outlook Flagged Emails across personal and school/organization accounts.
-- **Desktop Widget Layer Mode (Always on Bottom)** ([#5](https://github.com/Dowiw/widkanban/issues/5)): Support for true desktop wallpaper pinning where the widget stays behind active windows (`HWND_BOTTOM`, `kCGDesktopWindowLevel`, and `_NET_WM_STATE_BELOW`) with functional window movement and border resizing locks.
 - **GitLab & Jira Integrations**: Optional adapters following the same `UnifiedTask` normalization schema.
 - **Custom Board Columns**: Allowing user-defined workflow columns beyond the default 3 columns.
 - **Offline Mode & Queue**: Queuing write-back actions during offline network states and replaying on reconnect.
