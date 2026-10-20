@@ -109,8 +109,14 @@ interface TaskState {
   refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
+  fetchBlackboardTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
-  saveCredentials: (creds: { githubToken?: string; googleToken?: string }) => Promise<boolean>;
+  saveCredentials: (creds: {
+    githubToken?: string;
+    googleToken?: string;
+    blackboardDomain?: string;
+    blackboardToken?: string;
+  }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
 }
 
@@ -128,6 +134,7 @@ export const useTaskStore = create<TaskState>()(
       authStatus: {
         has_github: false,
         has_google: false,
+        has_blackboard: false,
       },
       githubSyncSettings: {
         manageLabels: true,
@@ -485,6 +492,7 @@ export const useTaskStore = create<TaskState>()(
         const promises: Promise<void>[] = [];
         if (status.has_google) promises.push(get().fetchGoogleTasks());
         if (status.has_github) promises.push(get().fetchGithubTasks());
+        if (status.has_blackboard) promises.push(get().fetchBlackboardTasks());
         await Promise.all(promises);
       },
 
@@ -510,6 +518,18 @@ export const useTaskStore = create<TaskState>()(
         });
       },
 
+      fetchBlackboardTasks: async () => {
+        const fetched = await safeInvoke<UnifiedTask[]>('fetch_blackboard_tasks');
+        if (!fetched) return;
+
+        set((state) => {
+          const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
+          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
+          const nonBlackboardTasks = state.tasks.filter((t) => t.source !== 'blackboard');
+          return { tasks: [...nonBlackboardTasks, ...activeFetched] };
+        });
+      },
+
       checkAuthStatus: async () => {
         const res = await safeInvoke<AuthStatus>('get_auth_status');
         if (res) {
@@ -519,10 +539,12 @@ export const useTaskStore = create<TaskState>()(
         return get().authStatus;
       },
 
-      saveCredentials: async ({ githubToken, googleToken }) => {
+      saveCredentials: async ({ githubToken, googleToken, blackboardDomain, blackboardToken }) => {
         const res = await safeInvoke<AuthStatus>('save_credentials', {
           githubToken: githubToken || null,
           googleToken: googleToken || null,
+          blackboardDomain: blackboardDomain || null,
+          blackboardToken: blackboardToken || null,
         });
         if (res) {
           const isFirstGithubConnect =
@@ -537,6 +559,7 @@ export const useTaskStore = create<TaskState>()(
           const syncs: Promise<void>[] = [];
           if (res.has_google) syncs.push(get().fetchGoogleTasks());
           if (res.has_github) syncs.push(get().fetchGithubTasks());
+          if (res.has_blackboard) syncs.push(get().fetchBlackboardTasks());
           await Promise.all(syncs);
           return true;
         }
@@ -555,6 +578,9 @@ export const useTaskStore = create<TaskState>()(
             }
             if (provider === 'github' || !provider) {
               updatedTasks = updatedTasks.filter((t) => t.source !== 'github');
+            }
+            if (provider === 'blackboard' || !provider) {
+              updatedTasks = updatedTasks.filter((t) => t.source !== 'blackboard');
             }
             return {
               authStatus: res,

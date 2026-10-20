@@ -739,4 +739,79 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('Blackboard Learn LMS Integration', () => {
+    it('dispatches save_credentials and clear_credentials with blackboard parameters', async () => {
+      const { saveCredentials, clearCredentials } = useTaskStore.getState();
+
+      await saveCredentials({
+        blackboardDomain: 'blackboard.univ.edu',
+        blackboardToken: 'bb_pat_secret_999',
+      });
+
+      expect(mockInvoke).toHaveBeenCalledWith('save_credentials', {
+        githubToken: null,
+        googleToken: null,
+        blackboardDomain: 'blackboard.univ.edu',
+        blackboardToken: 'bb_pat_secret_999',
+      });
+
+      await clearCredentials('blackboard');
+      expect(mockInvoke).toHaveBeenCalledWith('clear_credentials', { provider: 'blackboard' });
+    });
+
+    it('fetches blackboard tasks, merges them, and filters out locally deleted tasks', async () => {
+      const bbTask: UnifiedTask = {
+        id: 'bb_item_123',
+        title: 'Midterm Research Project',
+        description: 'Submit PDF report',
+        source: 'blackboard',
+        status: 'todo',
+        url: 'https://blackboard.univ.edu/webapps/calendar/launch/attempt/123',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {
+          dueDate: '2026-11-15T23:59:00Z',
+          courseName: 'CS 401 Software Engineering',
+          courseCode: 'CS401',
+          submissionUrl: 'https://blackboard.univ.edu/webapps/calendar/launch/attempt/123',
+          isGraded: true,
+        },
+      };
+
+      const hiddenBbTask: UnifiedTask = {
+        id: 'bb_item_999',
+        title: 'Hidden Old Quiz',
+        source: 'blackboard',
+        status: 'done',
+        url: 'https://blackboard.univ.edu/attempt/999',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+
+      // Set locally deleted task in store
+      useTaskStore.setState({
+        locallyDeletedTasks: [hiddenBbTask],
+        tasks: [],
+      });
+
+      mockInvoke.mockResolvedValueOnce([bbTask, hiddenBbTask]);
+
+      const { fetchBlackboardTasks } = useTaskStore.getState();
+      await fetchBlackboardTasks();
+
+      const tasks = useTaskStore.getState().tasks;
+      expect(tasks.some((t) => t.id === 'bb_item_123')).toBe(true);
+      expect(tasks.some((t) => t.id === 'bb_item_999')).toBe(false);
+
+      const found = tasks.find((t) => t.id === 'bb_item_123');
+      expect(found?.sourceMeta?.courseName).toBe('CS 401 Software Engineering');
+      expect(found?.sourceMeta?.submissionUrl).toBe('https://blackboard.univ.edu/webapps/calendar/launch/attempt/123');
+    });
+
+    it('filters tasks by blackboard source correctly in state', () => {
+      const { setFilterSource } = useTaskStore.getState();
+      setFilterSource('blackboard');
+      expect(useTaskStore.getState().filterSource).toBe('blackboard');
+    });
+  });
 });

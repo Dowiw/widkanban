@@ -1,4 +1,4 @@
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'blackboard';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export interface GitHubLabel {
@@ -69,12 +69,23 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;
+
+    // --- Blackboard Learn LMS ---
+    courseId?: string;
+    courseName?: string;
+    courseCode?: string;
+    submissionUrl?: string;
+    isGraded?: boolean;
+    score?: number;
+    totalPoints?: number;
   };
 }
 
 export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
+  has_blackboard?: boolean;
+  blackboard_domain?: string;
 }
 
 export interface GitHubSyncSettings {

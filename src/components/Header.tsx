@@ -16,7 +16,8 @@ import {
   Sun,
   Moon,
   Monitor,
-  Ellipsis
+  Ellipsis,
+  GraduationCap
 } from 'lucide-react';
 import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
 
@@ -101,6 +102,7 @@ export const Header: React.FC = () => {
 
   const ghCount = tasks.filter((t) => t.source === 'github').length;
   const gtCount = tasks.filter((t) => t.source === 'google_tasks').length;
+  const bbCount = tasks.filter((t) => t.source === 'blackboard').length;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -214,6 +216,20 @@ export const Header: React.FC = () => {
             <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
             <span>Google</span>
             <span className="text-[10px] font-mono opacity-75">({gtCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterSource('blackboard')}
+            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
+              filterSource === 'blackboard'
+                ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 shadow-2xs'
+                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+            }`}
+          >
+            <GraduationCap className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" />
+            <span>Blackboard</span>
+            <span className="text-[10px] font-mono opacity-75">({bbCount})</span>
           </button>
         </div>
 

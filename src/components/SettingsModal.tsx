@@ -22,7 +22,8 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Type
+  Type,
+  GraduationCap
 } from 'lucide-react';
 import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
 
@@ -38,6 +39,7 @@ export const SettingsModal: React.FC = () => {
     clearCredentials,
     fetchGoogleTasks,
     fetchGithubTasks,
+    fetchBlackboardTasks,
     setCompletedOnboarding,
     customization,
     setCustomization,
@@ -49,12 +51,16 @@ export const SettingsModal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
   const [githubToken, setGithubToken] = useState('');
   const [googleToken, setGoogleToken] = useState('');
+  const [blackboardDomain, setBlackboardDomain] = useState(authStatus.blackboard_domain || '');
+  const [blackboardToken, setBlackboardToken] = useState('');
   const [showGithub, setShowGithub] = useState(false);
   const [showGoogle, setShowGoogle] = useState(false);
+  const [showBlackboard, setShowBlackboard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [isFetchingBlackboard, setIsFetchingBlackboard] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
 
   if (!isSettingsOpen) return null;
@@ -67,12 +73,15 @@ export const SettingsModal: React.FC = () => {
     await saveCredentials({
       githubToken: githubToken.trim() || undefined,
       googleToken: googleToken.trim() || undefined,
+      blackboardDomain: blackboardDomain.trim() || undefined,
+      blackboardToken: blackboardToken.trim() || undefined,
     });
 
     setIsSaving(false);
     setSaveSuccess(true);
     setGithubToken('');
     setGoogleToken('');
+    setBlackboardToken('');
     setCompletedOnboarding(true);
 
     setTimeout(() => {
@@ -80,7 +89,7 @@ export const SettingsModal: React.FC = () => {
     }, 1500);
   };
 
-  const handleDisconnect = async (provider: 'github' | 'google') => {
+  const handleDisconnect = async (provider: 'github' | 'google' | 'blackboard') => {
     await clearCredentials(provider);
   };
 
@@ -94,6 +103,12 @@ export const SettingsModal: React.FC = () => {
     setIsFetchingGithub(true);
     await fetchGithubTasks();
     setIsFetchingGithub(false);
+  };
+
+  const handleFetchBlackboardTasks = async () => {
+    setIsFetchingBlackboard(true);
+    await fetchBlackboardTasks();
+    setIsFetchingBlackboard(false);
   };
 
   const handleClose = () => {
@@ -373,6 +388,100 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Blackboard Learn LMS Section */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <GraduationCap className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Blackboard Learn LMS</span>
+                  </div>
+                  {authStatus.has_blackboard ? (
+                    <div className="flex items-center space-x-1.5">
+                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
+                        <Check className="h-2.5 w-2.5" />
+                        <span>Connected</span>
+                      </span>
+                      {authStatus.blackboard_domain && (
+                        <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 max-w-[120px] truncate">
+                          {authStatus.blackboard_domain}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleFetchBlackboardTasks}
+                        disabled={isFetchingBlackboard}
+                        title="Sync Blackboard Assignments"
+                        className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-800 rounded transition-colors"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isFetchingBlackboard ? 'animate-spin text-amber-600 dark:text-amber-400' : ''}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDisconnect('blackboard')}
+                        title="Disconnect Blackboard"
+                        className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 rounded transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-300">
+                      Not Configured
+                    </span>
+                  )}
+                </div>
+
+                {/* Institution Domain */}
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Institution Domain
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={authStatus.blackboard_domain || 'blackboard.university.edu'}
+                    value={blackboardDomain}
+                    onChange={(e) => setBlackboardDomain(e.target.value)}
+                    className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1.5 px-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Personal Access Token */}
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Access Token / User Bearer Token
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showBlackboard ? 'text' : 'password'}
+                      placeholder={authStatus.has_blackboard ? '•••••••••••••••• (Leave blank to keep current)' : 'Token from institution or Learn REST API'}
+                      value={blackboardToken}
+                      onChange={(e) => setBlackboardToken(e.target.value)}
+                      className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1.5 pl-2.5 pr-8 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowBlackboard(!showBlackboard)}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      {showBlackboard ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                  <span>Syncs calendar deadlines and course grade items.</span>
+                  <a
+                    href="https://docs.anthology.com/rest-apis/learn/getting-started"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-amber-600 dark:text-amber-400 hover:underline flex items-center space-x-0.5 font-medium"
+                  >
+                    <span>API Docs</span>
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                </div>
+              </div>
+
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -385,11 +494,11 @@ export const SettingsModal: React.FC = () => {
 
                 <button
                   type="submit"
-                  disabled={isSaving || (!githubToken.trim() && !googleToken.trim())}
+                  disabled={isSaving || (!githubToken.trim() && !googleToken.trim() && !blackboardToken.trim() && !blackboardDomain.trim())}
                   className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     saveSuccess
                       ? 'bg-emerald-600 text-white'
-                      : isSaving || (!githubToken.trim() && !googleToken.trim())
+                      : isSaving || (!githubToken.trim() && !googleToken.trim() && !blackboardToken.trim() && !blackboardDomain.trim())
                       ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-[0.98]'
                   }`}
