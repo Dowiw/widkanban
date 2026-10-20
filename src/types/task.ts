@@ -1,4 +1,4 @@
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft_teams';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export interface GitHubLabel {
@@ -36,7 +36,7 @@ export interface PRBranchInfo {
 }
 
 export interface UnifiedTask {
-  id: string;             // e.g., 'gh_102' or 'gt_abc123'
+  id: string;             // e.g., 'gh_102' or 'gt_abc123' or 'ms_xyz789'
   title: string;
   source: TaskSource;
   status: TaskStatus;
@@ -69,12 +69,23 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;
+
+    // --- Microsoft 365 & Teams ---
+    teamName?: string;           // Teams channel or team name
+    courseName?: string;         // Teams for Education class name
+    assignmentId?: string;       // Unique assignment ID
+    isAssignment?: boolean;      // Teams for Education Assignment
+    isPlanner?: boolean;         // Microsoft Planner card
+    isFlaggedEmail?: boolean;    // Outlook flagged email
+    percentComplete?: number;    // Planner task percentage (0 - 100)
+    submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
 
 export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
+  has_microsoft: boolean;
 }
 
 export interface GitHubSyncSettings {
