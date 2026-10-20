@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
 import { TaskSource, TaskStatus } from '../types/task';
-import { X, Github, CheckSquare, Plus } from 'lucide-react';
+import { X, Github, CheckSquare, Plus, Users } from 'lucide-react';
 
 export const AddTaskModal: React.FC = () => {
   const { isAddTaskOpen, setAddTaskOpen, addTask } = useTaskStore();
@@ -28,6 +28,19 @@ export const AddTaskModal: React.FC = () => {
           issueNumber: Math.floor(Math.random() * 899) + 100,
           labels: [{ name: 'user-created', color: '6366f1' }],
           isPullRequest: false,
+        },
+      });
+    } else if (source === 'microsoft_teams') {
+      addTask({
+        title: title.trim(),
+        source: 'microsoft_teams',
+        status,
+        url: 'https://teams.microsoft.com',
+        sourceMeta: {
+          teamName: metaInfo.trim() || 'Teams Channel',
+          isPlanner: true,
+          percentComplete: status === 'done' ? 100 : status === 'in_progress' ? 50 : 0,
+          dueDate: new Date().toISOString(),
         },
       });
     } else {
@@ -73,30 +86,42 @@ export const AddTaskModal: React.FC = () => {
           {/* Source Selection */}
           <div>
             <label className="block text-slate-600 dark:text-slate-300 mb-1 font-medium">Provider</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
                 onClick={() => setSource('github')}
-                className={`flex items-center justify-center space-x-1.5 p-2 rounded-lg border transition-all ${
+                className={`flex flex-col items-center justify-center space-y-1 p-2 rounded-lg border text-center transition-all ${
                   source === 'github'
                     ? 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-500/60 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <Github className="h-3.5 w-3.5" />
-                <span>GitHub Issue</span>
+                <span className="text-[10px]">GitHub</span>
               </button>
               <button
                 type="button"
                 onClick={() => setSource('google_tasks')}
-                className={`flex items-center justify-center space-x-1.5 p-2 rounded-lg border transition-all ${
+                className={`flex flex-col items-center justify-center space-y-1 p-2 rounded-lg border text-center transition-all ${
                   source === 'google_tasks'
                     ? 'bg-blue-50 dark:bg-blue-950/80 border-blue-500/60 text-blue-700 dark:text-blue-300 font-semibold shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <CheckSquare className="h-3.5 w-3.5" />
-                <span>Google Task</span>
+                <span className="text-[10px]">Google</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSource('microsoft_teams')}
+                className={`flex flex-col items-center justify-center space-y-1 p-2 rounded-lg border text-center transition-all ${
+                  source === 'microsoft_teams'
+                    ? 'bg-violet-50 dark:bg-violet-950/80 border-violet-500/60 text-violet-700 dark:text-violet-300 font-semibold shadow-xs'
+                    : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span className="text-[10px]">Teams</span>
               </button>
             </div>
           </div>
@@ -131,11 +156,21 @@ export const AddTaskModal: React.FC = () => {
           {/* Extra Meta */}
           <div>
             <label className="block text-slate-600 dark:text-slate-300 mb-1 font-medium">
-              {source === 'github' ? 'Repository Name' : 'Task List Name'}
+              {source === 'github'
+                ? 'Repository Name'
+                : source === 'microsoft_teams'
+                ? 'Team or Course Name'
+                : 'Task List Name'}
             </label>
             <input
               type="text"
-              placeholder={source === 'github' ? 'widkanban' : 'Work'}
+              placeholder={
+                source === 'github'
+                  ? 'widkanban'
+                  : source === 'microsoft_teams'
+                  ? 'Engineering Team'
+                  : 'Work'
+              }
               value={metaInfo}
               onChange={(e) => setMetaInfo(e.target.value)}
               className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500"

@@ -16,7 +16,8 @@ import {
   Sun,
   Moon,
   Monitor,
-  Ellipsis
+  Ellipsis,
+  Users
 } from 'lucide-react';
 import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
 
@@ -101,6 +102,7 @@ export const Header: React.FC = () => {
 
   const ghCount = tasks.filter((t) => t.source === 'github').length;
   const gtCount = tasks.filter((t) => t.source === 'google_tasks').length;
+  const msCount = tasks.filter((t) => t.source === 'microsoft_teams').length;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -215,6 +217,20 @@ export const Header: React.FC = () => {
             <span>Google</span>
             <span className="text-[10px] font-mono opacity-75">({gtCount})</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterSource('microsoft_teams')}
+            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
+              filterSource === 'microsoft_teams'
+                ? 'bg-violet-50 text-violet-600 dark:bg-violet-950/70 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 shadow-2xs'
+                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+            }`}
+          >
+            <Users className="h-3 w-3 text-violet-500 dark:text-violet-400 shrink-0" />
+            <span>Teams</span>
+            <span className="text-[10px] font-mono opacity-75">({msCount})</span>
+          </button>
         </div>
 
         {/* Right: Primary Controls (Search, Add +, Settings, More ...) */}
@@ -296,7 +312,7 @@ export const Header: React.FC = () => {
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors relative"
           >
             <Settings className="h-3.5 w-3.5" />
-            {(authStatus.has_github || authStatus.has_google) && (
+            {(authStatus.has_github || authStatus.has_google || authStatus.has_microsoft) && (
               <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
             )}
           </button>
