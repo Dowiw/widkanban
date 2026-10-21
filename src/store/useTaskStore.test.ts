@@ -756,4 +756,114 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('Google Tasks interactive subtasks management (Batch 3)', () => {
+    const sampleGoogleTask: UnifiedTask = {
+      id: 'gt_parent_1',
+      title: 'Parent Task',
+      source: 'google_tasks',
+      status: 'todo',
+      url: 'https://tasks.google.com',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {
+        listId: 'work_list',
+        listTitle: 'Work',
+        hasSubtasks: true,
+        subtaskCount: 2,
+        subtasks: [
+          { id: 'gt_sub_1', title: 'Subtask 1', status: 'todo' },
+          { id: 'gt_sub_2', title: 'Subtask 2', status: 'done' },
+        ],
+      },
+    };
+
+    beforeEach(() => {
+      useTaskStore.setState({
+        tasks: [sampleGoogleTask],
+      });
+      mockInvoke.mockClear();
+    });
+
+    it('toggleGoogleSubtask toggles status between todo and done and dispatches update_google_subtask', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const { toggleGoogleSubtask } = useTaskStore.getState();
+
+      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
+
+      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
+      const subtask1 = task.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
+      expect(subtask1.status).toBe('done');
+
+      expect(mockInvoke).toHaveBeenCalledWith('update_google_subtask', {
+        taskId: 'sub_1',
+        listId: 'work_list',
+        newStatus: 'done',
+      });
+
+      // Toggle back to todo
+      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
+      const subtask1Again = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
+      expect(subtask1Again.status).toBe('todo');
+
+      expect(mockInvoke).toHaveBeenCalledWith('update_google_subtask', {
+        taskId: 'sub_1',
+        listId: 'work_list',
+        newStatus: 'todo',
+      });
+    });
+
+    it('toggleGoogleSubtask reverts optimistic state if IPC command fails', async () => {
+      mockInvoke.mockRejectedValueOnce(new Error('Network error'));
+      const { toggleGoogleSubtask } = useTaskStore.getState();
+
+      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
+
+      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
+      const subtask1 = task.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
+      expect(subtask1.status).toBe('todo');
+    });
+
+    it('createGoogleSubtask adds subtask optimistically and updates with remote result', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        id: 'gt_remote_sub_999',
+        title: 'New Subtask',
+        status: 'todo',
+      });
+
+      const { createGoogleSubtask } = useTaskStore.getState();
+      const created = await createGoogleSubtask('gt_parent_1', 'New Subtask');
+
+      expect(created).toBeDefined();
+      expect(created?.id).toBe('gt_remote_sub_999');
+
+      expect(mockInvoke).toHaveBeenCalledWith('create_google_subtask', {
+        listId: 'work_list',
+        parentId: 'parent_1',
+        title: 'New Subtask',
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
+      expect(task.sourceMeta.subtasks).toHaveLength(3);
+      expect(task.sourceMeta.subtaskCount).toBe(3);
+      expect(task.sourceMeta.hasSubtasks).toBe(true);
+      expect(task.sourceMeta.subtasks?.some((s) => s.id === 'gt_remote_sub_999')).toBe(true);
+    });
+
+    it('deleteGoogleSubtask removes subtask optimistically and dispatches delete_google_subtask', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const { deleteGoogleSubtask } = useTaskStore.getState();
+
+      await deleteGoogleSubtask('gt_parent_1', 'gt_sub_1');
+
+      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
+      expect(task.sourceMeta.subtasks).toHaveLength(1);
+      expect(task.sourceMeta.subtaskCount).toBe(1);
+      expect(task.sourceMeta.subtasks?.some((s) => s.id === 'gt_sub_1')).toBe(false);
+
+      expect(mockInvoke).toHaveBeenCalledWith('delete_google_subtask', {
+        listId: 'work_list',
+        subtaskId: 'sub_1',
+      });
+    });
+  });
 });
