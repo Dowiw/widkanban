@@ -132,8 +132,11 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] **Linux**: `.AppImage` and `.deb` distribution packages.
 - [ ] **macOS**: Signed `.dmg` application packages.
 
-### In-App OAuth Loopback Flow
-- [ ] Built-in local HTTP callback server (`http://localhost:<port>/callback`) for seamless Google sign-in without needing the OAuth Playground.
+### In-App OAuth Loopback Flow & Token Refresh ([#32](https://github.com/Dowiw/widkanban/issues/32))
+- [ ] Ephemeral local HTTP loopback server (`http://127.0.0.1:<port>`) for 1-click Google OAuth sign-in.
+- [ ] PKCE flow capturing permanent refresh token (`1//...`) alongside access token in native Rust storage.
+- [ ] Automatic background token renewal before API requests, eliminating 1-hour expiration dropouts.
+- [ ] Branded "Sign in with Google" button in `SettingsModal.tsx` and first-connect onboarding.
 
 ### Cross-Platform OS Autostart & Persistence ([#4](https://github.com/Dowiw/widkanban/issues/4))
 - [ ] Cross-platform launch at startup (`tauri-plugin-autostart`) for Windows (Registry), macOS (LaunchAgent), and Linux (XDG Autostart).
