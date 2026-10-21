@@ -12,6 +12,8 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  DeadlineFilterOption,
+  DeadlineSortOption,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -96,6 +98,18 @@ interface TaskState {
     repo: string,
     issueNumber: number
   ) => Promise<{ success: boolean; error?: string }>;
+  deadlineFilter: DeadlineFilterOption;
+  deadlineSort: DeadlineSortOption;
+  setDeadlineFilter: (filter: DeadlineFilterOption) => void;
+  setDeadlineSort: (sort: DeadlineSortOption) => void;
+  updateGitHubDeadline: (
+    taskId: string,
+    repo: string,
+    issueNumber: number,
+    isPr: boolean,
+    dueDate: string | null,
+    deadlineType?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -141,6 +155,10 @@ export const useTaskStore = create<TaskState>()(
       deletePreference: null,
       hasSeenLocallyDeletedTip: false,
       isTrashDropdownOpen: false,
+
+      // Deadline filter & sort
+      deadlineFilter: 'all',
+      deadlineSort: 'none',
 
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
@@ -498,6 +516,42 @@ export const useTaskStore = create<TaskState>()(
         });
       },
 
+      setDeadlineFilter: (filter) => set({ deadlineFilter: filter }),
+      setDeadlineSort: (sort) => set({ deadlineSort: sort }),
+
+      updateGitHubDeadline: async (taskId, repo, issueNumber, isPr, dueDate, deadlineType) => {
+        const prevTasks = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((t) => {
+            if (t.id === taskId) {
+              return {
+                ...t,
+                sourceMeta: {
+                  ...t.sourceMeta,
+                  dueDate: dueDate || undefined,
+                  deadlineType: deadlineType || t.sourceMeta.deadlineType,
+                },
+              };
+            }
+            return t;
+          }),
+        }));
+
+        const res = await safeInvokeWithResult('update_github_deadline', {
+          repo,
+          issueNumber,
+          isPr,
+          dueDate: dueDate || null,
+          deadlineType: deadlineType || null,
+        });
+
+        if (!res.success) {
+          set({ tasks: prevTasks });
+          return { success: false, error: res.error };
+        }
+        return { success: true };
+      },
+
       fetchGithubTasks: async () => {
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
         if (!fetched) return;
@@ -579,6 +633,8 @@ export const useTaskStore = create<TaskState>()(
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
+        deadlineFilter: state.deadlineFilter,
+        deadlineSort: state.deadlineSort,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };

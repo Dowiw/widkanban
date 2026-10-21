@@ -3,6 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { UnifiedTask, GitHubLabel, SubtaskItem } from '../types/task';
 import { useTaskStore } from '../store/useTaskStore';
+import { getSmartDueDate } from '../utils/deadline';
 import { 
   CheckSquare, 
   ExternalLink, 
@@ -20,7 +21,11 @@ import {
   Check,
   Tag,
   GitBranch,
-  GitFork
+  GitFork,
+  Clock,
+  AlertCircle,
+  X,
+  CalendarPlus
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -28,29 +33,7 @@ interface TaskCardProps {
   isOverlay?: boolean;
 }
 
-function getSmartDueDate(dueDateStr?: string): { label: string; urgency: 'overdue' | 'today' | 'upcoming' } | null {
-  if (!dueDateStr) return null;
-  const due = new Date(dueDateStr);
-  if (isNaN(due.getTime())) return { label: dueDateStr, urgency: 'upcoming' };
 
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const target = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const diffTime = target.getTime() - today.getTime();
-  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0) {
-    const formatted = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    return { label: `Overdue · ${formatted}`, urgency: 'overdue' };
-  } else if (diffDays === 0) {
-    return { label: 'Today', urgency: 'today' };
-  } else if (diffDays === 1) {
-    return { label: 'Tomorrow', urgency: 'upcoming' };
-  } else {
-    const formatted = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    return { label: formatted, urgency: 'upcoming' };
-  }
-}
 
 function getContrastTextColor(hex: string): string {
   const clean = hex.replace('#', '');
@@ -69,10 +52,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     deletePreference,
     closeGitHubIssueOnRemote,
     deleteGitHubIssuePermanentlyOnRemote,
+    updateGitHubDeadline,
     customization,
   } = useTaskStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
+  const [customDate, setCustomDate] = useState('');
+  const [deadlineType, setDeadlineType] = useState<'deadline' | 'review'>(
+    (task.sourceMeta?.deadlineType as 'deadline' | 'review') || 'deadline'
+  );
 
   const {
     attributes,
@@ -94,7 +83,39 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   };
 
   const isGitHub = task.source === 'github';
-  const smartDue = getSmartDueDate(task.sourceMeta?.dueDate);
+  const smartDue = getSmartDueDate(task.sourceMeta?.dueDate, task.status);
+
+  const getPresetDate = (preset: 'today' | 'tomorrow' | 'in3days' | 'nextMonday'): string => {
+    const d = new Date();
+    if (preset === 'today') {
+      d.setHours(23, 59, 59, 999);
+    } else if (preset === 'tomorrow') {
+      d.setDate(d.getDate() + 1);
+      d.setHours(23, 59, 59, 999);
+    } else if (preset === 'in3days') {
+      d.setDate(d.getDate() + 3);
+      d.setHours(23, 59, 59, 999);
+    } else if (preset === 'nextMonday') {
+      const day = d.getDay();
+      const daysUntilNextMonday = ((7 - day + 1) % 7) || 7;
+      d.setDate(d.getDate() + daysUntilNextMonday);
+      d.setHours(23, 59, 59, 999);
+    }
+    return d.toISOString();
+  };
+
+  const handleSetDeadline = async (isoDate: string | null, type?: string) => {
+    if (!task.sourceMeta?.repo || !task.sourceMeta?.issueNumber) return;
+    setShowDeadlinePicker(false);
+    await updateGitHubDeadline(
+      task.id,
+      task.sourceMeta.repo,
+      task.sourceMeta.issueNumber,
+      Boolean(task.sourceMeta.isPullRequest),
+      isoDate,
+      type || deadlineType
+    );
+  };
 
   const handleOpenUrl = (e: React.MouseEvent, urlToOpen?: string) => {
     e.stopPropagation();
@@ -206,6 +227,147 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
         {/* Action Controls */}
         <div className="flex items-center space-x-0.5 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+          {/* GitHub Set Deadline Button */}
+          {isGitHub && task.sourceMeta?.repo && task.sourceMeta?.issueNumber && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeadlinePicker((prev) => !prev);
+                }}
+                className={`p-1 rounded transition-colors ${
+                  task.sourceMeta?.dueDate
+                    ? 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60'
+                    : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title={task.sourceMeta?.dueDate ? `Edit Deadline (${smartDue?.formattedExact || task.sourceMeta.dueDate})` : "Set Deadline"}
+              >
+                <CalendarPlus className="h-3 w-3" />
+              </button>
+
+              {/* Deadline Picker Popover */}
+              {showDeadlinePicker && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute right-0 top-7 z-50 w-56 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl text-[11px] animate-in fade-in zoom-in-95 duration-100 text-slate-800 dark:text-slate-100"
+                >
+                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                    <span className="font-semibold text-xs">
+                      {task.sourceMeta?.isPullRequest ? 'PR Review Due' : 'Issue Deadline'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeadlinePicker(false)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-0.5 rounded"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  {/* Deadline Type toggle */}
+                  <div className="grid grid-cols-2 gap-1 my-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineType('deadline')}
+                      className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
+                        deadlineType === 'deadline'
+                          ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-2xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      Task Due
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineType('review')}
+                      className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
+                        deadlineType === 'review'
+                          ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-2xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      Review Due
+                    </button>
+                  </div>
+
+                  {/* Presets */}
+                  <div className="space-y-0.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSetDeadline(getPresetDate('today'))}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between text-[11px]"
+                    >
+                      <span>Today</span>
+                      <span className="text-[9.5px] text-slate-400 font-mono">23:59</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDeadline(getPresetDate('tomorrow'))}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between text-[11px]"
+                    >
+                      <span>Tomorrow</span>
+                      <span className="text-[9.5px] text-slate-400 font-mono">+1d</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDeadline(getPresetDate('in3days'))}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between text-[11px]"
+                    >
+                      <span>In 3 Days</span>
+                      <span className="text-[9.5px] text-slate-400 font-mono">+3d</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDeadline(getPresetDate('nextMonday'))}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between text-[11px]"
+                    >
+                      <span>Next Monday</span>
+                      <span className="text-[9.5px] text-slate-400 font-mono">Mon</span>
+                    </button>
+                  </div>
+
+                  {/* Custom Date Input */}
+                  <div className="pt-1.5 mt-1.5 border-t border-slate-100 dark:border-slate-800">
+                    <span className="text-[9.5px] text-slate-400 uppercase font-semibold block mb-1">Custom Date</span>
+                    <input
+                      type="date"
+                      value={customDate}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      className="w-full px-1.5 py-1 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 mb-1"
+                    />
+                    {customDate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(customDate);
+                          d.setHours(23, 59, 59, 999);
+                          handleSetDeadline(d.toISOString());
+                        }}
+                        className="w-full py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-[10px] transition-colors"
+                      >
+                        Apply Date
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Clear option if already set */}
+                  {task.sourceMeta?.dueDate && (
+                    <div className="pt-1 mt-1 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => handleSetDeadline(null)}
+                        className="w-full py-1 text-center text-[10px] text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors font-medium"
+                      >
+                        Clear Deadline
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleToggleExpand}
             className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -242,24 +404,39 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
       {/* Quick Micro-Badges Row */}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[10px]">
+        {/* Universal Smart Due Date Urgency Badge */}
+        {smartDue && (
+          <span
+            title={`Deadline: ${smartDue.formattedExact} (${smartDue.relativeText})`}
+            className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded font-medium border text-[10px] shadow-2xs transition-all ${
+              smartDue.urgency === 'overdue'
+                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800/70'
+                : smartDue.urgency === 'today'
+                ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800/70'
+                : smartDue.urgency === 'completed'
+                ? 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-800/70'
+            }`}
+          >
+            {smartDue.urgency === 'overdue' ? (
+              <AlertCircle className="h-2.5 w-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
+            ) : smartDue.urgency === 'today' ? (
+              <Clock className="h-2.5 w-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            ) : smartDue.urgency === 'completed' ? (
+              <Check className="h-2.5 w-2.5 text-slate-500 dark:text-slate-400 shrink-0" />
+            ) : (
+              <Calendar className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            )}
+            <span>{smartDue.label}</span>
+            {task.sourceMeta?.deadlineType === 'review' && (
+              <span className="text-[9px] uppercase tracking-wider opacity-75 font-mono">review</span>
+            )}
+          </span>
+        )}
+
         {/* --- GOOGLE TASKS MICRO-BADGES --- */}
         {!isGitHub && (
           <>
-            {/* Smart Due Date */}
-            {smartDue && (
-              <span
-                className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded font-medium border ${
-                  smartDue.urgency === 'overdue'
-                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : smartDue.urgency === 'today'
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                }`}
-              >
-                <Calendar className="h-2.5 w-2.5" />
-                <span>{smartDue.label}</span>
-              </span>
-            )}
 
             {/* Direct Deep-Link Buttons (e.g. Gmail / Calendar) */}
             {task.sourceMeta?.links?.map((linkItem, idx) => (
