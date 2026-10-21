@@ -5,6 +5,9 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 > [!NOTE]
 > WidKanban uses a native local loopback server (`http://127.0.0.1:<PORT>`) to capture your Google authorization response directly. Tokens are stored exclusively in native OS storage (`credentials.json`) and never exposed to browser context.
 
+> **Status**: Verified & Active  
+> **Last Updated**: October 2026 (Verified with current Google Cloud Platform & Auth UI)
+
 ---
 
 ## Table of Contents
