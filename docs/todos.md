@@ -142,8 +142,8 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Remember and restore last dragged window placement and size on boot.
 
 ### Developer Credential Overrides via `.env` ([#6](https://github.com/Dowiw/widkanban/issues/6))
-- [ ] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
-- [ ] Add `.env.example` template with dummy keys and update contributor onboarding guides.
+- [x] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
+- [x] Add `.env.example` template with dummy keys and update contributor onboarding guides.
 
 ---
 
