@@ -313,7 +313,7 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_github ? (
                     <div className="flex items-center space-x-1.5">
-                      {apiHealth.github.lastChecked && (!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) ? (
+                      {(!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) ? (
                         <span
                           className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
                           title={apiHealth.github.errorMessage || 'GitHub connection failed'}
@@ -425,7 +425,7 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_google ? (
                     <div className="flex items-center space-x-1.5">
-                      {apiHealth.google.lastChecked && (!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) ? (
+                      {(!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) ? (
                         <span
                           className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
                           title={apiHealth.google.errorMessage || 'Google connection error'}

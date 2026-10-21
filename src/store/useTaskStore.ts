@@ -620,6 +620,7 @@ export const useTaskStore = create<TaskState>()(
           });
         }
         await get().fetchApiHealth();
+        await get().checkAuthStatus();
       },
 
       fetchGithubTasks: async () => {
@@ -633,6 +634,7 @@ export const useTaskStore = create<TaskState>()(
           });
         }
         await get().fetchApiHealth();
+        await get().checkAuthStatus();
       },
 
       checkAuthStatus: async () => {

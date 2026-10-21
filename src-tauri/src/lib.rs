@@ -669,6 +669,11 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
                 }
             }
         }
+    } else if creds.google_refresh_token.is_some() {
+        health.google.connected = false;
+        if health.google.error_message.is_none() {
+            health.google.error_message = Some("Google access token expired. Sync to refresh.".to_string());
+        }
     } else {
         health.google.connected = false;
         health.google.error_message = None;
@@ -976,12 +981,31 @@ async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<Stri
                 }
             } else {
                 let err_body = resp.text().await.unwrap_or_default();
+                let is_deleted_or_revoked = err_body.contains("deleted_client")
+                    || err_body.contains("invalid_grant")
+                    || err_body.contains("invalid_client")
+                    || err_body.contains("unauthorized_client");
+
+                // Invalidate stored access token so we never re-use a stale dead token
+                let mut stored = read_stored_credentials_file(app_handle);
+                stored.google_token = None;
+                stored.google_token_expiry = None;
+                let _ = write_credentials(app_handle, &stored);
+
+                let error_msg = if is_deleted_or_revoked {
+                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
+                } else {
+                    format!("Google token refresh failed: {}", err_body)
+                };
+
                 if let Ok(mut health) = get_health_store().lock() {
                     health.google.connected = false;
                     health.google.token_expires_at = Some("Expired".to_string());
-                    health.google.error_message = Some("Google token expired. Please re-authenticate.".to_string());
+                    health.google.is_expiring_soon = Some(true);
+                    health.google.last_checked = Some(now);
+                    health.google.error_message = Some(error_msg.clone());
                 }
-                return Err(format!("Google token refresh failed: {}", err_body));
+                return Err(error_msg);
             }
         }
     }
@@ -1291,7 +1315,7 @@ async fn start_google_oauth_flow(
 /// resolving subtask hierarchy and deep links.
 #[tauri::command]
 async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let token = match ensure_valid_google_token(&app_handle).await {
+    let mut token = match ensure_valid_google_token(&app_handle).await {
         Ok(t) => t,
         Err(e) => {
             if let Ok(mut health) = get_health_store().lock() {
@@ -1309,7 +1333,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
     // 1. Fetch all task lists
-    let lists_resp = client
+    let mut lists_resp = client
         .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
         .bearer_auth(&token)
         .send()
@@ -1322,6 +1346,46 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             }
             format!("Failed to fetch task lists: {}", e)
         })?;
+
+    // If 401 Unauthorized, the access token is dead or revoked.
+    // Invalidate cached token immediately and attempt silent refresh.
+    if lists_resp.status().as_u16() == 401 {
+        let mut stored = read_stored_credentials_file(&app_handle);
+        stored.google_token = None;
+        stored.google_token_expiry = None;
+        let _ = write_credentials(&app_handle, &stored);
+
+        match ensure_valid_google_token(&app_handle).await {
+            Ok(new_token) => {
+                token = new_token;
+                lists_resp = client
+                    .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to fetch task lists after refresh: {}", e))?;
+            }
+            Err(refresh_err) => {
+                let is_deleted = refresh_err.contains("deleted_client")
+                    || refresh_err.contains("invalid_grant")
+                    || refresh_err.contains("invalid_client")
+                    || refresh_err.contains("credentials deleted or revoked");
+                let err_msg = if is_deleted {
+                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
+                } else {
+                    format!("Google authentication failed: {}", refresh_err)
+                };
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.google.connected = false;
+                    health.google.token_expires_at = Some("Expired".to_string());
+                    health.google.is_expiring_soon = Some(true);
+                    health.google.last_checked = Some(current_epoch_seconds());
+                    health.google.error_message = Some(err_msg.clone());
+                }
+                return Err(err_msg);
+            }
+        }
+    }
 
     let lists_status = lists_resp.status();
     let now = current_epoch_seconds();

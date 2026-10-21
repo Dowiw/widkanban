@@ -351,7 +351,15 @@ export const Header: React.FC = () => {
           >
             <Settings className="h-3.5 w-3.5" />
             {(authStatus.has_github || authStatus.has_google) && (
-              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
+              <span
+                className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ring-1 ring-white dark:ring-slate-900 ${
+                  isDisconnectedOrError
+                    ? 'bg-rose-500 animate-pulse'
+                    : isExpiringSoon
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+              />
             )}
           </button>
 
