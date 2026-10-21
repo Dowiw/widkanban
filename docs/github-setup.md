@@ -69,9 +69,11 @@ WidKanban requests only the minimal scopes required to query assigned issues and
 ### Step 4: Generate and Copy Your Token
 1. Scroll down to the bottom of the page and click the green **Generate token** button.
 
-![Step 4: Clicking Generate token](images/github/05-generate-token-button.png)
+![Step 4A: Clicking Generate token](images/github/05-generate-token-button.png)
 
-2. Copy the generated token starting with `ghp_...`.
+2. Click the copy icon next to your newly generated token starting with `ghp_...`.
+
+![Step 4B: Copying the generated token](images/github/06-copy-token.png)
 
 > [!WARNING]
 > Copy the token immediately! GitHub will never display it again after you navigate away from this page.
@@ -105,7 +107,7 @@ If your organization requires **fine-grained permissions** instead of classic to
 2. Select the **Integrations** tab.
 3. In the **GitHub Personal Access Token** field, paste your `ghp_...` token.
 
-![Pasting GitHub token in WidKanban Settings](images/github/06-paste-token-widkanban.png)
+![Pasting GitHub token in WidKanban Settings](images/github/07-paste-token-widkanban.png)
 
 ### Step 2: Save Credentials
 1. Click **Save Credentials** at the bottom right.
