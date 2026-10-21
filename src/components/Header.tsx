@@ -126,12 +126,21 @@ export const Header: React.FC = () => {
   const isLowQuota =
     ghRemaining !== undefined && ghLimit !== undefined && ghLimit > 0 && ghRemaining / ghLimit < 0.2;
 
-  if (isRateLimited || (gh?.connected && isExpiredOrError)) {
+  const isDisconnectedOrError =
+    (authStatus.has_github && gh?.lastChecked && !gh?.connected) ||
+    (authStatus.has_google && gg?.lastChecked && !gg?.connected) ||
+    Boolean(isExpiredOrError);
+
+  if (isRateLimited || isDisconnectedOrError) {
     healthColor = 'text-rose-500 bg-rose-500/10 border-rose-500/30';
     healthDot = 'bg-rose-500 animate-pulse';
     healthStatusText = isRateLimited
       ? 'GitHub Rate Limit Reached (Backing off)'
-      : 'Token or API Error Detected';
+      : gh?.errorMessage
+      ? `GitHub: ${gh.errorMessage}`
+      : gg?.errorMessage
+      ? `Google: ${gg.errorMessage}`
+      : 'Account Disconnected / Invalid Token';
   } else if (isLowQuota || isExpiringSoon) {
     healthColor = 'text-amber-500 bg-amber-500/10 border-amber-500/30';
     healthDot = 'bg-amber-500';

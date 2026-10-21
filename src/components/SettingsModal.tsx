@@ -102,9 +102,7 @@ export const SettingsModal: React.FC = () => {
   const [resetWindowDone, setResetWindowDone] = useState(false);
 
   useEffect(() => {
-    if (activeTab === 'sync') {
-      fetchApiHealth();
-    }
+    fetchApiHealth();
   }, [activeTab, fetchApiHealth]);
 
   if (!isSettingsOpen) return null;
@@ -314,10 +312,20 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_github ? (
                     <div className="flex items-center space-x-1.5">
-                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
-                        <Check className="h-2.5 w-2.5" />
-                        <span>Connected</span>
-                      </span>
+                      {apiHealth.github.lastChecked && (!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) ? (
+                        <span
+                          className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
+                          title={apiHealth.github.errorMessage || 'GitHub connection failed'}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          <span>Disconnected</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
+                          <Check className="h-2.5 w-2.5" />
+                          <span>Connected</span>
+                        </span>
+                      )}
                       {authStatus.github_from_env && (
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
                           .env (Dev Mode)
@@ -392,6 +400,15 @@ export const SettingsModal: React.FC = () => {
                     </a>
                   </div>
                 </div>
+
+                {authStatus.has_github && apiHealth.github.lastChecked && (!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) && (
+                  <div className="flex items-center space-x-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-md px-2.5 py-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                    <span>
+                      {apiHealth.github.errorMessage || 'GitHub token rejected or revoked. Please enter a valid token.'}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Google Tasks Section */}
@@ -407,7 +424,15 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_google ? (
                     <div className="flex items-center space-x-1.5">
-                      {authStatus.google_has_refresh_token ? (
+                      {apiHealth.google.lastChecked && (!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) ? (
+                        <span
+                          className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
+                          title={apiHealth.google.errorMessage || 'Google connection error'}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          <span>Disconnected</span>
+                        </span>
+                      ) : authStatus.google_has_refresh_token ? (
                         <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
                           <Check className="h-2.5 w-2.5" />
                           <span>Connected (Auto-Refresh)</span>
@@ -509,6 +534,15 @@ export const SettingsModal: React.FC = () => {
                           Tip: Ensure your OAuth Client in Google Cloud is set to <strong>Desktop app</strong> (not Web application) so dynamic loopback ports are allowed.
                         </p>
                       )}
+                    </div>
+                  )}
+
+                  {authStatus.has_google && apiHealth.google.lastChecked && (!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) && (
+                    <div className="flex items-center space-x-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-md px-2.5 py-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                      <span>
+                        {apiHealth.google.errorMessage || 'Google Tasks disconnected. Please re-authenticate.'}
+                      </span>
                     </div>
                   )}
                 </div>

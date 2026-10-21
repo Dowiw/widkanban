@@ -536,7 +536,6 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
     let mut health = get_health_store().lock().map(|h| h.clone()).unwrap_or_default();
 
     if let Some(token) = creds.github_token.as_ref().filter(|t| !t.trim().is_empty()) {
-        health.github.connected = true;
         let now = current_epoch_seconds();
         let should_check = health.github.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
 
@@ -571,9 +570,11 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
                     let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+                    let is_success = resp.status().is_success();
+                    let status_code = resp.status().as_u16();
 
                     let updated = ProviderHealth {
-                        connected: resp.status().is_success(),
+                        connected: is_success,
                         rate_limit_remaining,
                         rate_limit_limit,
                         rate_limit_reset,
@@ -581,8 +582,12 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
                         is_expiring_soon: Some(false),
                         is_rate_limited: Some(is_rate_limited),
                         last_checked: Some(now),
-                        error_message: if resp.status().is_success() {
+                        error_message: if is_success {
                             None
+                        } else if status_code == 401 {
+                            Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
+                        } else if status_code == 403 && is_rate_limited {
+                            Some("GitHub API rate limit exceeded".to_string())
                         } else {
                             Some(format!("HTTP {}", resp.status()))
                         },
@@ -597,10 +602,10 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
         }
     } else {
         health.github.connected = false;
+        health.github.error_message = None;
     }
 
     if let Some(token) = creds.google_token.as_ref().filter(|t| !t.trim().is_empty()) {
-        health.google.connected = true;
         let now = current_epoch_seconds();
         let should_check = health.google.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
 
@@ -639,7 +644,7 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
                             health.google = updated;
                         }
                     } else {
-                        let is_invalid = resp.status().as_u16() == 400;
+                        let is_invalid = resp.status().as_u16() == 400 || resp.status().as_u16() == 401;
                         let updated = ProviderHealth {
                             connected: false,
                             rate_limit_remaining: None,
@@ -650,7 +655,7 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
                             is_rate_limited: Some(false),
                             last_checked: Some(now),
                             error_message: if is_invalid {
-                                Some("Google OAuth access token has expired (1 hour lifetime)".to_string())
+                                Some("Google OAuth access token expired or revoked".to_string())
                             } else {
                                 Some(format!("HTTP {}", resp.status()))
                             },
@@ -666,6 +671,7 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
         }
     } else {
         health.google.connected = false;
+        health.google.error_message = None;
     }
 
     Ok(health)
@@ -1234,6 +1240,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             if let Ok(mut health) = get_health_store().lock() {
                 health.google.connected = false;
                 health.google.error_message = Some(e.clone());
+                health.google.last_checked = Some(current_epoch_seconds());
             }
             return Err(e);
         }
@@ -1254,6 +1261,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             if let Ok(mut health) = get_health_store().lock() {
                 health.google.connected = false;
                 health.google.error_message = Some(format!("Network error: {}", e));
+                health.google.last_checked = Some(current_epoch_seconds());
             }
             format!("Failed to fetch task lists: {}", e)
         })?;
@@ -1278,7 +1286,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             error_message: if lists_status.is_success() {
                 None
             } else if is_unauthorized {
-                Some("Google OAuth access token has expired (1 hour lifetime). Please generate a new access token.".to_string())
+                Some("Google token expired or revoked (401 Unauthorized)".to_string())
             } else {
                 Some(format!("HTTP {}", lists_status))
             },
@@ -1495,10 +1503,12 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
 
     let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
     let now = current_epoch_seconds();
+    let is_success = resp.status().is_success();
+    let status_code = resp.status().as_u16();
 
     if let Ok(mut health) = get_health_store().lock() {
         health.github = ProviderHealth {
-            connected: resp.status().is_success(),
+            connected: is_success,
             rate_limit_remaining,
             rate_limit_limit,
             rate_limit_reset,
@@ -1506,8 +1516,12 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             is_expiring_soon: Some(false),
             is_rate_limited: Some(is_rate_limited),
             last_checked: Some(now),
-            error_message: if resp.status().is_success() {
+            error_message: if is_success {
                 None
+            } else if status_code == 401 {
+                Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
+            } else if status_code == 403 && is_rate_limited {
+                Some("GitHub API rate limit exceeded".to_string())
             } else {
                 Some(format!("HTTP {}", resp.status()))
             },
