@@ -1027,35 +1027,45 @@ fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> Stri
 }
 
 /// Opens the OAuth callback page (verified or failed) in the default system browser for dev preview.
+/// Gated to debug mode; returns an error in production / release builds.
 #[tauri::command]
 fn open_oauth_preview(is_success: bool, error_msg: Option<String>) -> Result<(), String> {
-    let url = if is_success {
-        "http://localhost:1420/oauth-verified.html".to_string()
-    } else {
-        match error_msg {
-            Some(err) if !err.trim().is_empty() => {
-                format!("http://localhost:1420/oauth-failed.html?error={}", url_encode(&err))
-            }
-            _ => "http://localhost:1420/oauth-failed.html".to_string(),
-        }
-    };
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (is_success, error_msg);
+        return Err("OAuth preview is disabled in production builds.".to_string());
+    }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(debug_assertions)]
     {
-        let script = format!("Start-Process '{}'", url.replace('\'', "''"));
-        let _ = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .spawn();
+        let url = if is_success {
+            "http://localhost:1420/oauth-verified.html".to_string()
+        } else {
+            match error_msg {
+                Some(err) if !err.trim().is_empty() => {
+                    format!("http://localhost:1420/oauth-failed.html?error={}", url_encode(&err))
+                }
+                _ => "http://localhost:1420/oauth-failed.html".to_string(),
+            }
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!("Start-Process '{}'", url.replace('\'', "''"));
+            let _ = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        }
+        Ok(())
     }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open").arg(&url).spawn();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
-    }
-    Ok(())
 }
 
 /// Start an in-app "Sign in with Google" OAuth loopback flow.

@@ -630,40 +630,45 @@ export const SettingsModal: React.FC = () => {
                         </ol>
                       </div>
 
-                      {/* Dev Preview Callback Pages */}
-                      <div className="pt-2 border-t border-slate-200 dark:border-slate-750 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                        <span>Preview OAuth Response:</span>
-                        <div className="flex items-center space-x-1.5">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await invoke('open_oauth_preview', { isSuccess: true, errorMsg: null });
-                              } catch {
-                                window.open('http://localhost:1420/oauth-verified.html', '_blank');
-                              }
-                            }}
-                            className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
-                            title="Open Google Authentication Verified page in browser"
-                          >
-                            Verified
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await invoke('open_oauth_preview', { isSuccess: false, errorMsg: null });
-                              } catch {
-                                window.open('http://localhost:1420/oauth-failed.html', '_blank');
-                              }
-                            }}
-                            className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-rose-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-                            title="Open Google Authentication Failed page in browser"
-                          >
-                            Failed
-                          </button>
+                      {/* Dev Preview Callback Pages (Only rendered in Development mode) */}
+                      {import.meta.env.DEV && (
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-750 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <span className="px-1 py-0.2 rounded text-[9px] bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 font-mono font-medium">DEV</span>
+                            <span>Preview OAuth:</span>
+                          </span>
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await invoke('open_oauth_preview', { isSuccess: true, errorMsg: null });
+                                } catch {
+                                  window.open('http://localhost:1420/oauth-verified.html', '_blank');
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                              title="Open Google Authentication Verified page in browser"
+                            >
+                              Verified
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await invoke('open_oauth_preview', { isSuccess: false, errorMsg: null });
+                                } catch {
+                                  window.open('http://localhost:1420/oauth-failed.html', '_blank');
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-rose-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                              title="Open Google Authentication Failed page in browser"
+                            >
+                              Failed
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
