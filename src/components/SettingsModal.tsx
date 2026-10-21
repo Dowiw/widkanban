@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
 import { 
   X, 
@@ -22,11 +22,41 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Type
+  Type,
+  Clock,
+  Bell,
+  Activity,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  HelpCircle,
 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
 
-type SettingsTab = 'integrations' | 'appearance' | 'window' | 'advanced';
+const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none">
+    <path
+      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      fill="#4285F4"
+    />
+    <path
+      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      fill="#34A853"
+    />
+    <path
+      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+      fill="#FBBC05"
+    />
+    <path
+      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+      fill="#EA4335"
+    />
+  </svg>
+);
+
+type SettingsTab = 'integrations' | 'sync' | 'appearance' | 'window' | 'advanced';
 
 export const SettingsModal: React.FC = () => {
   const { 
@@ -36,6 +66,7 @@ export const SettingsModal: React.FC = () => {
     authStatus, 
     saveCredentials, 
     clearCredentials,
+    startGoogleOAuthFlow,
     fetchGoogleTasks,
     fetchGithubTasks,
     setCompletedOnboarding,
@@ -44,18 +75,36 @@ export const SettingsModal: React.FC = () => {
     isPinned,
     setWindowSizePreset,
     resetWindowPositionAndSize,
+    autoSyncSettings,
+    setAutoSyncSettings,
+    apiHealth,
+    fetchApiHealth,
+    refreshTasks,
   } = useTaskStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
   const [githubToken, setGithubToken] = useState('');
   const [googleToken, setGoogleToken] = useState('');
+  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientSecret, setGoogleClientSecret] = useState('');
   const [showGithub, setShowGithub] = useState(false);
   const [showGoogle, setShowGoogle] = useState(false);
+  const [showGoogleClientSecret, setShowGoogleClientSecret] = useState(false);
+  const [showManualGoogle, setShowManualGoogle] = useState(false);
+  const [showGoogleSetupGuide, setShowGoogleSetupGuide] = useState(false);
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
+  const [googleOAuthError, setGoogleOAuthError] = useState<string | null>(null);
+  const [googleOAuthSuccess, setGoogleOAuthSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
+
+  useEffect(() => {
+    fetchApiHealth();
+  }, [activeTab, fetchApiHealth]);
 
   if (!isSettingsOpen) return null;
 
@@ -67,6 +116,8 @@ export const SettingsModal: React.FC = () => {
     await saveCredentials({
       githubToken: githubToken.trim() || undefined,
       googleToken: googleToken.trim() || undefined,
+      googleClientId: googleClientId.trim() || undefined,
+      googleClientSecret: googleClientSecret.trim() || undefined,
     });
 
     setIsSaving(false);
@@ -78,6 +129,26 @@ export const SettingsModal: React.FC = () => {
     setTimeout(() => {
       setSaveSuccess(false);
     }, 1500);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setIsSigningInGoogle(true);
+    setGoogleOAuthError(null);
+    setGoogleOAuthSuccess(false);
+
+    const res = await startGoogleOAuthFlow({
+      clientId: googleClientId.trim() || undefined,
+      clientSecret: googleClientSecret.trim() || undefined,
+    });
+
+    setIsSigningInGoogle(false);
+    if (res.success) {
+      setGoogleOAuthSuccess(true);
+      setCompletedOnboarding(true);
+      setTimeout(() => setGoogleOAuthSuccess(false), 2500);
+    } else {
+      setGoogleOAuthError(res.error || 'Google sign-in was cancelled or failed.');
+    }
   };
 
   const handleDisconnect = async (provider: 'github' | 'google') => {
@@ -166,6 +237,19 @@ export const SettingsModal: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setActiveTab('sync')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+              activeTab === 'sync'
+                ? 'bg-indigo-600 text-white shadow-xs dark:bg-indigo-600 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Auto-Sync & Quota</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('appearance')}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
               activeTab === 'appearance'
@@ -229,10 +313,20 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_github ? (
                     <div className="flex items-center space-x-1.5">
-                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
-                        <Check className="h-2.5 w-2.5" />
-                        <span>Connected</span>
-                      </span>
+                      {(!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) ? (
+                        <span
+                          className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
+                          title={apiHealth.github.errorMessage || 'GitHub connection failed'}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          <span>Disconnected</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
+                          <Check className="h-2.5 w-2.5" />
+                          <span>Connected</span>
+                        </span>
+                      )}
                       {authStatus.github_from_env && (
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
                           .env (Dev Mode)
@@ -307,24 +401,51 @@ export const SettingsModal: React.FC = () => {
                     </a>
                   </div>
                 </div>
+
+                {authStatus.has_github && apiHealth.github.lastChecked && (!apiHealth.github.connected || Boolean(apiHealth.github.errorMessage)) && (
+                  <div className="flex items-center space-x-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-md px-2.5 py-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                    <span>
+                      {apiHealth.github.errorMessage || 'GitHub token rejected or revoked. Please enter a valid token.'}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Google Tasks OAuth Section */}
-              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
+              {/* Google Tasks Section */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <CheckSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Google Tasks OAuth Token</span>
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block">
+                        Google Tasks
+                      </span>
+                    </div>
                   </div>
                   {authStatus.has_google ? (
                     <div className="flex items-center space-x-1.5">
-                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
-                        <Check className="h-2.5 w-2.5" />
-                        <span>Connected</span>
-                      </span>
+                      {(!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) ? (
+                        <span
+                          className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80"
+                          title={apiHealth.google.errorMessage || 'Google connection error'}
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          <span>Disconnected</span>
+                        </span>
+                      ) : authStatus.google_has_refresh_token ? (
+                        <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
+                          <Check className="h-2.5 w-2.5" />
+                          <span>Connected (Auto-Refresh)</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-950/90 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80">
+                          <span>Connected (1h Token)</span>
+                        </span>
+                      )}
                       {authStatus.google_from_env && (
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
-                          .env (Dev Mode)
+                          .env
                         </span>
                       )}
                       <button
@@ -352,34 +473,250 @@ export const SettingsModal: React.FC = () => {
                   )}
                 </div>
 
-                <div className="relative">
-                  <input
-                    type={showGoogle ? 'text' : 'password'}
-                    placeholder={authStatus.has_google ? '•••••••••••••••• (Leave blank to keep current)' : 'ya29.a0A...'}
-                    value={googleToken}
-                    onChange={(e) => setGoogleToken(e.target.value)}
-                    className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1.5 pl-2.5 pr-8 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                  />
+                {/* Primary 1-Click "Sign in with Google" Button */}
+                <div className="space-y-2">
                   <button
                     type="button"
-                    onClick={() => setShowGoogle(!showGoogle)}
-                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    onClick={handleGoogleSignIn}
+                    disabled={isSigningInGoogle}
+                    className={`w-full flex items-center justify-center space-x-2.5 py-2 px-3 rounded-lg border text-xs font-semibold shadow-xs transition-all ${
+                      isSigningInGoogle
+                        ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-wait'
+                        : authStatus.has_google && authStatus.google_has_refresh_token
+                        ? 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-850 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                        : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-sm active:scale-[0.99]'
+                    }`}
                   >
-                    {showGoogle ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    {isSigningInGoogle ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600" />
+                        <span>Waiting for Google sign-in in browser...</span>
+                      </>
+                    ) : (
+                      <>
+                        <GoogleIcon className="h-4 w-4 shrink-0" />
+                        <span>
+                          {authStatus.has_google && authStatus.google_has_refresh_token
+                            ? 'Re-authenticate with Google'
+                            : 'Sign in with Google (Recommended)'}
+                        </span>
+                      </>
+                    )}
                   </button>
+
+                  {/* Browser Wait Notice */}
+                  {isSigningInGoogle && (
+                    <div className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 p-2 rounded-lg border border-blue-200 dark:border-blue-800/80 flex items-start space-x-1.5 animate-pulse">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        A browser tab opened to the Google OAuth consent page. Choose your Google account and click Allow. WidKanban will automatically capture the response.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* OAuth Success Alert */}
+                  {googleOAuthSuccess && (
+                    <div className="text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800/80 flex items-center space-x-1.5">
+                      <Check className="h-3.5 w-3.5 shrink-0" />
+                      <span>Google Tasks connected successfully! Background auto-refresh is enabled.</span>
+                    </div>
+                  )}
+
+                  {/* OAuth Error Alert */}
+                  {googleOAuthError && (
+                    <div className="text-[10px] text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/80 p-2 rounded-lg border border-rose-200 dark:border-rose-800/80 space-y-1">
+                      <div className="flex items-center space-x-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="font-semibold">Authentication Error</span>
+                      </div>
+                      <p className="pl-5 text-rose-600 dark:text-rose-400">{googleOAuthError}</p>
+                      {googleOAuthError.includes('redirect_uri_mismatch') && (
+                        <p className="pl-5 text-[9px] text-slate-600 dark:text-slate-300">
+                          Tip: Ensure your OAuth Client in Google Cloud is set to <strong>Desktop app</strong> (not Web application) so dynamic loopback ports are allowed.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {authStatus.has_google && apiHealth.google.lastChecked && (!apiHealth.google.connected || Boolean(apiHealth.google.errorMessage)) && (
+                    <div className="flex items-center space-x-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-md px-2.5 py-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                      <span>
+                        {apiHealth.google.errorMessage || 'Google Tasks disconnected. Please re-authenticate.'}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                  <span>Scope: <code>https://www.googleapis.com/auth/tasks</code></span>
-                  <a
-                    href="https://developers.google.com/oauthplayground"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5 font-medium"
+                {/* Collapsible: Custom Client ID / Secret Settings */}
+                <div className="pt-1 border-t border-slate-200/80 dark:border-slate-750">
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleSetupGuide(!showGoogleSetupGuide)}
+                    className="w-full flex items-center justify-between text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 py-1 transition-colors"
                   >
-                    <span>Get OAuth token</span>
-                    <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
+                    <span className="flex items-center space-x-1">
+                      <HelpCircle className="h-3 w-3" />
+                      <span>OAuth App Settings & Setup Guide</span>
+                    </span>
+                    {showGoogleSetupGuide ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+
+                  {showGoogleSetupGuide && (
+                    <div className="mt-2 space-y-2.5 text-[11px] p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Google OAuth Client ID (Desktop App)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="xxxx.apps.googleusercontent.com"
+                          value={googleClientId}
+                          onChange={(e) => setGoogleClientId(e.target.value)}
+                          className="w-full rounded-md bg-slate-50 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 py-1 px-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono text-[10px]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Client Secret (Optional for Desktop)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showGoogleClientSecret ? 'text' : 'password'}
+                            placeholder="GOCSPX-..."
+                            value={googleClientSecret}
+                            onChange={(e) => setGoogleClientSecret(e.target.value)}
+                            className="w-full rounded-md bg-slate-50 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 py-1 pl-2 pr-7 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono text-[10px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowGoogleClientSecret(!showGoogleClientSecret)}
+                            className="absolute right-1.5 top-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          >
+                            {showGoogleClientSecret ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Setup Instructions */}
+                      <div className="p-2 rounded bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-[10px] space-y-1.5 text-slate-600 dark:text-slate-300">
+                        <span className="font-semibold text-slate-700 dark:text-slate-200 block">
+                          3-Step Setup Instructions:
+                        </span>
+                        <ol className="list-decimal list-inside space-y-1 text-slate-500 dark:text-slate-400">
+                          <li>
+                            Open{' '}
+                            <a
+                              href="https://console.cloud.google.com/apis/credentials"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-indigo-600 dark:text-indigo-400 underline inline-flex items-center gap-0.5 font-medium"
+                            >
+                              <span>Google Cloud Console</span>
+                              <ExternalLink className="h-2 w-2" />
+                            </a>
+                            {' '}and enable the <strong>Google Tasks API</strong>.
+                          </li>
+                          <li>
+                            Create Credentials → <strong>OAuth client ID</strong>.
+                          </li>
+                          <li>
+                            Under Application type, select <strong>Desktop app</strong> (this enables dynamic loopback port authentication without URI errors).
+                          </li>
+                          <li>
+                            Paste the Client ID above, click <strong>Save Credentials</strong> below, and click <strong>Sign in with Google</strong>.
+                          </li>
+                        </ol>
+                      </div>
+
+                      {/* Dev Preview Callback Pages (Only rendered in Development mode) */}
+                      {import.meta.env.DEV && (
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-750 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <span className="px-1 py-0.2 rounded text-[9px] bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 font-mono font-medium">DEV</span>
+                            <span>Preview OAuth:</span>
+                          </span>
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await invoke('open_oauth_preview', { isSuccess: true, errorMsg: null });
+                                } catch {
+                                  window.open('http://localhost:1420/oauth-verified.html', '_blank');
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                              title="Open Google Authentication Verified page in browser"
+                            >
+                              Verified
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await invoke('open_oauth_preview', { isSuccess: false, errorMsg: null });
+                                } catch {
+                                  window.open('http://localhost:1420/oauth-failed.html', '_blank');
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-rose-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                              title="Open Google Authentication Failed page in browser"
+                            >
+                              Failed
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Collapsible: Manual Access Token Fallback */}
+                <div className="pt-1 border-t border-slate-200/80 dark:border-slate-750">
+                  <button
+                    type="button"
+                    onClick={() => setShowManualGoogle(!showManualGoogle)}
+                    className="w-full flex items-center justify-between text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 py-1 transition-colors"
+                  >
+                    <span>Manual Access Token (Fallback)</span>
+                    {showManualGoogle ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+
+                  {showManualGoogle && (
+                    <div className="mt-2 space-y-2">
+                      <div className="relative">
+                        <input
+                          type={showGoogle ? 'text' : 'password'}
+                          placeholder={authStatus.has_google ? '•••••••••••••••• (Leave blank to keep current)' : 'ya29.a0A...'}
+                          value={googleToken}
+                          onChange={(e) => setGoogleToken(e.target.value)}
+                          className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1.5 pl-2.5 pr-8 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono text-[10px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGoogle(!showGoogle)}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        >
+                          {showGoogle ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                        <span>Scope: <code>tasks</code></span>
+                        <a
+                          href="https://developers.google.com/oauthplayground"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5 font-medium"
+                        >
+                          <span>Get OAuth token via Playground</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -395,11 +732,21 @@ export const SettingsModal: React.FC = () => {
 
                 <button
                   type="submit"
-                  disabled={isSaving || (!githubToken.trim() && !googleToken.trim())}
+                  disabled={
+                    isSaving ||
+                    (!githubToken.trim() &&
+                      !googleToken.trim() &&
+                      !googleClientId.trim() &&
+                      !googleClientSecret.trim())
+                  }
                   className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     saveSuccess
                       ? 'bg-emerald-600 text-white'
-                      : isSaving || (!githubToken.trim() && !googleToken.trim())
+                      : isSaving ||
+                        (!githubToken.trim() &&
+                          !googleToken.trim() &&
+                          !googleClientId.trim() &&
+                          !googleClientSecret.trim())
                       ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-[0.98]'
                   }`}
@@ -418,7 +765,377 @@ export const SettingsModal: React.FC = () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════════ */}
-          {/* TAB 2: APPEARANCE */}
+          {/* TAB: AUTO-SYNC & API HEALTH */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {activeTab === 'sync' && (
+            <div className="space-y-4">
+              {/* Auto-Sync & Polling Engine */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 dark:border-slate-750">
+                  <div className="flex items-center space-x-2">
+                    <RefreshCw className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        Background Auto-Sync
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Periodically query remote providers for new issues and tasks
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAutoSyncSettings({
+                        enabled: !autoSyncSettings.enabled,
+                        hasPrompted: true,
+                      })
+                    }
+                    className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
+                      autoSyncSettings.enabled
+                        ? 'bg-indigo-600 justify-end'
+                        : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    }`}
+                  >
+                    <div className="h-4 w-4 rounded-full bg-white shadow-xs" />
+                  </button>
+                </div>
+
+                {/* Polling Frequency Grid */}
+                <div>
+                  <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+                    <Clock className="h-3 w-3 text-indigo-500" />
+                    <span>Polling Frequency</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 1, label: '1 minute' },
+                      { value: 3, label: '3 minutes (Recommended)' },
+                      { value: 5, label: '5 minutes' },
+                      { value: 15, label: '15 minutes' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setAutoSyncSettings({ intervalMinutes: opt.value })}
+                        className={`py-1.5 px-2.5 text-xs rounded-lg border text-left transition-all ${
+                          autoSyncSettings.intervalMinutes === opt.value
+                            ? 'border-indigo-500 bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-semibold shadow-2xs'
+                            : 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notifications checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-slate-200/80 dark:border-slate-750">
+                  <input
+                    type="checkbox"
+                    checked={autoSyncSettings.notifyOnNewTasks}
+                    onChange={(e) =>
+                      setAutoSyncSettings({ notifyOnNewTasks: e.target.checked })
+                    }
+                    className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1.5 select-none">
+                    <Bell className="h-3 w-3 text-indigo-500" />
+                    <span>Show native desktop notification when new tasks are detected</span>
+                  </span>
+                </label>
+
+                {/* Manual Refresh Now */}
+                <div className="pt-1 flex items-center justify-between border-t border-slate-200/80 dark:border-slate-750 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Status: {autoSyncSettings.enabled ? 'Active background polling' : 'Manual only'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsManualSyncing(true);
+                      await refreshTasks();
+                      setIsManualSyncing(false);
+                    }}
+                    disabled={isManualSyncing}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                    <span>Sync Now</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* API Quota & Token Health */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-3">
+                <div className="flex items-center space-x-2 pb-2 border-b border-slate-200/80 dark:border-slate-750">
+                  <Activity className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      API Quota & Token Health
+                    </h4>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Real-time rate limit headers and token expiration metadata
+                    </p>
+                  </div>
+                </div>
+
+                {/* GitHub Quota Card */}
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5">
+                      <Github className="h-3.5 w-3.5 text-slate-800 dark:text-slate-100" />
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        GitHub API Quota
+                      </span>
+                    </div>
+                    {authStatus.has_github ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                        {apiHealth.github.isRateLimited ? 'Throttled (0 Left)' : 'Active'}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
+                        Disconnected
+                      </span>
+                    )}
+                  </div>
+
+                  {authStatus.has_github ? (
+                    <div className="space-y-1.5 text-[11px]">
+                      {/* Visual Progress Bar */}
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pb-1">
+                          <span>Hourly Request Quota</span>
+                          <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
+                            {apiHealth.github.rateLimitRemaining ?? 5000} /{' '}
+                            {apiHealth.github.rateLimitLimit ?? 5000}
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-750 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              apiHealth.github.isRateLimited
+                                ? 'bg-rose-500'
+                                : (apiHealth.github.rateLimitRemaining ?? 5000) /
+                                    (apiHealth.github.rateLimitLimit ?? 5000) <
+                                  0.2
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500'
+                            }`}
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  2,
+                                  Math.round(
+                                    ((apiHealth.github.rateLimitRemaining ?? 5000) /
+                                      (apiHealth.github.rateLimitLimit ?? 5000)) *
+                                      100
+                                  )
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Reset Timestamp */}
+                      {apiHealth.github.rateLimitReset && (
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                          <span>Quota Reset</span>
+                          <span>
+                            in{' '}
+                            {Math.max(
+                              0,
+                              Math.round(
+                                (apiHealth.github.rateLimitReset - Date.now() / 1000) / 60
+                              )
+                            )}{' '}
+                            mins (
+                            {new Date(
+                              apiHealth.github.rateLimitReset * 1000
+                            ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            )
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Token Expiration Alert */}
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>Token Expiration:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {apiHealth.github.tokenExpiresAt
+                            ? (() => {
+                                try {
+                                  const d = new Date(apiHealth.github.tokenExpiresAt);
+                                  if (isNaN(d.getTime())) return apiHealth.github.tokenExpiresAt;
+                                  const days = Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                  return `${d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })} (${days > 0 ? `in ${days} days` : 'expired'})`;
+                                } catch {
+                                  return apiHealth.github.tokenExpiresAt;
+                                }
+                              })()
+                            : authStatus.has_github && !apiHealth.github.lastChecked
+                            ? 'Checking status...'
+                            : 'No expiration set'}
+                        </span>
+                      </div>
+
+                      {Boolean(
+                        apiHealth.github.isExpiringSoon ||
+                          (apiHealth.github.tokenExpiresAt &&
+                            (() => {
+                              const d = new Date(apiHealth.github.tokenExpiresAt).getTime();
+                              return !isNaN(d) && d - Date.now() < 7 * 24 * 60 * 60 * 1000 && d > Date.now();
+                            })())
+                      ) && (
+                        <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] flex items-center gap-1.5">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>PAT expires within 7 days. Generate a new token to prevent interruption.</span>
+                        </div>
+                      )}
+
+                      <div className="pt-1 text-right">
+                        <a
+                          href="https://github.com/settings/tokens"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 font-medium"
+                        >
+                          <span>Manage Personal Access Tokens</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400">
+                      Connect your GitHub Personal Access Token in Integrations to view quota details.
+                    </p>
+                  )}
+                </div>
+
+                {/* Google Tasks Card */}
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5">
+                      <CheckSquare className="h-3.5 w-3.5 text-blue-500" />
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        Google Tasks API & OAuth
+                      </span>
+                    </div>
+                    {authStatus.has_google ? (
+                      authStatus.google_has_refresh_token ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-1">
+                          <Check className="h-2.5 w-2.5" />
+                          <span>Active (Auto-Refresh)</span>
+                        </span>
+                      ) : apiHealth.google.errorMessage || apiHealth.google.tokenExpiresAt === 'Expired' ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
+                          Token Expired
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60">
+                          Active (Manual Token)
+                        </span>
+                      )
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
+                        Disconnected
+                      </span>
+                    )}
+                  </div>
+
+                  {authStatus.has_google ? (
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pb-0.5">
+                        <span>Daily API Quota</span>
+                        <span className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                          50,000 / day (Free Tier)
+                        </span>
+                      </div>
+
+                      {/* Google Token Expiration & Mode */}
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>Sync Mode:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {authStatus.google_has_refresh_token
+                            ? 'Auto-Refresh (Persistent)'
+                            : 'Manual Access Token (1-hour lifespan)'}
+                        </span>
+                      </div>
+
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>Current Access Token:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {apiHealth.google.tokenExpiresAt === 'Expired'
+                            ? authStatus.google_has_refresh_token
+                              ? 'Refreshed on next sync'
+                              : 'Expired (1h limit)'
+                            : apiHealth.google.tokenExpiresAt
+                            ? (() => {
+                                try {
+                                  const d = new Date(apiHealth.google.tokenExpiresAt);
+                                  if (isNaN(d.getTime())) return apiHealth.google.tokenExpiresAt;
+                                  const diffMins = Math.round((d.getTime() - Date.now()) / (1000 * 60));
+                                  if (diffMins <= 0) {
+                                    return authStatus.google_has_refresh_token
+                                      ? 'Refreshed on next sync'
+                                      : 'Expired (1h limit)';
+                                  }
+                                  return `Expires in ${diffMins}m (${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+                                } catch {
+                                  return apiHealth.google.tokenExpiresAt;
+                                }
+                              })()
+                            : authStatus.has_google && !apiHealth.google.lastChecked
+                            ? 'Checking status...'
+                            : 'Active (OAuth token)'}
+                        </span>
+                      </div>
+
+                      {/* Token Warnings / Auto-refresh confirmation */}
+                      {authStatus.google_has_refresh_token ? (
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] flex items-center gap-1.5">
+                          <ShieldCheck className="h-3 w-3 shrink-0" />
+                          <span>
+                            Silent auto-refresh active. WidKanban renews access tokens automatically using your OAuth refresh token.
+                          </span>
+                        </div>
+                      ) : (
+                        (apiHealth.google.tokenExpiresAt === 'Expired' ||
+                          apiHealth.google.isExpiringSoon ||
+                          Boolean(apiHealth.google.errorMessage)) && (
+                          <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] flex items-center gap-1.5">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            <span>
+                              Google access tokens expire after 60 minutes. Use "Sign in with Google" in Integrations for automatic background refresh.
+                            </span>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400">
+                      Connect your Google Tasks account in Integrations to sync your lists and tasks.
+                    </p>
+                  )}
+                </div>
+
+                {/* Rate-Limit Backoff Notice */}
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-100/60 dark:bg-slate-800/50 p-2 rounded-lg border border-slate-200/60 dark:border-slate-750">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>
+                    Smart Rate-Limit Back-Off: Polling automatically pauses whenever GitHub hourly
+                    quota is exhausted, resuming once the reset window arrives.
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* TAB 3: APPEARANCE */}
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'appearance' && (
             <div className="space-y-4">

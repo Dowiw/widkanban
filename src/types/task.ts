@@ -80,6 +80,7 @@ export interface AuthStatus {
   has_google: boolean;
   github_from_env?: boolean;
   google_from_env?: boolean;
+  google_has_refresh_token?: boolean;
 }
 
 export interface GitHubSyncSettings {
@@ -137,5 +138,61 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   defaultWidth: 380,
   defaultHeight: 680,
   rememberWindowPlacement: true,
+};
+
+export interface AutoSyncSettings {
+  enabled: boolean;
+  intervalMinutes: number; // 1, 3, 5, 15
+  notifyOnNewTasks: boolean;
+  hasPrompted: boolean;
+}
+
+export const DEFAULT_AUTOSYNC_SETTINGS: AutoSyncSettings = {
+  enabled: false,
+  intervalMinutes: 3,
+  notifyOnNewTasks: true,
+  hasPrompted: false,
+};
+
+export interface ProviderHealth {
+  connected: boolean;
+  rateLimitRemaining?: number;
+  rateLimitLimit?: number;
+  rateLimitReset?: number; // Unix epoch seconds
+  tokenExpiresAt?: string | null;
+  isExpiringSoon?: boolean; // e.g. < 7 days
+  isRateLimited?: boolean;
+  lastChecked?: number;
+  errorMessage?: string | null;
+}
+
+export interface ApiHealthState {
+  github: ProviderHealth;
+  google: ProviderHealth;
+}
+
+export const DEFAULT_API_HEALTH_STATE: ApiHealthState = {
+  github: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
+  google: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
 };
 
