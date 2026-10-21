@@ -648,12 +648,30 @@ export const SettingsModal: React.FC = () => {
                         <span>Token Expiration:</span>
                         <span className="font-medium text-slate-700 dark:text-slate-300">
                           {apiHealth.github.tokenExpiresAt
-                            ? apiHealth.github.tokenExpiresAt
+                            ? (() => {
+                                try {
+                                  const d = new Date(apiHealth.github.tokenExpiresAt);
+                                  if (isNaN(d.getTime())) return apiHealth.github.tokenExpiresAt;
+                                  const days = Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                  return `${d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })} (${days > 0 ? `in ${days} days` : 'expired'})`;
+                                } catch {
+                                  return apiHealth.github.tokenExpiresAt;
+                                }
+                              })()
+                            : authStatus.has_github && !apiHealth.github.lastChecked
+                            ? 'Checking status...'
                             : 'No expiration set'}
                         </span>
                       </div>
 
-                      {apiHealth.github.isExpiringSoon && (
+                      {Boolean(
+                        apiHealth.github.isExpiringSoon ||
+                          (apiHealth.github.tokenExpiresAt &&
+                            (() => {
+                              const d = new Date(apiHealth.github.tokenExpiresAt).getTime();
+                              return !isNaN(d) && d - Date.now() < 7 * 24 * 60 * 60 * 1000 && d > Date.now();
+                            })())
+                      ) && (
                         <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] flex items-center gap-1.5">
                           <AlertTriangle className="h-3 w-3 shrink-0" />
                           <span>PAT expires within 7 days. Generate a new token to prevent interruption.</span>

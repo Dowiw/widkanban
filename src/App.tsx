@@ -63,6 +63,9 @@ export const App: React.FC = () => {
       } else if ((status.has_github || status.has_google) && !autoSyncSettings.hasPrompted) {
         setAutoSyncPromptOpen(true);
       }
+      if (status.has_github || status.has_google) {
+        refreshTasksWithDiff();
+      }
     });
     fetchApiHealth();
   }, [
@@ -72,6 +75,7 @@ export const App: React.FC = () => {
     autoSyncSettings.hasPrompted,
     setAutoSyncPromptOpen,
     fetchApiHealth,
+    refreshTasksWithDiff,
   ]);
 
   // Periodic Auto-Sync Polling Engine

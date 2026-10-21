@@ -469,13 +469,74 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, String> {
+async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, String> {
     let creds = read_credentials(&app_handle);
     let mut health = get_health_store().lock().map(|h| h.clone()).unwrap_or_default();
 
-    if health.github.last_checked.is_none() {
-        health.github.connected = creds.github_token.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
+    if let Some(token) = creds.github_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        health.github.connected = true;
+        let now = current_epoch_seconds();
+        let should_check = health.github.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get("https://api.github.com/rate_limit")
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                {
+                    let rate_limit_limit = resp
+                        .headers()
+                        .get("x-ratelimit-limit")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_remaining = resp
+                        .headers()
+                        .get("x-ratelimit-remaining")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_reset = resp
+                        .headers()
+                        .get("x-ratelimit-reset")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok());
+                    let token_expires_at = resp
+                        .headers()
+                        .get("github-authentication-token-expiration")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+
+                    let updated = ProviderHealth {
+                        connected: resp.status().is_success(),
+                        rate_limit_remaining,
+                        rate_limit_limit,
+                        rate_limit_reset,
+                        token_expires_at,
+                        is_expiring_soon: Some(false),
+                        is_rate_limited: Some(is_rate_limited),
+                        last_checked: Some(now),
+                        error_message: if resp.status().is_success() {
+                            None
+                        } else {
+                            Some(format!("HTTP {}", resp.status()))
+                        },
+                    };
+
+                    if let Ok(mut store) = get_health_store().lock() {
+                        store.github = updated.clone();
+                    }
+                    health.github = updated;
+                }
+            }
+        }
+    } else {
+        health.github.connected = false;
     }
+
     if health.google.last_checked.is_none() {
         health.google.connected = creds.google_token.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
     }
