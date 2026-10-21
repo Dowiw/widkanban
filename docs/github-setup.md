@@ -5,16 +5,35 @@ This guide walks you through generating a **GitHub Personal Access Token (PAT)**
 > [!NOTE]
 > WidKanban **never** stores tokens in your browser or frontend state. Your token is transmitted directly to the native Rust backend and saved securely in local OS storage (`credentials.json`) with restricted file permissions (`600`).
 
+> **Status**: Verified & Active  
+> **Last Updated**: October 2026 (Verified with current GitHub UI)
+
 ---
 
 ## Table of Contents
 
+- [Comparison: Classic vs. Fine-Grained PATs](#comparison-classic-vs-fine-grained-personal-access-tokens)
 - [Required Scopes Overview](#required-scopes-overview)
 - [Option 1: Classic Personal Access Token (Recommended)](#option-1-classic-personal-access-token-recommended)
 - [Option 2: Fine-Grained Personal Access Token (Beta)](#option-2-fine-grained-personal-access-token-beta)
 - [Connecting GitHub in WidKanban](#connecting-github-in-widkanban)
 - [Auto-Sync & Rate Limit Monitoring](#auto-sync--rate-limit-monitoring)
 - [Troubleshooting & FAQ](#troubleshooting--faq)
+
+---
+
+## Comparison: Classic vs. Fine-Grained Personal Access Tokens
+
+GitHub offers two types of Personal Access Tokens. Both formats (`ghp_...` and `github_pat_...`) are fully supported by WidKanban:
+
+| Feature / Dimension | Classic PAT (`ghp_...`) | Fine-Grained PAT (`github_pat_...`) |
+| :--- | :--- | :--- |
+| **Repository Scope** | **Account-Wide**: Grants access across **all** repositories you own or collaborate on. | **Targeted**: Can be restricted to specific individual repositories or all repositories. |
+| **Permission Granularity** | **Coarse**: The `repo` scope grants full read/write to everything (code, releases, PRs, issues). | **Granular**: Configured per sub-resource (e.g. only `Issues: Read & Write` and `Pull requests: Read & Write`). |
+| **Maximum Expiration** | **Flexible / Unlimited**: Can choose `No expiration`, 30, 60, or 90 days. | **1 Year Hard Cap**: Cannot exceed 365 days (must be rotated at least once per year). |
+| **Organization Policies** | Often blocked or restricted by enterprise security policies. | **Enterprise-Friendly**: Organization owners can review, approve, or revoke tokens per repository. |
+| **Security Blast Radius** | **Higher**: If leaked, grants full access to repository source code and settings. | **Minimal**: Only grants access to the specific resources you selected (e.g., issues only). |
+| **Best Choice For** | **Fast Personal Setup**: Recommended if you want a quick 1-minute setup across all your projects without expiration limits. | **Enterprise / Sensitive Repos**: Recommended if you work with organization repositories requiring least-privilege security. |
 
 ---
 
@@ -82,21 +101,62 @@ WidKanban requests only the minimal scopes required to query assigned issues and
 
 ## Option 2: Fine-Grained Personal Access Token (Beta)
 
-If your organization requires **fine-grained permissions** instead of classic tokens:
+Fine-grained personal access tokens allow you to restrict WidKanban's access to only issues and pull requests while keeping your source code protected.
 
-1. Navigate to **Developer settings** → **Personal access tokens** → **Fine-grained tokens**.
+### Step 1: Open Fine-Grained Tokens
+1. Go to **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens**.
    - *Direct link*: [https://github.com/settings/tokens?type=beta](https://github.com/settings/tokens?type=beta)
-2. Click **Generate new token**.
-3. Set **Token name** to `WidKanban Desktop` and choose an **Expiration** (up to 365 days).
-4. **Repository access**: Select **All repositories** or pick the specific repositories you want displayed on your Kanban board.
-5. **Repository permissions**:
-   - **Issues**: Select `Read and write` (to query issues, update labels, and close issues).
-   - **Pull requests**: Select `Read and write` (or `Read-only` if not updating PR labels).
-   - **Metadata**: Automatically set to `Read-only`.
-6. Click **Generate token** and copy the `github_pat_...` token.
+2. Click the **Generate new token** button in the top right.
 
-<!-- SCREENSHOT PLACEHOLDER: Fine-Grained Permissions Configuration -->
-![Fine-grained token permissions](images/github/05-fine-grained-permissions.png)
+![Step 1: Navigating to Fine-grained tokens](images/github/08-fine-grained-nav.png)
+
+---
+
+### Step 2: Configure Name, Expiration & Repository Access
+1. **Token name**: Enter `WidKanban Desktop`.
+2. **Expiration**: Select your preferred expiration (up to 365 days).
+3. **Repository access**: Choose **All repositories** (or select specific repositories).
+4. Under **Permissions**, click **Add permissions** and search for **Issues**.
+
+![Step 2: Selecting All repositories and searching for Issues](images/github/09-fine-grained-repo-access-issues.png)
+
+---
+
+### Step 3: Configure Issues Permissions
+1. Under **Issues**, change the Access dropdown from `Read-only` to **Read and write**.
+   - *Why*: Allows WidKanban to read assigned issues, update `in-progress` labels, and close issues when moved to Done.
+
+![Step 3: Setting Issues access to Read and write](images/github/10-fine-grained-issues-read-write.png)
+
+---
+
+### Step 4: Configure Pull Requests Permissions
+1. Under **Permissions**, search for **Pull requests**.
+2. Set Access to **Read and write** (or `Read-only` if you do not want WidKanban applying labels to PRs).
+   - *Note*: `Metadata: Read-only` is automatically required and selected by GitHub.
+
+![Step 4: Setting Pull requests access to Read and write](images/github/11-fine-grained-pr-permissions.png)
+
+---
+
+### Step 5: Review Permissions & Generate Token
+1. Review the permissions summary:
+   - **Issues**: `Access: Read and write`
+   - **Metadata (Required)**: `Access: Read-only`
+   - **Pull requests**: `Access: Read and write`
+2. Scroll to the bottom and click the green **Generate token** button.
+
+![Step 5: Reviewing permissions and clicking Generate token](images/github/12-fine-grained-permissions-summary.png)
+
+---
+
+### Step 6: Copy the Generated Token
+1. Click the copy icon next to your new token starting with `github_pat_...`.
+
+![Step 6: Copying the fine-grained token](images/github/13-fine-grained-copy-token.png)
+
+> [!WARNING]
+> Copy the token immediately! GitHub will never display it again after you leave this page.
 
 ---
 
@@ -105,7 +165,7 @@ If your organization requires **fine-grained permissions** instead of classic to
 ### Step 1: Open Settings in WidKanban
 1. In the WidKanban header, click the **Settings (gear icon)** in the top right.
 2. Select the **Integrations** tab.
-3. In the **GitHub Personal Access Token** field, paste your `ghp_...` token.
+3. In the **GitHub Personal Access Token** field, paste your `ghp_...` (or `github_pat_...`) token.
 
 ![Pasting GitHub token in WidKanban Settings](images/github/07-paste-token-widkanban.png)
 
@@ -113,9 +173,6 @@ If your organization requires **fine-grained permissions** instead of classic to
 1. Click **Save Credentials** at the bottom right.
 2. The badge will switch to <span style="color:#10b981;font-weight:600;">Connected</span>.
 3. WidKanban will immediately fetch your assigned open issues and render them onto the **To Do** / **In Progress** columns.
-
-<!-- SCREENSHOT PLACEHOLDER: Connected GitHub Badge in WidKanban -->
-![GitHub Connected in WidKanban](images/github/07-github-connected.png)
 
 ---
 
@@ -127,9 +184,6 @@ If your organization requires **fine-grained permissions** instead of classic to
    - **Hourly Request Quota**: Visual progress bar showing remaining GitHub API calls (5,000 requests/hour free tier).
    - **Token Expiration**: Displays the exact expiration date and countdown extracted directly from GitHub headers.
    - **Smart Rate-Limit Back-Off**: Automatic pause protection whenever your hourly quota is exhausted.
-
-<!-- SCREENSHOT PLACEHOLDER: Auto-Sync & Quota Tab for GitHub -->
-![GitHub Quota & Token Health Card](images/github/08-github-quota-card.png)
 
 ---
 
@@ -143,6 +197,7 @@ If your organization requires **fine-grained permissions** instead of classic to
 - If your organization enforces **SAML SSO**, you must authorize the token:
   1. In [GitHub Token Settings](https://github.com/settings/tokens), locate your token.
   2. Click **Configure SSO** next to the token and click **Authorize** for your organization.
+- For fine-grained tokens, an organization administrator may need to approve the token under **Organization Settings → Personal Access Tokens → Pending Requests**.
 
 ### 3. How do I disconnect or rotate my token?
 - Click the **Trash icon** next to GitHub in WidKanban Settings to delete the token from local storage.
