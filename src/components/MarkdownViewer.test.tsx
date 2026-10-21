@@ -72,4 +72,22 @@ describe('MarkdownViewer', () => {
     expect(blockquote).toBeInTheDocument();
     expect(blockquote).toHaveTextContent('This is a notable blockquote.');
   });
+
+  it('renders task list items with inline code chips cleanly without breaking layout', () => {
+    const markdown = `- [ ] Pull requests linking to issues via \`fixes #X\` / \`closes #X\` are automatically tied together.`;
+    const { container } = render(<MarkdownViewer content={markdown} />);
+
+    expect(screen.getByText('fixes #X')).toBeInTheDocument();
+    expect(screen.getByText('closes #X')).toBeInTheDocument();
+    const li = container.querySelector('li');
+    expect(li).toHaveClass('task-list-item');
+    // Ensure li is not flex (which breaks inline text flow)
+    expect(li?.className).not.toContain('flex');
+    const codes = container.querySelectorAll('code');
+    expect(codes).toHaveLength(2);
+    codes.forEach((c) => {
+      expect(c.className).toContain('whitespace-nowrap');
+    });
+  });
 });
+

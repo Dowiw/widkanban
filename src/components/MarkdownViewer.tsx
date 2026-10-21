@@ -98,21 +98,23 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
             </h6>
           ),
           p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
-          ul: ({ children }) => (
-            <ul className="list-disc list-outside pl-4 space-y-0.5 my-1.5">
-              {children}
-            </ul>
-          ),
+          ul: ({ children, className: ulClass }) => {
+            const isTaskList = ulClass?.includes('contains-task-list');
+            return (
+              <ul className={`${isTaskList ? 'list-none pl-0.5' : 'list-disc list-outside pl-4'} space-y-0.5 my-1.5`}>
+                {children}
+              </ul>
+            );
+          },
           ol: ({ children }) => (
             <ol className="list-decimal list-outside pl-4 space-y-0.5 my-1.5">
               {children}
             </ol>
           ),
           li: ({ children, className: liClass }) => {
-            // Task lists items in remark-gfm have task-list-item class
             const isTaskItem = liClass?.includes('task-list-item');
             return (
-              <li className={`leading-relaxed ${isTaskItem ? 'list-none -ml-4 flex items-start space-x-1.5 my-0.5' : ''}`}>
+              <li className={`leading-relaxed my-0.5 ${isTaskItem ? 'list-none pl-0' : ''} ${liClass || ''}`}>
                 {children}
               </li>
             );
@@ -120,11 +122,11 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
           input: ({ type, checked, ...props }) => {
             if (type === 'checkbox') {
               return (
-                <span className="inline-flex items-center shrink-0 mt-0.5 pointer-events-none">
+                <span className="inline-flex items-center align-middle mr-1.5 -translate-y-px shrink-0 pointer-events-none select-none">
                   {checked ? (
-                    <CheckSquare className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
+                    <CheckSquare className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
                   ) : (
-                    <Square className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                    <Square className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
                   )}
                 </span>
               );
@@ -149,7 +151,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
             }
             return (
               <code
-                className="font-mono text-[10px] px-1 py-0.5 rounded bg-slate-150 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 break-all font-semibold"
+                className="font-mono text-[10px] px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 whitespace-nowrap break-normal font-semibold inline"
                 {...props}
               >
                 {children}
