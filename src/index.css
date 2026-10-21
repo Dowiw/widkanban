@@ -30,6 +30,11 @@
 @layer base {
   body {
     @apply select-none overflow-hidden bg-slate-50 antialiased;
+    font-family: inherit;
+  }
+
+  code, kbd, samp, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
 }
 
