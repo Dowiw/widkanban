@@ -278,11 +278,11 @@ export const Header: React.FC = () => {
             )}
           </div>
 
-          {/* Add Mock Task Button */}
+          {/* Add Task Button */}
           <button
             type="button"
             onClick={() => setAddTaskOpen(true)}
-            title="Add Mock Task"
+            title="Add Task"
             className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 transition-all active:scale-95"
           >
             <Plus className="h-3.5 w-3.5" />

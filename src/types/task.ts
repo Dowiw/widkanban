@@ -1,5 +1,6 @@
 export type TaskSource = 'github' | 'google_tasks';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface GitHubLabel {
   name: string;
@@ -40,11 +41,13 @@ export interface UnifiedTask {
   title: string;
   source: TaskSource;
   status: TaskStatus;
+  priority?: TaskPriority;
   url: string;            // Direct link to issue/task
   updatedAt: string;
   description?: string;   // Markdown body or task notes
 
   sourceMeta: {
+    priority?: TaskPriority;
     // --- Google Tasks ---
     listId?: string;
     listTitle?: string;

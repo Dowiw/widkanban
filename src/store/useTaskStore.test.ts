@@ -396,6 +396,65 @@ describe('useTaskStore', () => {
     expect(githubLabelCalls).toHaveLength(0);
   });
 
+  it('addTask creates production-compliant UnifiedTask with UUID-based client ID, status, priority, and description', () => {
+    const { addTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'Production Task Feature',
+      source: 'github',
+      status: 'in_progress',
+      priority: 'urgent',
+      description: '### Plan\n- [ ] Step 1\n- [ ] Step 2',
+      url: 'https://github.com/Dowiw/widkanban/issues',
+      sourceMeta: {
+        repo: 'Dowiw/widkanban',
+        isPullRequest: false,
+        priority: 'urgent',
+        notes: '### Plan\n- [ ] Step 1\n- [ ] Step 2',
+      },
+    });
+
+    const tasks = useTaskStore.getState().tasks;
+    const created = tasks.find((t) => t.title === 'Production Task Feature');
+
+    expect(created).toBeDefined();
+    expect(created?.id).toMatch(/^gh_[a-zA-Z0-9]+$/);
+    expect(created?.status).toBe('in_progress');
+    expect(created?.priority).toBe('urgent');
+    expect(created?.description).toContain('### Plan');
+    expect(created?.sourceMeta.repo).toBe('Dowiw/widkanban');
+    expect(created?.updatedAt).toBeDefined();
+  });
+
+  it('addTask generates clean Google Task with list context, priority, and notes', () => {
+    const { addTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'Team Meeting Prep',
+      source: 'google_tasks',
+      status: 'todo',
+      priority: 'high',
+      description: 'Review Q4 OKRs',
+      url: 'https://tasks.google.com',
+      sourceMeta: {
+        listTitle: 'Sprint 12',
+        listId: 'sprint-12',
+        dueDate: '2026-11-01T12:00:00.000Z',
+        priority: 'high',
+        notes: 'Review Q4 OKRs',
+      },
+    });
+
+    const tasks = useTaskStore.getState().tasks;
+    const created = tasks.find((t) => t.title === 'Team Meeting Prep');
+
+    expect(created).toBeDefined();
+    expect(created?.id).toMatch(/^gt_[a-zA-Z0-9]+$/);
+    expect(created?.source).toBe('google_tasks');
+    expect(created?.priority).toBe('high');
+    expect(created?.sourceMeta.listTitle).toBe('Sprint 12');
+  });
+
   it('saveCredentials triggers isGithubSetupOpen on first GitHub connection', async () => {
     mockInvoke.mockResolvedValueOnce({ has_github: true, has_google: false });
 
