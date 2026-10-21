@@ -39,8 +39,7 @@ WidKanban requests only the minimal scopes required to query assigned issues and
 4. Select **Personal access tokens** → **Tokens (classic)**.
    - *Direct link*: [https://github.com/settings/tokens](https://github.com/settings/tokens)
 
-<!-- SCREENSHOT PLACEHOLDER: GitHub Developer Settings Navigation -->
-![Step 1: Navigating to Tokens (classic)](images/github/01-developer-settings.png)
+![Step 1: Navigating to Tokens (classic)](images/github/01-tokens-classic.png)
 
 ---
 
@@ -48,35 +47,34 @@ WidKanban requests only the minimal scopes required to query assigned issues and
 1. Click the **Generate new token** dropdown in the top-right and select **Generate new token (classic)**.
 2. If prompted, confirm your GitHub password or two-factor authentication (2FA).
 
-<!-- SCREENSHOT PLACEHOLDER: Generate New Token Button -->
 ![Step 2: Generate new token (classic)](images/github/02-generate-token-dropdown.png)
 
 ---
 
 ### Step 3: Configure Token Expiration and Scopes
-1. **Note**: Give your token a recognizable name (e.g., `WidKanban Desktop Widget`).
+1. **Note**: Give your token a recognizable name (e.g., `WidKanban Desktop`).
 2. **Expiration**: Choose an expiration interval:
-   - `90 days` (recommended by GitHub for security)
+   - `30 days` or `90 days` (recommended by GitHub for security)
    - `No expiration` (if you do not want to rotate tokens periodically)
 3. **Select scopes**:
-   - Check `repo` (Full control of private repositories, including issues and labels).
-     *(Or check `public_repo` if you only work with public repositories).*
-   - Check `read:user` (Under *User*, grants read access to user profile).
+   - Check `repo` (Full control of private repositories, commit status, and issue labels).
+   - Check `read:user` (Under *User*, grants read access to identify your assigned issues and PRs).
 
-<!-- SCREENSHOT PLACEHOLDER: Selecting Scopes (repo and read:user) -->
-![Step 3: Configuring token scopes and expiration](images/github/03-token-scopes.png)
+![Step 3A: Selecting repo scope](images/github/03-repo-scope.png)
+
+![Step 3B: Selecting read:user scope](images/github/04-read-user-scope.png)
 
 ---
 
 ### Step 4: Generate and Copy Your Token
 1. Scroll down to the bottom of the page and click the green **Generate token** button.
+
+![Step 4: Clicking Generate token](images/github/05-generate-token-button.png)
+
 2. Copy the generated token starting with `ghp_...`.
 
 > [!WARNING]
 > Copy the token immediately! GitHub will never display it again after you navigate away from this page.
-
-<!-- SCREENSHOT PLACEHOLDER: Generated Token Output -->
-![Step 4: Copying the generated ghp_ token](images/github/04-copy-token.png)
 
 ---
 
@@ -105,17 +103,14 @@ If your organization requires **fine-grained permissions** instead of classic to
 ### Step 1: Open Settings in WidKanban
 1. In the WidKanban header, click the **Settings (gear icon)** in the top right.
 2. Select the **Integrations** tab.
+3. In the **GitHub Personal Access Token** field, paste your `ghp_...` token.
 
-<!-- SCREENSHOT PLACEHOLDER: WidKanban Integrations Tab -->
-![Opening WidKanban Settings](images/github/06-widkanban-settings.png)
-
----
+![Pasting GitHub token in WidKanban Settings](images/github/06-paste-token-widkanban.png)
 
 ### Step 2: Save Credentials
-1. In the **GitHub Personal Access Token** field, paste your `ghp_...` (or `github_pat_...`) token.
-2. Click **Save Credentials**.
-3. The badge will switch to <span style="color:#10b981;font-weight:600;">Connected</span>.
-4. WidKanban will immediately fetch your assigned open issues and render them onto the **To Do** / **In Progress** columns.
+1. Click **Save Credentials** at the bottom right.
+2. The badge will switch to <span style="color:#10b981;font-weight:600;">Connected</span>.
+3. WidKanban will immediately fetch your assigned open issues and render them onto the **To Do** / **In Progress** columns.
 
 <!-- SCREENSHOT PLACEHOLDER: Connected GitHub Badge in WidKanban -->
 ![GitHub Connected in WidKanban](images/github/07-github-connected.png)
