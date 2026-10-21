@@ -53,6 +53,25 @@ If you are a contributor developing or testing locally (`npm run tauri dev`), yo
 
 ---
 
+## Credential Hierarchy & Precedence
+
+To maintain predictable behavior and avoid confusing badge states, WidKanban enforces a strict 3-tier hierarchy:
+
+1. **Tier 1: Native In-App Credentials (`credentials.json`) — Highest Precedence**
+   - Whenever you enter a token in the app settings or complete **Sign in with Google**, your credentials are saved locally in `credentials.json`.
+   - **Active credentials in `credentials.json` always override any `.env` entries.**
+   - The `.env (Dev Mode)` and `.env` badges are **automatically removed** from the UI once credentials are saved in the app, giving you clear visual confirmation that your own stored keys are in active use.
+
+2. **Tier 2: Explicit Disconnection Guard**
+   - Clicking the **Trash (Disconnect) icon** in Settings marks the provider as explicitly disconnected.
+   - WidKanban will **not** fall back to `.env` variables after an explicit disconnect, respecting your decision until you re-authenticate or enter a new token in the app.
+
+3. **Tier 3: Developer Environment Variables (`.env`) — Initial Fallback Only**
+   - Used **only** when no active token exists in `credentials.json` and the provider has not been disconnected.
+   - When active, the purple `.env (Dev Mode)` badge is displayed in Settings.
+
+---
+
 ## Where Credentials Are Stored
 
 When credentials are saved via the in-app settings UI or captured through the Google OAuth loopback flow, WidKanban saves them in the local native OS app data directory:

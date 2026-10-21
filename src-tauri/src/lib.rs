@@ -22,6 +22,10 @@ pub struct StoredCredentials {
     pub google_client_secret: Option<String>,
     #[serde(default)]
     pub google_token_expiry: Option<u64>,
+    #[serde(default)]
+    pub github_disconnected: Option<bool>,
+    #[serde(default)]
+    pub google_disconnected: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -394,21 +398,60 @@ fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredenti
 fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     let mut creds = read_stored_credentials_file(app_handle);
 
-    // Overlay developer environment variable overrides
-    if let Some(gh) = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]) {
-        creds.github_token = Some(gh);
+    // 1. GitHub: App-stored token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token exists
+    // and the user has not explicitly disconnected GitHub.
+    let has_stored_github = creds
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_github && creds.github_disconnected != Some(true) {
+        if let Some(gh) = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]) {
+            creds.github_token = Some(gh);
+        }
     }
-    if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
-        creds.google_token = Some(gt);
+
+    // 2. Google: App-stored token or refresh token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token or refresh token exists
+    // and the user has not explicitly disconnected Google.
+    let has_stored_google = creds
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || creds
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_google && creds.google_disconnected != Some(true) {
+        if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
+            creds.google_token = Some(gt);
+        }
+        if let Some(gr) = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]) {
+            creds.google_refresh_token = Some(gr);
+        }
     }
-    if let Some(gr) = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]) {
-        creds.google_refresh_token = Some(gr);
+
+    // 3. Client ID & Secret: App-entered/stored takes precedence; fall back to .env if empty
+    let has_stored_cid = creds
+        .google_client_id
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_cid {
+        if let Some(cid) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]) {
+            creds.google_client_id = Some(cid);
+        }
     }
-    if let Some(cid) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]) {
-        creds.google_client_id = Some(cid);
-    }
-    if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
-        creds.google_client_secret = Some(sec);
+
+    let has_stored_sec = creds
+        .google_client_secret
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_sec {
+        if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
+            creds.google_client_secret = Some(sec);
+        }
     }
 
     creds
@@ -678,18 +721,48 @@ fn close_app(app_handle: tauri::AppHandle) {
 
 #[tauri::command]
 fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
+    let stored = read_stored_credentials_file(&app_handle);
     let creds = read_credentials(&app_handle);
+
+    let has_stored_github = stored
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    let has_stored_google = stored
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || stored
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
     let env_github = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]);
     let env_google = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]);
     let env_google_refresh = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]);
+
+    let has_github = creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
     let has_google_token = creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty());
     let has_refresh_token = creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_google = has_google_token || has_refresh_token;
+
+    // Sourced from env ONLY if NOT stored in credentials.json, NOT explicitly disconnected, and env provided the active credential
+    let github_from_env = !has_stored_github
+        && stored.github_disconnected != Some(true)
+        && env_github.is_some()
+        && has_github;
+
+    let google_from_env = !has_stored_google
+        && stored.google_disconnected != Some(true)
+        && (env_google.is_some() || env_google_refresh.is_some())
+        && has_google;
 
     Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: has_google_token || has_refresh_token,
-        github_from_env: env_github.is_some(),
-        google_from_env: env_google.is_some() || env_google_refresh.is_some(),
+        has_github,
+        has_google,
+        github_from_env,
+        google_from_env,
         google_has_refresh_token: has_refresh_token,
     })
 }
@@ -708,24 +781,30 @@ fn save_credentials(
         let trimmed = gh.trim().to_string();
         if trimmed.is_empty() {
             creds.github_token = None;
+            creds.github_disconnected = Some(true);
         } else {
             creds.github_token = Some(trimmed);
+            creds.github_disconnected = Some(false);
         }
     }
     if let Some(gt) = google_token.as_ref() {
         let trimmed = gt.trim().to_string();
         if trimmed.is_empty() {
             creds.google_token = None;
+            creds.google_disconnected = Some(true);
         } else {
             creds.google_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
         }
     }
     if let Some(gr) = google_refresh_token.as_ref() {
         let trimmed = gr.trim().to_string();
         if trimmed.is_empty() {
             creds.google_refresh_token = None;
+            creds.google_disconnected = Some(true);
         } else {
             creds.google_refresh_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
         }
     }
     if let Some(cid) = google_client_id.as_ref() {
@@ -768,17 +847,23 @@ fn clear_credentials(
 ) -> Result<AuthStatus, String> {
     let mut creds = read_stored_credentials_file(&app_handle);
     match provider.as_deref() {
-        Some("github") => creds.github_token = None,
+        Some("github") => {
+            creds.github_token = None;
+            creds.github_disconnected = Some(true);
+        }
         Some("google") => {
             creds.google_token = None;
             creds.google_refresh_token = None;
             creds.google_token_expiry = None;
+            creds.google_disconnected = Some(true);
         }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
             creds.google_refresh_token = None;
             creds.google_token_expiry = None;
+            creds.github_disconnected = Some(true);
+            creds.google_disconnected = Some(true);
         }
     }
     write_credentials(&app_handle, &creds)?;
@@ -1118,6 +1203,7 @@ async fn start_google_oauth_flow(
         stored.google_client_secret = Some(resolved_client_secret);
     }
     stored.google_token_expiry = Some(now + expires_in);
+    stored.google_disconnected = Some(false);
     write_credentials(&app_handle, &stored)?;
 
     // 7. Update health state
@@ -2262,6 +2348,8 @@ mod tests {
             google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
             google_client_secret: Some("GOCSPX-secret".to_string()),
             google_token_expiry: Some(1792615000),
+            github_disconnected: Some(false),
+            google_disconnected: Some(false),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -2279,6 +2367,8 @@ mod tests {
             google_client_id: None,
             google_client_secret: None,
             google_token_expiry: None,
+            github_disconnected: None,
+            google_disconnected: None,
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
@@ -2292,6 +2382,55 @@ mod tests {
         assert!(status.google_has_refresh_token);
         assert!(!status.github_from_env);
         assert!(!status.google_from_env);
+    }
+
+    #[test]
+    fn test_credential_hierarchy_logic() {
+        // Case 1: Stored credentials exist -> env is ignored, from_env is false
+        let stored = StoredCredentials {
+            github_token: Some("ghp_stored".to_string()),
+            google_token: None,
+            google_refresh_token: Some("1//stored_refresh".to_string()),
+            google_client_id: None,
+            google_client_secret: None,
+            google_token_expiry: None,
+            github_disconnected: None,
+            google_disconnected: None,
+        };
+        let env_github = Some("ghp_env".to_string());
+        let env_google = Some("ya29.env".to_string());
+
+        let has_stored_github = stored.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+        let has_stored_google = stored.google_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            || stored.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
+        let github_from_env = !has_stored_github
+            && stored.github_disconnected != Some(true)
+            && env_github.is_some();
+        let google_from_env = !has_stored_google
+            && stored.google_disconnected != Some(true)
+            && env_google.is_some();
+
+        assert!(!github_from_env);
+        assert!(!google_from_env);
+
+        // Case 2: No stored credentials, not disconnected -> env is used, from_env is true
+        let stored_empty = StoredCredentials::default();
+        let gh_from_env_fallback = !stored_empty.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_empty.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(gh_from_env_fallback);
+
+        // Case 3: Explicitly disconnected -> env fallback is suppressed
+        let stored_disconnected = StoredCredentials {
+            github_disconnected: Some(true),
+            google_disconnected: Some(true),
+            ..Default::default()
+        };
+        let gh_suppressed = !stored_disconnected.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_disconnected.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(!gh_suppressed);
     }
 
     #[test]
