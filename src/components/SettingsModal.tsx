@@ -698,24 +698,79 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 {/* Google Tasks Card */}
-                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 flex items-center justify-between">
-                  <div className="flex items-center space-x-1.5">
-                    <CheckSquare className="h-3.5 w-3.5 text-blue-500" />
-                    <div>
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 block">
-                        Google Tasks Connection
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-750 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5">
+                      <CheckSquare className="h-3.5 w-3.5 text-blue-500" />
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        Google Tasks API & OAuth
                       </span>
-                      <span className="text-[10px] text-slate-400">OAuth 2.0 Loopback</span>
                     </div>
+                    {authStatus.has_google ? (
+                      apiHealth.google.errorMessage || apiHealth.google.tokenExpiresAt === 'Expired' ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
+                          Token Expired
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                          Active
+                        </span>
+                      )
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
+                        Disconnected
+                      </span>
+                    )}
                   </div>
+
                   {authStatus.has_google ? (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
-                      Connected
-                    </span>
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pb-0.5">
+                        <span>Daily API Quota</span>
+                        <span className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                          50,000 / day (Free Tier)
+                        </span>
+                      </div>
+
+                      {/* Google Token Expiration */}
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>Token Expiration:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {apiHealth.google.tokenExpiresAt === 'Expired'
+                            ? 'Expired (1h limit)'
+                            : apiHealth.google.tokenExpiresAt
+                            ? (() => {
+                                try {
+                                  const d = new Date(apiHealth.google.tokenExpiresAt);
+                                  if (isNaN(d.getTime())) return apiHealth.google.tokenExpiresAt;
+                                  const diffMins = Math.round((d.getTime() - Date.now()) / (1000 * 60));
+                                  if (diffMins <= 0) return 'Expired (1h limit)';
+                                  return `Expires in ${diffMins}m (${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+                                } catch {
+                                  return apiHealth.google.tokenExpiresAt;
+                                }
+                              })()
+                            : authStatus.has_google && !apiHealth.google.lastChecked
+                            ? 'Checking status...'
+                            : 'Active (OAuth token)'}
+                        </span>
+                      </div>
+
+                      {(apiHealth.google.tokenExpiresAt === 'Expired' ||
+                        apiHealth.google.isExpiringSoon ||
+                        Boolean(apiHealth.google.errorMessage)) && (
+                        <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] flex items-center gap-1.5">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>
+                            Google access tokens expire after 60 minutes. Re-authenticate or update your token in Integrations.
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   ) : (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-400">
-                      Disconnected
-                    </span>
+                    <p className="text-[10px] text-slate-400">
+                      Connect your Google Tasks account in Integrations to sync your lists and tasks.
+                    </p>
                   )}
                 </div>
 

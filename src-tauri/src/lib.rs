@@ -537,8 +537,73 @@ async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, 
         health.github.connected = false;
     }
 
-    if health.google.last_checked.is_none() {
-        health.google.connected = creds.google_token.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
+    if let Some(token) = creds.google_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        health.google.connected = true;
+        let now = current_epoch_seconds();
+        let should_check = health.google.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get(format!("https://oauth2.googleapis.com/tokeninfo?access_token={}", token))
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(info) = resp.json::<serde_json::Value>().await {
+                            let expires_in = info
+                                .get("expires_in")
+                                .and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| v.as_u64()));
+
+                            let token_expires_at = expires_in.map(|secs| chrono_epoch_to_iso(now + secs));
+                            let is_expiring_soon = expires_in.map(|secs| secs < 300).unwrap_or(false);
+
+                            let updated = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at,
+                                is_expiring_soon: Some(is_expiring_soon),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+
+                            if let Ok(mut store) = get_health_store().lock() {
+                                store.google = updated.clone();
+                            }
+                            health.google = updated;
+                        }
+                    } else {
+                        let is_invalid = resp.status().as_u16() == 400;
+                        let updated = ProviderHealth {
+                            connected: false,
+                            rate_limit_remaining: None,
+                            rate_limit_limit: None,
+                            rate_limit_reset: None,
+                            token_expires_at: Some("Expired".to_string()),
+                            is_expiring_soon: Some(true),
+                            is_rate_limited: Some(false),
+                            last_checked: Some(now),
+                            error_message: if is_invalid {
+                                Some("Google OAuth access token has expired (1 hour lifetime)".to_string())
+                            } else {
+                                Some(format!("HTTP {}", resp.status()))
+                            },
+                        };
+
+                        if let Ok(mut store) = get_health_store().lock() {
+                            store.google = updated.clone();
+                        }
+                        health.google = updated;
+                    }
+                }
+            }
+        }
+    } else {
+        health.google.connected = false;
     }
 
     Ok(health)
@@ -718,17 +783,24 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
     let lists_status = lists_resp.status();
     let now = current_epoch_seconds();
     if let Ok(mut health) = get_health_store().lock() {
+        let is_unauthorized = lists_status.as_u16() == 401;
         health.google = ProviderHealth {
             connected: lists_status.is_success(),
             rate_limit_remaining: None,
             rate_limit_limit: None,
             rate_limit_reset: None,
-            token_expires_at: None,
-            is_expiring_soon: Some(false),
+            token_expires_at: if is_unauthorized {
+                Some("Expired".to_string())
+            } else {
+                health.google.token_expires_at.clone()
+            },
+            is_expiring_soon: Some(is_unauthorized),
             is_rate_limited: Some(false),
             last_checked: Some(now),
             error_message: if lists_status.is_success() {
                 None
+            } else if is_unauthorized {
+                Some("Google OAuth access token has expired (1 hour lifetime). Please generate a new access token.".to_string())
             } else {
                 Some(format!("HTTP {}", lists_status))
             },
@@ -1596,6 +1668,11 @@ async fn delete_github_issue_permanently(
     Ok(())
 }
 
+fn chrono_epoch_to_iso(secs: u64) -> String {
+    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+}
+
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
 fn chrono_now_iso() -> String {
@@ -1604,9 +1681,7 @@ fn chrono_now_iso() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // Basic ISO-8601 formatter (seconds precision, UTC)
-    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+    chrono_epoch_to_iso(secs)
 }
 
 fn unix_to_ymd_hms(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
