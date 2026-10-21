@@ -74,6 +74,8 @@ pub struct PRBranchInfo {
     pub head_repo: Option<String>,
     #[serde(rename = "isDraft")]
     pub is_draft: Option<bool>,
+    #[serde(rename = "isMerged")]
+    pub is_merged: Option<bool>,
     pub additions: Option<u64>,
     pub deletions: Option<u64>,
     #[serde(rename = "changedFiles")]
@@ -220,6 +222,7 @@ struct GHPullDetail {
     head: Option<GHBranchRef>,
     base: Option<GHBranchRef>,
     draft: Option<bool>,
+    merged: Option<bool>,
     additions: Option<u64>,
     deletions: Option<u64>,
     changed_files: Option<u64>,
@@ -797,6 +800,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                                     is_fork,
                                     head_repo,
                                     is_draft: pr_detail.draft,
+                                    is_merged: pr_detail.merged,
                                     additions: pr_detail.additions,
                                     deletions: pr_detail.deletions,
                                     changed_files: pr_detail.changed_files,
@@ -1212,6 +1216,61 @@ async fn close_github_issue(
     Ok(())
 }
 
+#[derive(Serialize, Debug)]
+struct IssueStatePayload<'a> {
+    state: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_reason: Option<&'a str>,
+}
+
+/// Set issue state ('open' or 'closed') with optional state_reason ('completed', 'reopened', 'not_planned').
+#[tauri::command]
+async fn set_github_issue_state(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    issue_number: u64,
+    state: String,
+    state_reason: Option<String>,
+) -> Result<(), String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
+    let payload = IssueStatePayload {
+        state: &state,
+        state_reason: state_reason.as_deref(),
+    };
+
+    let resp = client
+        .patch(&patch_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Network error updating issue state: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Failed to update issue state {}#{} ({}): {}",
+            repo, issue_number, status, body
+        ));
+    }
+
+    Ok(())
+}
+
 /// Permanently delete an issue on GitHub via GraphQL (requires Repository Admin/Owner permissions).
 #[tauri::command]
 async fn delete_github_issue_permanently(
@@ -1439,6 +1498,7 @@ pub fn run() {
             update_github_issue_labels,
             close_github_issue,
             delete_github_issue_permanently,
+            set_github_issue_state,
         ])
         .setup(|app| {
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
@@ -1640,6 +1700,7 @@ mod tests {
             is_fork: Some(true),
             head_repo: Some("contributor/widkanban".to_string()),
             is_draft: Some(false),
+            is_merged: Some(false),
             additions: Some(150),
             deletions: Some(40),
             changed_files: Some(5),
@@ -1731,6 +1792,25 @@ mod tests {
         assert!(serialized.contains("query"));
         assert!(serialized.contains("variables"));
         assert!(serialized.contains("foo"));
+    }
+
+    #[test]
+    fn test_issue_state_payload_serialization() {
+        let payload_closed = IssueStatePayload {
+            state: "closed",
+            state_reason: Some("completed"),
+        };
+        let ser_closed = serde_json::to_string(&payload_closed).expect("serialization failed");
+        assert!(ser_closed.contains(r#""state":"closed""#));
+        assert!(ser_closed.contains(r#""state_reason":"completed""#));
+
+        let payload_open = IssueStatePayload {
+            state: "open",
+            state_reason: None,
+        };
+        let ser_open = serde_json::to_string(&payload_open).expect("serialization failed");
+        assert!(ser_open.contains(r#""state":"open""#));
+        assert!(!ser_open.contains("state_reason"));
     }
 }
 

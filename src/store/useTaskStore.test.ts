@@ -25,6 +25,19 @@ describe('useTaskStore', () => {
       isSettingsOpen: false,
       hasCompletedOnboarding: false,
       authStatus: { has_github: false, has_google: false },
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
+        postCommentsFallback: false,
+        hasPromptedSetup: false,
+      },
+      locallyDeletedTasks: [],
+      deleteModalTask: null,
+      githubDoneModalTask: null,
+      groupLinkedPRs: true,
     });
   });
 
@@ -404,6 +417,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
@@ -589,6 +604,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: true,
       },
@@ -647,6 +664,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: true,
       },
@@ -756,4 +775,76 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('GitHub workflow, PR linking, and Done actions (Batch 2)', () => {
+    it('opens GitHub done action modal when moved to Done with doneAction=ask', () => {
+      const { addTask, moveTask } = useTaskStore.getState();
+
+      addTask({
+        title: 'Fix edge case in parser',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/widkanban/issues/60',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 60, isPullRequest: false },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Fix edge case in parser')!;
+      moveTask(task.id, 'done');
+
+      expect(useTaskStore.getState().tasks.find((t) => t.id === task.id)?.status).toBe('done');
+      expect(useTaskStore.getState().githubDoneModalTask?.id).toBe(task.id);
+    });
+
+    it('executes close action remotely when user confirms close', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const { addTask, executeGitHubDoneAction } = useTaskStore.getState();
+
+      addTask({
+        title: 'Complete documentation',
+        source: 'github',
+        status: 'done',
+        url: 'https://github.com/org/widkanban/issues/61',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 61, isPullRequest: false },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Complete documentation')!;
+      await executeGitHubDoneAction(task, 'close', true);
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_github_issue_state', {
+        repo: 'org/widkanban',
+        issueNumber: 61,
+        state: 'closed',
+        stateReason: 'completed',
+      });
+      expect(useTaskStore.getState().githubSyncSettings.doneAction).toBe('close');
+    });
+
+    it('reopens closed issue on remote when moving from Done back to In Progress', async () => {
+      mockInvoke.mockResolvedValue(null);
+      const { addTask, moveTask, setGithubSyncSettings } = useTaskStore.getState();
+
+      setGithubSyncSettings({ doneAction: 'close', manageLabels: true });
+
+      addTask({
+        title: 'Reopened issue feature',
+        source: 'github',
+        status: 'done',
+        url: 'https://github.com/org/widkanban/issues/62',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 62, isPullRequest: false },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Reopened issue feature')!;
+      mockInvoke.mockClear();
+
+      moveTask(task.id, 'in_progress');
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_github_issue_state', {
+        repo: 'org/widkanban',
+        issueNumber: 62,
+        state: 'open',
+        stateReason: 'reopened',
+      });
+    });
+  });
 });
+
