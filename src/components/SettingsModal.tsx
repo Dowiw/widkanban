@@ -32,6 +32,7 @@ import {
   Info,
   HelpCircle,
 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' }) => (
@@ -627,6 +628,41 @@ export const SettingsModal: React.FC = () => {
                             Paste the Client ID above, click <strong>Save Credentials</strong> below, and click <strong>Sign in with Google</strong>.
                           </li>
                         </ol>
+                      </div>
+
+                      {/* Dev Preview Callback Pages */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-750 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                        <span>Preview OAuth Response:</span>
+                        <div className="flex items-center space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await invoke('open_oauth_preview', { isSuccess: true, errorMsg: null });
+                              } catch {
+                                window.open('http://localhost:1420/oauth-verified.html', '_blank');
+                              }
+                            }}
+                            className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                            title="Open Google Authentication Verified page in browser"
+                          >
+                            Verified
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await invoke('open_oauth_preview', { isSuccess: false, errorMsg: null });
+                              } catch {
+                                window.open('http://localhost:1420/oauth-failed.html', '_blank');
+                              }
+                            }}
+                            className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-rose-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                            title="Open Google Authentication Failed page in browser"
+                          >
+                            Failed
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}

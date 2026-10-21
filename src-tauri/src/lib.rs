@@ -997,133 +997,14 @@ async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<Stri
 }
 
 /// Generates a modern, responsive HTML page served by the local loopback OAuth server
+static OAUTH_VERIFIED_HTML: &str = include_str!("../../public/oauth-verified.html");
+static OAUTH_FAILED_HTML: &str = include_str!("../../public/oauth-failed.html");
+
+/// Generates a modern, responsive HTML page served by the local loopback OAuth server
 /// to confirm successful authentication or explain an authorization failure.
 fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> String {
     if is_success {
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Google Authentication Verified</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/unifont@5.3.0/index.min.css">
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    body {
-      background-color: #f4f4f4;
-      color: #4b4d51;
-      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
-      padding: 64px 48px;
-      line-height: 1.8;
-      font-size: 14px;
-    }
-    @media (prefers-color-scheme: dark) {
-      body {
-        background-color: #121315;
-        color: #b5b8be;
-      }
-    }
-    .container {
-      max-width: 600px;
-    }
-    h1 {
-      font-size: 24px;
-      font-weight: normal;
-      color: #007acc;
-      margin-bottom: 24px;
-      letter-spacing: -0.5px;
-    }
-    @media (prefers-color-scheme: dark) {
-      h1 {
-        color: #38bdf8;
-      }
-    }
-    p {
-      margin-bottom: 12px;
-    }
-    .actions {
-      margin-top: 28px;
-    }
-    .btn {
-      display: inline-block;
-      padding: 8px 18px;
-      border: 1px solid #4b4d51;
-      background: transparent;
-      color: #4b4d51;
-      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
-      font-size: 14px;
-      cursor: pointer;
-      border-radius: 0;
-      text-decoration: none;
-      outline: none;
-    }
-    .btn:hover {
-      background: #e2e2e2;
-    }
-    .btn:focus-visible {
-      outline: 1px dashed #007acc;
-      outline-offset: 2px;
-    }
-    @media (prefers-color-scheme: dark) {
-      .btn {
-        border-color: #888888;
-        color: #d0d0d0;
-      }
-      .btn:hover {
-        background: #25282c;
-      }
-    }
-    .hint {
-      display: none;
-      margin-top: 14px;
-      font-size: 13px;
-      color: #797d84;
-    }
-    @media (prefers-color-scheme: dark) {
-      .hint {
-        color: #94a3b8;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Google Authentication Verified</h1>
-    <p>Your Google account has been connected to WidKanban.</p>
-    <p>You can return to the app or close this tab.</p>
-    <div class="actions">
-      <button id="close-btn" class="btn" onclick="closeTab()">close tab</button>
-      <p id="close-hint" class="hint">Press <strong>Ctrl+W</strong> (or <strong>⌘W</strong>) to close this tab.</p>
-    </div>
-  </div>
-  <script>
-    function closeTab() {
-      try { window.close(); } catch (e) {}
-      try { window.open('', '_self', ''); window.close(); } catch (e) {}
-      setTimeout(function() {
-        var hint = document.getElementById('close-hint');
-        var btn = document.getElementById('close-btn');
-        if (hint) hint.style.display = 'block';
-        if (btn) btn.textContent = 'close tab (Ctrl+W)';
-      }, 100);
-    }
-    window.onload = function() {
-      var btn = document.getElementById('close-btn');
-      if (btn) btn.focus();
-    };
-    window.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' || e.key === 'Enter') {
-        closeTab();
-      }
-    });
-  </script>
-</body>
-</html>"#
-            .to_string()
+        OAUTH_VERIFIED_HTML.to_string()
     } else {
         let raw_error = error_msg.unwrap_or("Access was denied or the request was cancelled.");
         let sanitized_error = raw_error
@@ -1139,148 +1020,42 @@ fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> Stri
             "Google authorization was not completed. Please check your OAuth Client settings in Settings."
         };
 
-        format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Google Authentication Failed</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/unifont@5.3.0/index.min.css">
-  <style>
-    * {{
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }}
-    body {{
-      background-color: #f4f4f4;
-      color: #4b4d51;
-      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
-      padding: 64px 48px;
-      line-height: 1.8;
-      font-size: 14px;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      body {{
-        background-color: #121315;
-        color: #b5b8be;
-      }}
-    }}
-    .container {{
-      max-width: 600px;
-    }}
-    h1 {{
-      font-size: 24px;
-      font-weight: normal;
-      color: #d32f2f;
-      margin-bottom: 24px;
-      letter-spacing: -0.5px;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      h1 {{
-        color: #f87171;
-      }}
-    }}
-    p {{
-      margin-bottom: 12px;
-    }}
-    .error-box {{
-      margin: 16px 0;
-      padding: 8px 12px;
-      border: 1px solid #d32f2f;
-      color: #b71c1c;
-      font-size: 13px;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      .error-box {{
-        border-color: #f87171;
-        color: #fca5a5;
-      }}
-    }}
-    .actions {{
-      margin-top: 28px;
-    }}
-    .btn {{
-      display: inline-block;
-      padding: 8px 18px;
-      border: 1px solid #4b4d51;
-      background: transparent;
-      color: #4b4d51;
-      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
-      font-size: 14px;
-      cursor: pointer;
-      border-radius: 0;
-      text-decoration: none;
-      outline: none;
-    }}
-    .btn:hover {{
-      background: #e2e2e2;
-    }}
-    .btn:focus-visible {{
-      outline: 1px dashed #d32f2f;
-      outline-offset: 2px;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      .btn {{
-        border-color: #888888;
-        color: #d0d0d0;
-      }}
-      .btn:hover {{
-        background: #25282c;
-      }}
-    }}
-    .hint {{
-      display: none;
-      margin-top: 14px;
-      font-size: 13px;
-      color: #797d84;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      .hint {{
-        color: #94a3b8;
-      }}
-    }}
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Google Authentication Failed</h1>
-    <p>{desc}</p>
-    <div class="error-box">Error: {detail}</div>
-    <p>No changes were made to your account. You can return to WidKanban and try again.</p>
-    <div class="actions">
-      <button id="close-btn" class="btn" onclick="closeTab()">close tab</button>
-      <p id="close-hint" class="hint">Press <strong>Ctrl+W</strong> (or <strong>⌘W</strong>) to close this tab.</p>
-    </div>
-  </div>
-  <script>
-    function closeTab() {{
-      try {{ window.close(); }} catch (e) {{}}
-      try {{ window.open('', '_self', ''); window.close(); }} catch (e) {{}}
-      setTimeout(function() {{
-        var hint = document.getElementById('close-hint');
-        var btn = document.getElementById('close-btn');
-        if (hint) hint.style.display = 'block';
-        if (btn) btn.textContent = 'close tab (Ctrl+W)';
-      }}, 100);
-    }}
-    window.onload = function() {{
-      var btn = document.getElementById('close-btn');
-      if (btn) btn.focus();
-    }};
-    window.addEventListener('keydown', function(e) {{
-      if (e.key === 'Escape' || e.key === 'Enter') {{
-        closeTab();
-      }}
-    }});
-  </script>
-</body>
-</html>"#,
-            desc = display_desc,
-            detail = sanitized_error
-        )
+        OAUTH_FAILED_HTML
+            .replace("{{DESC}}", display_desc)
+            .replace("{{DETAIL}}", &sanitized_error)
     }
+}
+
+/// Opens the OAuth callback page (verified or failed) in the default system browser for dev preview.
+#[tauri::command]
+fn open_oauth_preview(is_success: bool, error_msg: Option<String>) -> Result<(), String> {
+    let url = if is_success {
+        "http://localhost:1420/oauth-verified.html".to_string()
+    } else {
+        match error_msg {
+            Some(err) if !err.trim().is_empty() => {
+                format!("http://localhost:1420/oauth-failed.html?error={}", url_encode(&err))
+            }
+            _ => "http://localhost:1420/oauth-failed.html".to_string(),
+        }
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        let script = format!("Start-Process '{}'", url.replace('\'', "''"));
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+    Ok(())
 }
 
 /// Start an in-app "Sign in with Google" OAuth loopback flow.
@@ -2543,6 +2318,7 @@ pub fn run() {
             update_github_issue_labels,
             close_github_issue,
             delete_github_issue_permanently,
+            open_oauth_preview,
         ])
         .setup(|app| {
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
