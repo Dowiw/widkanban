@@ -1005,163 +1005,121 @@ fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> Stri
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WidKanban — Authentication Successful</title>
+  <title>Google Authentication Verified</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/unifont@5.3.0/index.min.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      background: #090d16;
-      background-image:
-        radial-gradient(at 50% 0%, rgba(56, 189, 248, 0.16) 0px, transparent 60%),
-        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
-        radial-gradient(at 0% 100%, rgba(16, 185, 129, 0.10) 0px, transparent 50%);
-      color: #f1f5f9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
+      background-color: #f4f4f4;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      padding: 64px 48px;
+      line-height: 1.8;
+      font-size: 14px;
     }
-    .card {
-      width: 100%;
-      max-width: 440px;
-      background: rgba(15, 23, 42, 0.82);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 20px;
-      padding: 38px 32px 30px;
-      text-align: center;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.65), 0 0 40px rgba(16, 185, 129, 0.08);
-      animation: enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #121315;
+        color: #b5b8be;
+      }
     }
-    @keyframes enter {
-      from { opacity: 0; transform: scale(0.96) translateY(10px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
+    .container {
+      max-width: 600px;
     }
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 22px;
-      padding: 5px 14px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 9999px;
-    }
-    .brand-svg { width: 14px; height: 14px; fill: #38bdf8; }
-    .brand-name {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.8px;
-      background: linear-gradient(135deg, #38bdf8, #818cf8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-transform: uppercase;
-    }
-    .icon-wrapper {
-      width: 68px;
-      height: 68px;
-      margin: 0 auto 18px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(16, 185, 129, 0.04) 70%);
-      border: 1.5px solid rgba(16, 185, 129, 0.45);
-      box-shadow: 0 0 30px rgba(16, 185, 129, 0.25);
-    }
-    .icon-wrapper svg { width: 34px; height: 34px; stroke: #10b981; }
     h1 {
-      font-size: 20px;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: 8px;
-      letter-spacing: -0.01em;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 10px;
-      border-radius: 9999px;
-      font-size: 11px;
-      font-weight: 600;
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #34d399;
-      margin-bottom: 14px;
-    }
-    p.desc {
-      font-size: 13px;
-      line-height: 1.6;
-      color: #94a3b8;
+      font-size: 24px;
+      font-weight: normal;
+      color: #007acc;
       margin-bottom: 24px;
+      letter-spacing: -0.5px;
+    }
+    @media (prefers-color-scheme: dark) {
+      h1 {
+        color: #38bdf8;
+      }
+    }
+    p {
+      margin-bottom: 12px;
+    }
+    .actions {
+      margin-top: 28px;
     }
     .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      padding: 12px 20px;
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
-      color: #ffffff;
-      font-size: 13px;
-      font-weight: 600;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 10px;
+      display: inline-block;
+      padding: 8px 18px;
+      border: 1px solid #4b4d51;
+      background: transparent;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      font-size: 14px;
       cursor: pointer;
-      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: 0;
       text-decoration: none;
+      outline: none;
     }
     .btn:hover {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      transform: translateY(-1px);
-      box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45);
+      background: #e2e2e2;
     }
-    .countdown {
-      font-size: 11px;
-      color: #64748b;
+    .btn:focus-visible {
+      outline: 1px dashed #007acc;
+      outline-offset: 2px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .btn {
+        border-color: #888888;
+        color: #d0d0d0;
+      }
+      .btn:hover {
+        background: #25282c;
+      }
+    }
+    .hint {
+      display: none;
       margin-top: 14px;
+      font-size: 13px;
+      color: #797d84;
+    }
+    @media (prefers-color-scheme: dark) {
+      .hint {
+        color: #94a3b8;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="brand">
-      <svg class="brand-svg" viewBox="0 0 24 24"><path d="M4 4h4v16H4zm6 0h4v10h-4zm6 0h4v6h-4z"/></svg>
-      <span class="brand-name">WidKanban</span>
-    </div>
-    <div class="icon-wrapper">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 6L9 17l-5-5"/>
-      </svg>
-    </div>
-    <h1>Authentication Successful!</h1>
-    <div>
-      <span class="badge">Google Tasks Connected</span>
-    </div>
-    <p class="desc">
-      Your Google account is now securely linked with offline auto-refresh enabled.
-      You can safely close this browser window and return to WidKanban.
-    </p>
-    <button class="btn" onclick="window.close()">Close Browser Tab</button>
-    <div class="countdown">
-      Closing automatically in <span id="sec">3</span>s...
+  <div class="container">
+    <h1>Google Authentication Verified</h1>
+    <p>Your Google account has been connected to WidKanban.</p>
+    <p>You can return to the app or close this tab.</p>
+    <div class="actions">
+      <button id="close-btn" class="btn" onclick="closeTab()">close tab</button>
+      <p id="close-hint" class="hint">Press <strong>Ctrl+W</strong> (or <strong>⌘W</strong>) to close this tab.</p>
     </div>
   </div>
   <script>
-    let s = 3;
-    const el = document.getElementById('sec');
-    const timer = setInterval(() => {
-      s--;
-      if (el) el.textContent = s;
-      if (s <= 0) {
-        clearInterval(timer);
-        window.close();
+    function closeTab() {
+      try { window.close(); } catch (e) {}
+      try { window.open('', '_self', ''); window.close(); } catch (e) {}
+      setTimeout(function() {
+        var hint = document.getElementById('close-hint');
+        var btn = document.getElementById('close-btn');
+        if (hint) hint.style.display = 'block';
+        if (btn) btn.textContent = 'close tab (Ctrl+W)';
+      }, 100);
+    }
+    window.onload = function() {
+      var btn = document.getElementById('close-btn');
+      if (btn) btn.focus();
+    };
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        closeTab();
       }
-    }, 1000);
+    });
   </script>
 </body>
 </html>"#
@@ -1175,15 +1133,10 @@ fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> Stri
             .replace('"', "&quot;");
 
         let is_denied = raw_error.contains("access_denied");
-        let display_title = if is_denied {
-            "Authentication Cancelled"
-        } else {
-            "Authentication Failed"
-        };
         let display_desc = if is_denied {
-            "You cancelled the Google sign-in request in your browser. No changes were made to your WidKanban account."
+            "You cancelled the Google sign-in request in your browser."
         } else {
-            "Google authorization was not completed. Please check your OAuth Client settings in Settings and try again."
+            "Google authorization was not completed. Please check your OAuth Client settings in Settings."
         };
 
         format!(
@@ -1192,155 +1145,138 @@ fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> Stri
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WidKanban — {title}</title>
+  <title>Google Authentication Failed</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/unifont@5.3.0/index.min.css">
   <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    * {{
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }}
     body {{
-      background: #090d16;
-      background-image:
-        radial-gradient(at 50% 0%, rgba(244, 63, 94, 0.16) 0px, transparent 60%),
-        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.10) 0px, transparent 50%),
-        radial-gradient(at 0% 100%, rgba(244, 63, 94, 0.08) 0px, transparent 50%);
-      color: #f1f5f9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
+      background-color: #f4f4f4;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      padding: 64px 48px;
+      line-height: 1.8;
+      font-size: 14px;
     }}
-    .card {{
-      width: 100%;
-      max-width: 440px;
-      background: rgba(15, 23, 42, 0.82);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 20px;
-      padding: 38px 32px 30px;
-      text-align: center;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.65), 0 0 40px rgba(244, 63, 94, 0.08);
-      animation: enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    @media (prefers-color-scheme: dark) {{
+      body {{
+        background-color: #121315;
+        color: #b5b8be;
+      }}
     }}
-    @keyframes enter {{
-      from {{ opacity: 0; transform: scale(0.96) translateY(10px); }}
-      to {{ opacity: 1; transform: scale(1) translateY(0); }}
+    .container {{
+      max-width: 600px;
     }}
-    .brand {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 22px;
-      padding: 5px 14px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 9999px;
-    }}
-    .brand-svg {{ width: 14px; height: 14px; fill: #f43f5e; }}
-    .brand-name {{
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.8px;
-      background: linear-gradient(135deg, #f43f5e, #fb7185);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-transform: uppercase;
-    }}
-    .icon-wrapper {{
-      width: 68px;
-      height: 68px;
-      margin: 0 auto 18px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle, rgba(244, 63, 94, 0.28) 0%, rgba(244, 63, 94, 0.04) 70%);
-      border: 1.5px solid rgba(244, 63, 94, 0.45);
-      box-shadow: 0 0 30px rgba(244, 63, 94, 0.25);
-    }}
-    .icon-wrapper svg {{ width: 34px; height: 34px; stroke: #f43f5e; }}
     h1 {{
-      font-size: 20px;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: 8px;
-      letter-spacing: -0.01em;
+      font-size: 24px;
+      font-weight: normal;
+      color: #d32f2f;
+      margin-bottom: 24px;
+      letter-spacing: -0.5px;
     }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 10px;
-      border-radius: 9999px;
-      font-size: 11px;
-      font-weight: 600;
-      background: rgba(244, 63, 94, 0.15);
-      border: 1px solid rgba(244, 63, 94, 0.3);
-      color: #fb7185;
-      margin-bottom: 14px;
+    @media (prefers-color-scheme: dark) {{
+      h1 {{
+        color: #f87171;
+      }}
     }}
-    p.desc {{
-      font-size: 13px;
-      line-height: 1.6;
-      color: #94a3b8;
-      margin-bottom: 16px;
+    p {{
+      margin-bottom: 12px;
     }}
     .error-box {{
-      background: rgba(244, 63, 94, 0.08);
-      border: 1px solid rgba(244, 63, 94, 0.22);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 11px;
-      color: #fca5a5;
-      margin-bottom: 24px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      word-break: break-all;
+      margin: 16px 0;
+      padding: 8px 12px;
+      border: 1px solid #d32f2f;
+      color: #b71c1c;
+      font-size: 13px;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      .error-box {{
+        border-color: #f87171;
+        color: #fca5a5;
+      }}
+    }}
+    .actions {{
+      margin-top: 28px;
     }}
     .btn {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      padding: 12px 20px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #ffffff;
-      font-size: 13px;
-      font-weight: 600;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 10px;
+      display: inline-block;
+      padding: 8px 18px;
+      border: 1px solid #4b4d51;
+      background: transparent;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      font-size: 14px;
       cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: 0;
+      text-decoration: none;
+      outline: none;
     }}
     .btn:hover {{
-      background: rgba(255, 255, 255, 0.14);
-      transform: translateY(-1px);
+      background: #e2e2e2;
+    }}
+    .btn:focus-visible {{
+      outline: 1px dashed #d32f2f;
+      outline-offset: 2px;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      .btn {{
+        border-color: #888888;
+        color: #d0d0d0;
+      }}
+      .btn:hover {{
+        background: #25282c;
+      }}
+    }}
+    .hint {{
+      display: none;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #797d84;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      .hint {{
+        color: #94a3b8;
+      }}
     }}
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="brand">
-      <svg class="brand-svg" viewBox="0 0 24 24"><path d="M4 4h4v16H4zm6 0h4v10h-4zm6 0h4v6h-4z"/></svg>
-      <span class="brand-name">WidKanban</span>
+  <div class="container">
+    <h1>Google Authentication Failed</h1>
+    <p>{desc}</p>
+    <div class="error-box">Error: {detail}</div>
+    <p>No changes were made to your account. You can return to WidKanban and try again.</p>
+    <div class="actions">
+      <button id="close-btn" class="btn" onclick="closeTab()">close tab</button>
+      <p id="close-hint" class="hint">Press <strong>Ctrl+W</strong> (or <strong>⌘W</strong>) to close this tab.</p>
     </div>
-    <div class="icon-wrapper">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="15" y1="9" x2="9" y2="15"/>
-        <line x1="9" y1="9" x2="15" y2="15"/>
-      </svg>
-    </div>
-    <h1>{title}</h1>
-    <div>
-      <span class="badge">Google Sign-in</span>
-    </div>
-    <p class="desc">{desc}</p>
-    <div class="error-box">{detail}</div>
-    <button class="btn" onclick="window.close()">Close Browser Tab</button>
   </div>
+  <script>
+    function closeTab() {{
+      try {{ window.close(); }} catch (e) {{}}
+      try {{ window.open('', '_self', ''); window.close(); }} catch (e) {{}}
+      setTimeout(function() {{
+        var hint = document.getElementById('close-hint');
+        var btn = document.getElementById('close-btn');
+        if (hint) hint.style.display = 'block';
+        if (btn) btn.textContent = 'close tab (Ctrl+W)';
+      }}, 100);
+    }}
+    window.onload = function() {{
+      var btn = document.getElementById('close-btn');
+      if (btn) btn.focus();
+    }};
+    window.addEventListener('keydown', function(e) {{
+      if (e.key === 'Escape' || e.key === 'Enter') {{
+        closeTab();
+      }}
+    }});
+  </script>
 </body>
 </html>"#,
-            title = display_title,
             desc = display_desc,
             detail = sanitized_error
         )
@@ -3004,17 +2940,17 @@ mod tests {
     #[test]
     fn test_render_oauth_callback_html() {
         let success_html = render_oauth_callback_html(true, None);
-        assert!(success_html.contains("Authentication Successful!"));
-        assert!(success_html.contains("Google Tasks Connected"));
-        assert!(success_html.contains("WidKanban"));
+        assert!(success_html.contains("Google Authentication Verified"));
+        assert!(success_html.contains("close tab"));
+        assert!(success_html.contains("Unifont"));
 
         let fail_html = render_oauth_callback_html(false, Some("access_denied"));
-        assert!(fail_html.contains("Authentication Cancelled"));
+        assert!(fail_html.contains("Google Authentication Failed"));
         assert!(fail_html.contains("access_denied"));
-        assert!(fail_html.contains("WidKanban"));
+        assert!(fail_html.contains("close tab"));
 
         let fail_generic = render_oauth_callback_html(false, Some("redirect_uri_mismatch"));
-        assert!(fail_generic.contains("Authentication Failed"));
+        assert!(fail_generic.contains("Google Authentication Failed"));
         assert!(fail_generic.contains("redirect_uri_mismatch"));
     }
 }
