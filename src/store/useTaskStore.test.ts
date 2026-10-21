@@ -975,5 +975,81 @@ describe('useTaskStore', () => {
       // fetch_github_tasks should NOT have been called because it is rate limited!
       expect(mockInvoke).not.toHaveBeenCalledWith('fetch_github_tasks', undefined);
     });
+
+    it('startGoogleOAuthFlow succeeds and updates auth status with refresh token', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_google_oauth_flow') {
+          return {
+            has_github: false,
+            has_google: true,
+            google_has_refresh_token: true,
+          };
+        }
+        if (cmd === 'fetch_google_tasks') return [];
+        if (cmd === 'get_api_health') return { github: { connected: false }, google: { connected: true } };
+        return null;
+      });
+
+      const { startGoogleOAuthFlow } = useTaskStore.getState();
+      const res = await startGoogleOAuthFlow({
+        clientId: 'custom-client-id.apps.googleusercontent.com',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('start_google_oauth_flow', {
+        clientId: 'custom-client-id.apps.googleusercontent.com',
+        clientSecret: null,
+      });
+      expect(useTaskStore.getState().authStatus.google_has_refresh_token).toBe(true);
+      expect(useTaskStore.getState().hasCompletedOnboarding).toBe(true);
+    });
+
+    it('startGoogleOAuthFlow handles rejection or cancellation gracefully', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_google_oauth_flow') {
+          throw new Error('OAuth flow timed out waiting for user response');
+        }
+        return null;
+      });
+
+      const { startGoogleOAuthFlow } = useTaskStore.getState();
+      const res = await startGoogleOAuthFlow();
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('timed out');
+    });
+
+    it('saveCredentials passes refresh token and client credentials to native backend', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'save_credentials') {
+          return {
+            has_github: true,
+            has_google: true,
+            google_has_refresh_token: true,
+          };
+        }
+        if (cmd === 'fetch_google_tasks') return [];
+        if (cmd === 'fetch_github_tasks') return [];
+        if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: true } };
+        return null;
+      });
+
+      const { saveCredentials } = useTaskStore.getState();
+      const ok = await saveCredentials({
+        githubToken: 'ghp_test123',
+        googleRefreshToken: '1//refresh_token_xyz',
+        googleClientId: 'test-client-id.apps.googleusercontent.com',
+      });
+
+      expect(ok).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('save_credentials', {
+        githubToken: 'ghp_test123',
+        googleToken: null,
+        googleRefreshToken: '1//refresh_token_xyz',
+        googleClientId: 'test-client-id.apps.googleusercontent.com',
+        googleClientSecret: null,
+      });
+    });
   });
 });
+

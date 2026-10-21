@@ -114,8 +114,18 @@ interface TaskState {
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
-  saveCredentials: (creds: { githubToken?: string; googleToken?: string }) => Promise<boolean>;
+  saveCredentials: (creds: {
+    githubToken?: string;
+    googleToken?: string;
+    googleRefreshToken?: string;
+    googleClientId?: string;
+    googleClientSecret?: string;
+  }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
+  startGoogleOAuthFlow: (creds?: {
+    clientId?: string;
+    clientSecret?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   autoSyncSettings: AutoSyncSettings;
   isAutoSyncPromptOpen: boolean;
   apiHealth: ApiHealthState;
@@ -634,10 +644,19 @@ export const useTaskStore = create<TaskState>()(
         return get().authStatus;
       },
 
-      saveCredentials: async ({ githubToken, googleToken }) => {
+      saveCredentials: async ({
+        githubToken,
+        googleToken,
+        googleRefreshToken,
+        googleClientId,
+        googleClientSecret,
+      }) => {
         const res = await safeInvoke<AuthStatus>('save_credentials', {
           githubToken: githubToken || null,
           googleToken: googleToken || null,
+          googleRefreshToken: googleRefreshToken || null,
+          googleClientId: googleClientId || null,
+          googleClientSecret: googleClientSecret || null,
         });
         if (res) {
           const isFirstGithubConnect =
@@ -660,6 +679,34 @@ export const useTaskStore = create<TaskState>()(
           return true;
         }
         return false;
+      },
+
+      startGoogleOAuthFlow: async (creds) => {
+        const result = await safeInvokeWithResult<AuthStatus>('start_google_oauth_flow', {
+          clientId: creds?.clientId || null,
+          clientSecret: creds?.clientSecret || null,
+        });
+
+        if (result.success && result.data) {
+          const authStatus = result.data;
+          const isFirstConnect =
+            (authStatus.has_github || authStatus.has_google) && !get().autoSyncSettings.hasPrompted;
+
+          set({
+            authStatus,
+            hasCompletedOnboarding: true,
+            isAutoSyncPromptOpen: isFirstConnect ? true : get().isAutoSyncPromptOpen,
+          });
+
+          await get().fetchGoogleTasks();
+          await get().fetchApiHealth();
+          return { success: true };
+        }
+
+        return {
+          success: false,
+          error: result.error || 'Failed to complete Google authentication',
+        };
       },
 
       clearCredentials: async (provider) => {

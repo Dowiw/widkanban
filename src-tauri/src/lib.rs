@@ -14,6 +14,14 @@ use tauri::{
 pub struct StoredCredentials {
     pub github_token: Option<String>,
     pub google_token: Option<String>,
+    #[serde(default)]
+    pub google_refresh_token: Option<String>,
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    #[serde(default)]
+    pub google_token_expiry: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -24,6 +32,8 @@ pub struct AuthStatus {
     pub github_from_env: bool,
     #[serde(default)]
     pub google_from_env: bool,
+    #[serde(default)]
+    pub google_has_refresh_token: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -391,6 +401,15 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
         creds.google_token = Some(gt);
     }
+    if let Some(gr) = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]) {
+        creds.google_refresh_token = Some(gr);
+    }
+    if let Some(cid) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]) {
+        creds.google_client_id = Some(cid);
+    }
+    if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
+        creds.google_client_secret = Some(sec);
+    }
 
     creds
 }
@@ -662,11 +681,16 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
     let creds = read_credentials(&app_handle);
     let env_github = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]);
     let env_google = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]);
+    let env_google_refresh = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]);
+    let has_google_token = creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_refresh_token = creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_google: has_google_token || has_refresh_token,
         github_from_env: env_github.is_some(),
-        google_from_env: env_google.is_some(),
+        google_from_env: env_google.is_some() || env_google_refresh.is_some(),
+        google_has_refresh_token: has_refresh_token,
     })
 }
 
@@ -675,6 +699,9 @@ fn save_credentials(
     app_handle: tauri::AppHandle,
     github_token: Option<String>,
     google_token: Option<String>,
+    google_refresh_token: Option<String>,
+    google_client_id: Option<String>,
+    google_client_secret: Option<String>,
 ) -> Result<AuthStatus, String> {
     let mut creds = read_stored_credentials_file(&app_handle);
     if let Some(gh) = github_token.as_ref() {
@@ -693,6 +720,30 @@ fn save_credentials(
             creds.google_token = Some(trimmed);
         }
     }
+    if let Some(gr) = google_refresh_token.as_ref() {
+        let trimmed = gr.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_refresh_token = None;
+        } else {
+            creds.google_refresh_token = Some(trimmed);
+        }
+    }
+    if let Some(cid) = google_client_id.as_ref() {
+        let trimmed = cid.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_id = None;
+        } else {
+            creds.google_client_id = Some(trimmed);
+        }
+    }
+    if let Some(cs) = google_client_secret.as_ref() {
+        let trimmed = cs.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_secret = None;
+        } else {
+            creds.google_client_secret = Some(trimmed);
+        }
+    }
     write_credentials(&app_handle, &creds)?;
 
     let full_creds = read_credentials(&app_handle);
@@ -701,8 +752,8 @@ fn save_credentials(
             health.github.connected = full_creds.github_token.is_some();
             health.github.error_message = None;
         }
-        if google_token.is_some() {
-            health.google.connected = full_creds.google_token.is_some();
+        if google_token.is_some() || google_refresh_token.is_some() {
+            health.google.connected = full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some();
             health.google.error_message = None;
         }
     }
@@ -718,10 +769,16 @@ fn clear_credentials(
     let mut creds = read_stored_credentials_file(&app_handle);
     match provider.as_deref() {
         Some("github") => creds.github_token = None,
-        Some("google") => creds.google_token = None,
+        Some("google") => {
+            creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
+        }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
         }
     }
     write_credentials(&app_handle, &creds)?;
@@ -736,10 +793,346 @@ fn clear_credentials(
         }
         if provider.as_deref() == Some("google") || provider.is_none() {
             health.google = ProviderHealth {
-                connected: full_creds.google_token.is_some(),
+                connected: full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some(),
                 ..Default::default()
             };
         }
+    }
+
+    get_auth_status(app_handle)
+}
+
+/// Ensures that a valid Google access token is available.
+/// If the current access token is expired (or will expire in < 5 minutes)
+/// and a refresh token is available, automatically requests a new access token
+/// from Google's OAuth 2.0 token endpoint and updates stored credentials.
+async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let creds = read_credentials(app_handle);
+    let now = current_epoch_seconds();
+
+    // Check if current token is still valid (has > 300s remaining)
+    let is_still_valid = match (creds.google_token.as_ref(), creds.google_token_expiry) {
+        (Some(tok), Some(expiry)) => !tok.trim().is_empty() && expiry > now + 300,
+        (Some(tok), None) => !tok.trim().is_empty(), // Legacy or manual token without known expiry
+        _ => false,
+    };
+
+    if is_still_valid {
+        if let Some(tok) = creds.google_token {
+            return Ok(tok);
+        }
+    }
+
+    // If we have a refresh token, attempt silent background refresh
+    if let Some(refresh_tok) = creds.google_refresh_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let client_id = creds.google_client_id.as_deref().unwrap_or("");
+        let client_secret = creds.google_client_secret.as_deref().unwrap_or("");
+
+        if !client_id.is_empty() {
+            let client = reqwest::Client::builder()
+                .use_native_tls()
+                .build()
+                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+            let mut params = vec![
+                ("client_id", client_id),
+                ("refresh_token", refresh_tok.as_str()),
+                ("grant_type", "refresh_token"),
+            ];
+            if !client_secret.is_empty() {
+                params.push(("client_secret", client_secret));
+            }
+
+            let resp = client
+                .post("https://oauth2.googleapis.com/token")
+                .form(&params)
+                .header("User-Agent", "WidKanban-Desktop")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send token refresh request: {}", e))?;
+
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(new_access_token) = data.get("access_token").and_then(|v| v.as_str()) {
+                        let expires_in = data
+                            .get("expires_in")
+                            .and_then(|v| v.as_u64())
+                            .or_else(|| data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+                            .unwrap_or(3600);
+
+                        let mut stored = read_stored_credentials_file(app_handle);
+                        stored.google_token = Some(new_access_token.to_string());
+                        stored.google_token_expiry = Some(now + expires_in);
+                        let _ = write_credentials(app_handle, &stored);
+
+                        // Update in-memory health
+                        if let Ok(mut health) = get_health_store().lock() {
+                            health.google = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+                                is_expiring_soon: Some(false),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+                        }
+
+                        return Ok(new_access_token.to_string());
+                    }
+                }
+            } else {
+                let err_body = resp.text().await.unwrap_or_default();
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.google.connected = false;
+                    health.google.token_expires_at = Some("Expired".to_string());
+                    health.google.error_message = Some("Google token expired. Please re-authenticate.".to_string());
+                }
+                return Err(format!("Google token refresh failed: {}", err_body));
+            }
+        }
+    }
+
+    // Fall back to existing token if present
+    if let Some(tok) = creds.google_token {
+        if !tok.trim().is_empty() {
+            return Ok(tok);
+        }
+    }
+
+    Err("Google Tasks token not configured or expired. Please sign in with Google or enter a valid token in Settings.".to_string())
+}
+
+/// Start an in-app "Sign in with Google" OAuth loopback flow.
+/// Listens on an ephemeral localhost port, launches the browser, captures the auth code,
+/// exchanges it for both access and refresh tokens, and saves them securely in native credentials.
+#[tauri::command]
+async fn start_google_oauth_flow(
+    app_handle: tauri::AppHandle,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> Result<AuthStatus, String> {
+    let creds = read_credentials(&app_handle);
+    let resolved_client_id = client_id
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_id)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]))
+        .ok_or_else(|| "Google Client ID is required to start the OAuth flow. Please enter your OAuth Client ID in Settings.".to_string())?;
+
+    let resolved_client_secret = client_secret
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_secret)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]))
+        .unwrap_or_default();
+
+    // 1. Bind TCP listener on ephemeral port (127.0.0.1:0)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to start local OAuth loopback server: {}", e))?;
+
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local port: {}", e))?
+        .port();
+
+    let redirect_uri = format!("http://127.0.0.1:{}", port);
+    let state = format!("widkanban_{}", current_epoch_seconds());
+
+    // 2. Build Google authorization URL
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?\
+        client_id={}&\
+        redirect_uri={}&\
+        response_type=code&\
+        scope={}&\
+        access_type=offline&\
+        prompt=consent&\
+        state={}",
+        url_encode(&resolved_client_id),
+        url_encode(&redirect_uri),
+        url_encode("https://www.googleapis.com/auth/tasks"),
+        url_encode(&state),
+    );
+
+    // 3. Open browser
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_url = auth_url.replace('\'', "''");
+        let script = format!("Start-Process '{}'", escaped_url);
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    }
+
+    // 4. Wait for incoming redirect with 120-second timeout
+    let timeout_duration = std::time::Duration::from_secs(120);
+    let code = match tokio::time::timeout(timeout_duration, async {
+        loop {
+            let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            let mut buf = [0u8; 4096];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if let Some(first_line) = req_str.lines().next() {
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "GET" {
+                    let path = parts[1];
+                    let query = path.split('?').nth(1).unwrap_or("");
+                    let mut code_val: Option<String> = None;
+                    let mut error_val: Option<String> = None;
+
+                    for param in query.split('&') {
+                        let mut kv = param.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" {
+                                code_val = Some(v.to_string());
+                            } else if k == "error" {
+                                error_val = Some(v.to_string());
+                            }
+                        }
+                    }
+
+                    let (html_body, status_line) = if code_val.is_some() {
+                        (
+                            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>WidKanban Auth</title></head>\
+                            <body style='background:#0f172a;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;text-align:center;padding-top:80px;margin:0;'>\
+                            <div style='max-width:420px;margin:auto;background:#1e293b;padding:36px;border-radius:16px;border:1px solid #334155;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);'>\
+                              <div style='width:52px;height:52px;background:rgba(16,185,129,0.2);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;'>\
+                                <span style='font-size:28px;color:#10b981;'>&#10003;</span>\
+                              </div>\
+                              <h2 style='margin:0 0 10px;font-size:22px;color:#38bdf8;'>WidKanban</h2>\
+                              <p style='color:#10b981;font-size:16px;font-weight:600;margin:0 0 8px;'>Authentication Successful!</p>\
+                              <p style='color:#94a3b8;font-size:13px;line-height:1.5;margin:0 0 24px;'>Your Google account is now connected with offline auto-refresh enabled. You can safely close this browser window and return to WidKanban.</p>\
+                              <button onclick='window.close()' style='background:#3b82f6;color:white;font-weight:600;font-size:13px;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;'>Close Tab</button>\
+                            </div>\
+                            <script>setTimeout(() => window.close(), 1800);</script>\
+                            </body></html>",
+                            "HTTP/1.1 200 OK",
+                        )
+                    } else {
+                        (
+                            "<!DOCTYPE html><html><body style='background:#0f172a;color:#f8fafc;font-family:sans-serif;text-align:center;padding-top:80px;'>\
+                            <div style='max-width:400px;margin:auto;background:#1e293b;padding:32px;border-radius:12px;'>\
+                              <h2 style='color:#ef4444;'>Authentication Cancelled or Failed</h2>\
+                              <p style='color:#94a3b8;'>Please return to WidKanban and try again.</p>\
+                            </div></body></html>",
+                            "HTTP/1.1 400 Bad Request",
+                        )
+                    };
+
+                    let response = format!(
+                        "{}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        html_body.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+
+                    if let Some(err) = error_val {
+                        return Err(format!("Google OAuth authorization error: {}", err));
+                    }
+                    if let Some(c) = code_val {
+                        return Ok(c);
+                    }
+                }
+            }
+        }
+    }).await {
+        Ok(res) => res?,
+        Err(_) => return Err("Google OAuth flow timed out (2 minutes elapsed). Please try again.".to_string()),
+    };
+
+    // 5. Exchange code for access & refresh tokens
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut token_params = vec![
+        ("client_id", resolved_client_id.as_str()),
+        ("code", code.as_str()),
+        ("grant_type", "authorization_code"),
+        ("redirect_uri", redirect_uri.as_str()),
+    ];
+    if !resolved_client_secret.is_empty() {
+        token_params.push(("client_secret", resolved_client_secret.as_str()));
+    }
+
+    let token_resp = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&token_params)
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to exchange authorization code: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        let err_body = token_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to retrieve Google tokens: {}", err_body));
+    }
+
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = token_data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Google token response did not contain an access_token".to_string())?
+        .to_string();
+
+    let refresh_token = token_data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let expires_in = token_data
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .or_else(|| token_data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(3600);
+
+    let now = current_epoch_seconds();
+
+    // 6. Save in native OS credentials
+    let mut stored = read_stored_credentials_file(&app_handle);
+    stored.google_token = Some(access_token);
+    if refresh_token.is_some() {
+        stored.google_refresh_token = refresh_token;
+    }
+    stored.google_client_id = Some(resolved_client_id);
+    if !resolved_client_secret.is_empty() {
+        stored.google_client_secret = Some(resolved_client_secret);
+    }
+    stored.google_token_expiry = Some(now + expires_in);
+    write_credentials(&app_handle, &stored)?;
+
+    // 7. Update health state
+    if let Ok(mut health) = get_health_store().lock() {
+        health.google = ProviderHealth {
+            connected: true,
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: None,
+        };
     }
 
     get_auth_status(app_handle)
@@ -749,17 +1142,16 @@ fn clear_credentials(
 /// resolving subtask hierarchy and deep links.
 #[tauri::command]
 async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| {
+    let token = match ensure_valid_google_token(&app_handle).await {
+        Ok(t) => t,
+        Err(e) => {
             if let Ok(mut health) = get_health_store().lock() {
                 health.google.connected = false;
-                health.google.error_message = Some("Google Tasks token not configured".to_string());
+                health.google.error_message = Some(e.clone());
             }
-            "Google Tasks token not configured".to_string()
-        })?;
+            return Err(e);
+        }
+    };
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -1188,11 +1580,7 @@ async fn update_google_task(
     list_id: String,
     new_status: String,
 ) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+    let token = ensure_valid_google_token(&app_handle).await?;
 
     let google_status = task_status_to_google_status(&new_status);
     let payload = GTaskPatchPayload { status: google_status };
@@ -1775,6 +2163,7 @@ pub fn run() {
             get_auth_status,
             save_credentials,
             clear_credentials,
+            start_google_oauth_flow,
             fetch_google_tasks,
             fetch_github_tasks,
             update_google_task,
@@ -1869,6 +2258,10 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
+            google_refresh_token: Some("1//refresh_token_test".to_string()),
+            google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
+            google_client_secret: Some("GOCSPX-secret".to_string()),
+            google_token_expiry: Some(1792615000),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -1882,15 +2275,21 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123".to_string()),
             google_token: Some("   ".to_string()),
+            google_refresh_token: Some("1//valid_refresh".to_string()),
+            google_client_id: None,
+            google_client_secret: None,
+            google_token_expiry: None,
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-            has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_google: creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             github_from_env: false,
             google_from_env: false,
+            google_has_refresh_token: true,
         };
         assert!(status.has_github);
-        assert!(!status.has_google);
+        assert!(status.has_google);
+        assert!(status.google_has_refresh_token);
         assert!(!status.github_from_env);
         assert!(!status.google_from_env);
     }
@@ -1902,9 +2301,11 @@ mod tests {
             has_google: false,
             github_from_env: true,
             google_from_env: false,
+            google_has_refresh_token: false,
         };
         let json = serde_json::to_string(&status).expect("Serialization failed");
         assert!(json.contains("github_from_env"));
+        assert!(json.contains("google_has_refresh_token"));
         let deserialized: AuthStatus = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(status, deserialized);
     }

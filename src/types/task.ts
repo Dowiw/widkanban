@@ -80,6 +80,7 @@ export interface AuthStatus {
   has_google: boolean;
   github_from_env?: boolean;
   google_from_env?: boolean;
+  google_has_refresh_token?: boolean;
 }
 
 export interface GitHubSyncSettings {
