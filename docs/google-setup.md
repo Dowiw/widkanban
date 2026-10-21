@@ -31,37 +31,53 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 ### Step 1: Open Google Cloud Console
 1. Navigate to the [Google Cloud Console](https://console.cloud.google.com/).
 2. Log in with the Google account whose tasks you want to synchronize.
-3. In the top project dropdown, select an existing project or click **New Project** (e.g., name it `WidKanban-Desktop`).
+3. In the top project dropdown, select an existing project or click **New project**.
 
-<!-- SCREENSHOT PLACEHOLDER: Google Cloud Project Selection -->
-![Step 1: Selecting or creating a Google Cloud project](images/google/01-project-selection.png)
+![Step 1a: Selecting New project from the resource dropdown](images/google/01a-new-project.png)
+
+4. Enter a descriptive **Project name** (e.g. `widkanban-widget`) and click **Create**.
+
+![Step 1b: Creating the project](images/google/01b-create-project.png)
 
 ---
 
 ### Step 2: Enable the Google Tasks API
-1. In the left navigation menu, go to **APIs & Services** → **Enabled APIs & Services**.
-2. Click **+ ENABLE APIS AND SERVICES** at the top.
-3. Search for **Google Tasks API** and click on it.
-4. Click the blue **Enable** button.
+1. Select your new project (`widkanban-widget`) from the top bar, then open the left navigation menu.
 
-<!-- SCREENSHOT PLACEHOLDER: Enabling Google Tasks API -->
-![Step 2: Enabling Google Tasks API](images/google/02-enable-tasks-api.png)
+![Step 2a: Selecting the project and opening navigation menu](images/google/02a-select-project-menu.png)
+
+2. In the navigation menu, go to **APIs & Services** → **Enabled APIs & services**.
+
+![Step 2b: Navigating to Enabled APIs & services](images/google/02b-apis-services-nav.png)
+
+3. Click **+ Enable APIs and services** at the top.
+
+![Step 2c: Clicking Enable APIs and services](images/google/02c-enable-apis-button.png)
+
+4. Search for **Google Tasks** in the API library and select **Google Tasks API**.
+
+![Step 2d: Selecting Google Tasks API](images/google/02d-search-tasks-api.png)
+
+5. Click the blue **Enable** button.
+
+![Step 2e: Enabling Google Tasks API](images/google/02e-enable-tasks-api.png)
 
 ---
 
 ## Part 2: Configure OAuth Consent Screen & Test Users (Crucial)
 
 ### Step 3: Configure Consent Screen
-1. In the left menu, select **APIs & Services** → **OAuth consent screen** (or **Google Auth Platform** → **Branding**).
-2. Set **User Type** to **External** and click **Create**.
-3. Fill in the basic app details:
-   - **App name**: `WidKanban`
-   - **User support email**: Your email address
-   - **Developer contact information**: Your email address
-4. Click **Save and Continue**.
+1. In the left navigation, select **APIs & Services** → **OAuth consent screen**.
 
-<!-- SCREENSHOT PLACEHOLDER: OAuth Consent Screen Setup -->
-![Step 3: Configuring app branding and contact email](images/google/03-consent-screen-setup.png)
+![Step 3a: Navigating to OAuth consent screen](images/google/03a-oauth-consent-screen-nav.png)
+
+2. If Google Auth Platform is not configured yet, click **Get started**.
+
+![Step 3b: Starting Google Auth Platform setup](images/google/03b-get-started.png)
+
+3. Under **Audience**, select **External** user type and click **Next / Create**.
+
+![Step 3c: Selecting External user type](images/google/03c-audience-external.png)
 
 ---
 
@@ -72,23 +88,24 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 
 1. In the left navigation, click **Audience** (or advance to the **Test users** step).
 2. Under **Test users**, click **+ Add users**.
+
+![Step 4a: Adding test users under Audience](images/google/04a-audience-test-users.png)
+
 3. Enter your Google account email address (the exact email you will sign in with).
 4. Click **Save**.
 5. Confirm your email appears in the test users table.
 
-<!-- SCREENSHOT PLACEHOLDER: Adding Test User in Audience -->
-![Step 4: Adding your email under Test Users in Audience](images/google/04-add-test-user.png)
+![Step 4b: Saving test user email address](images/google/04b-save-test-user.png)
 
 ---
 
 ## Part 3: Create Desktop OAuth Client Credentials
 
 ### Step 5: Create OAuth Client ID
-1. In the left navigation, go to **Credentials** (or **Clients**).
-2. Click **+ CREATE CREDENTIALS** at the top and select **OAuth client ID**.
+1. In the left navigation, go to **Clients** (or **Credentials**).
+2. Click **+ Create client** (or **+ CREATE CREDENTIALS** → **OAuth client ID**).
 
-<!-- SCREENSHOT PLACEHOLDER: Create Credentials Dropdown -->
-![Step 5: Create Credentials dropdown](images/google/05-create-credentials.png)
+![Step 5: Creating OAuth client](images/google/05-create-client.png)
 
 ---
 
@@ -98,22 +115,20 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 > Do NOT select "Web application"! You must select **Desktop app** so Google allows dynamic loopback port redirects (`http://127.0.0.1:<PORT>`) without redirect URI mismatch errors.
 
 1. Under **Application type**, choose **Desktop app**.
-2. **Name**: `WidKanban Client` (or any descriptive name).
+2. **Name**: `WidKanban Widget` (or any descriptive name).
 3. Click **Create**.
 
-<!-- SCREENSHOT PLACEHOLDER: Desktop App Selection -->
 ![Step 6: Choosing Desktop app application type](images/google/06-select-desktop-app.png)
 
 ---
 
 ### Step 7: Copy Client ID and Client Secret
-1. A dialog will appear displaying **Your Client ID** and **Your Client Secret**.
-2. Both values are **mandatory**:
-   - Copy the **Client ID** (`xxxx.apps.googleusercontent.com`).
-   - Copy the **Client Secret** (`GOCSPX-...`).
+1. A dialog will appear displaying **OAuth client created** with your **Client ID** and **Client secret**.
+2. Both values are required:
+   - Click the copy button next to **Client ID** (`xxxx.apps.googleusercontent.com`).
+   - Click the copy button next to **Client secret** (`GOCSPX-...`).
 3. *(Optional)* Click **DOWNLOAD JSON** to keep a local backup (e.g. `client_secret_...json`).
 
-<!-- SCREENSHOT PLACEHOLDER: Client ID and Client Secret Dialog -->
 ![Step 7: Copying Client ID and Client Secret](images/google/07-copy-credentials.png)
 
 ---
@@ -123,10 +138,9 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 ### Step 8: Enter Credentials in WidKanban
 1. Open WidKanban and click **Settings (gear icon)** → **Integrations** tab.
 2. Under **Google Tasks**, click **OAuth App Settings & Setup Guide** to expand the credentials drawer.
-3. Paste your **Client ID** and **Client Secret**.
+3. Paste your **Google OAuth Client ID** and **Client Secret**.
 4. Click **Save Credentials**.
 
-<!-- SCREENSHOT PLACEHOLDER: WidKanban Google OAuth Settings Drawer -->
 ![Step 8: Entering Client ID and Client Secret in WidKanban](images/google/08-widkanban-oauth-settings.png)
 
 ---
@@ -136,21 +150,19 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 2. WidKanban will display: *"Waiting for Google sign-in in browser..."*.
 3. Your default web browser will automatically open with Google's consent screen.
 
-<!-- SCREENSHOT PLACEHOLDER: Sign in with Google Button & Waiting State -->
-![Step 9: Sign in with Google waiting state](images/google/09-sign-in-button.png)
-
 ---
 
 ### Step 10: Complete Authorization in Browser
 1. Select your Google account.
 2. If prompted with *"Google hasn't verified this app"*:
-   - Click **Advanced** (or *Continue*).
-   - Click **Go to WidKanban (unsafe)**.
-3. Review permissions (*"Create, edit, organize, and delete all your tasks"*).
-4. Click **Continue / Allow**.
+   - Click **Continue**.
 
-<!-- SCREENSHOT PLACEHOLDER: Google Permissions Screen -->
-![Step 10: Google permissions consent screen](images/google/10-google-consent.png)
+![Step 10a: Continuing past unverified app prompt](images/google/10a-unverified-app-continue.png)
+
+3. Review the permissions requested by WidKanban (*"Create, edit, organize, and delete all your tasks"*).
+4. Click **Continue** (or *Allow*).
+
+![Step 10b: Authorizing tasks access permissions](images/google/10b-google-consent.png)
 
 ---
 
@@ -162,9 +174,6 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
 2. Close the browser tab and return to WidKanban.
 3. WidKanban will now show <span style="color:#10b981;font-weight:600;">Connected (Auto-Refresh)</span> and your Google Tasks lists will appear on your board!
 
-<!-- SCREENSHOT PLACEHOLDER: Browser Success Page & WidKanban Connected Badge -->
-![Step 11: Browser confirmation and WidKanban connected badge](images/google/11-auth-success.png)
-
 ---
 
 ## Part 5: Silent Auto-Refresh & Quota Monitoring
@@ -175,9 +184,6 @@ This guide walks you through setting up a **Google Cloud OAuth 2.0 Client** to e
    - **Sync Mode**: `Auto-Refresh (Persistent)`
    - **Access Token**: Countdown display showing the current 1-hour access token.
    - **Silent Auto-Refresh Notice**: Confirms that WidKanban will automatically renew expired access tokens using your stored refresh token before background sync runs.
-
-<!-- SCREENSHOT PLACEHOLDER: Google Tasks Card in Auto-Sync Tab -->
-![Google Tasks Auto-Refresh & Quota Health Card](images/google/12-google-health-card.png)
 
 ---
 
