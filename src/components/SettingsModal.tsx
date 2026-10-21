@@ -262,6 +262,11 @@ export const SettingsModal: React.FC = () => {
                         <Check className="h-2.5 w-2.5" />
                         <span>Connected</span>
                       </span>
+                      {authStatus.github_from_env && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
+                          .env (Dev Mode)
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={handleFetchGithubTasks}
@@ -346,6 +351,11 @@ export const SettingsModal: React.FC = () => {
                         <Check className="h-2.5 w-2.5" />
                         <span>Connected</span>
                       </span>
+                      {authStatus.google_from_env && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
+                          .env (Dev Mode)
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={handleFetchGoogleTasks}

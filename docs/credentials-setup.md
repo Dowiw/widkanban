@@ -55,9 +55,18 @@ If you are a **contributor or developer** testing features, bug fixes, or PRs, *
 - For testing GitHub integration, generate a fine-grained PAT with a **7-day expiration** and access restricted only to a test/sandbox repository.
 - Follow **[Fine-Grained PAT instructions](#how-to-create-a-fine-grained-pat-recommended)** below.
 
-### 3. Cleaning Up After Testing
+### 3. Developer Environment Credentials via `.env` (Fastest Setup)
+- To avoid manual token pasting during local development (`npm run tauri dev`), copy `.env.example` to `.env` or `.env.local`:
+  ```bash
+  cp .env.example .env
+  ```
+- Add your test tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`).
+- Rust loads these automatically on boot via `dotenvy`. In `SettingsModal`, an indicator `.env (Dev Mode)` will confirm active environment credentials.
+- These tokens remain purely in-memory in the Rust process and are never written to `credentials.json` or frontend state.
+
+### 4. Cleaning Up After Testing
 - In the widget header, click **Settings (⚙)** and click **"Disconnect"** on the provider.
-- This immediately deletes the token from your local `credentials.json` file.
+- This immediately deletes the token from your local `credentials.json` file (and remove from `.env` if testing env overrides).
 
 ---
 

@@ -20,6 +20,10 @@ pub struct StoredCredentials {
 pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
+    #[serde(default)]
+    pub github_from_env: bool,
+    #[serde(default)]
+    pub google_from_env: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -143,6 +147,8 @@ pub struct SourceMeta {
     pub subtask_count: Option<usize>,
     pub subtasks: Option<Vec<SubtaskItem>>,
     pub links: Option<Vec<TaskLink>>,
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -151,6 +157,8 @@ pub struct UnifiedTask {
     pub title: String,
     pub source: String,      // "github" | "google_tasks"
     pub status: String,      // "todo" | "in_progress" | "done"
+    #[serde(default)]
+    pub priority: Option<String>,
     pub url: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
@@ -348,7 +356,19 @@ fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::Path
     Ok(dir)
 }
 
-fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+fn get_env_credential(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(val) = std::env::var(key) {
+            let trimmed = val.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if let Ok(path) = get_credentials_path(app_handle) {
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(&path) {
@@ -359,6 +379,20 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
         }
     }
     StoredCredentials::default()
+}
+
+fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+    let mut creds = read_stored_credentials_file(app_handle);
+
+    // Overlay developer environment variable overrides
+    if let Some(gh) = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]) {
+        creds.github_token = Some(gh);
+    }
+    if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
+        creds.google_token = Some(gt);
+    }
+
+    creds
 }
 
 fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
@@ -500,9 +534,13 @@ fn close_app(app_handle: tauri::AppHandle) {
 #[tauri::command]
 fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
     let creds = read_credentials(&app_handle);
+    let env_github = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]);
+    let env_google = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]);
     Ok(AuthStatus {
         has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
         has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        github_from_env: env_github.is_some(),
+        google_from_env: env_google.is_some(),
     })
 }
 
@@ -512,7 +550,7 @@ fn save_credentials(
     github_token: Option<String>,
     google_token: Option<String>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
+    let mut creds = read_stored_credentials_file(&app_handle);
     if let Some(gh) = github_token.as_ref() {
         let trimmed = gh.trim().to_string();
         if trimmed.is_empty() {
@@ -531,21 +569,19 @@ fn save_credentials(
     }
     write_credentials(&app_handle, &creds)?;
 
+    let full_creds = read_credentials(&app_handle);
     if let Ok(mut health) = get_health_store().lock() {
         if github_token.is_some() {
-            health.github.connected = creds.github_token.is_some();
+            health.github.connected = full_creds.github_token.is_some();
             health.github.error_message = None;
         }
         if google_token.is_some() {
-            health.google.connected = creds.google_token.is_some();
+            health.google.connected = full_creds.google_token.is_some();
             health.google.error_message = None;
         }
     }
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    get_auth_status(app_handle)
 }
 
 #[tauri::command]
@@ -553,7 +589,7 @@ fn clear_credentials(
     app_handle: tauri::AppHandle,
     provider: Option<String>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
+    let mut creds = read_stored_credentials_file(&app_handle);
     match provider.as_deref() {
         Some("github") => creds.github_token = None,
         Some("google") => creds.google_token = None,
@@ -564,19 +600,23 @@ fn clear_credentials(
     }
     write_credentials(&app_handle, &creds)?;
 
+    let full_creds = read_credentials(&app_handle);
     if let Ok(mut health) = get_health_store().lock() {
         if provider.as_deref() == Some("github") || provider.is_none() {
-            health.github = ProviderHealth::default();
+            health.github = ProviderHealth {
+                connected: full_creds.github_token.is_some(),
+                ..Default::default()
+            };
         }
         if provider.as_deref() == Some("google") || provider.is_none() {
-            health.google = ProviderHealth::default();
+            health.google = ProviderHealth {
+                connected: full_creds.google_token.is_some(),
+                ..Default::default()
+            };
         }
     }
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    get_auth_status(app_handle)
 }
 
 /// Fetch all Google Tasks across all task lists for the authenticated user,
@@ -755,6 +795,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title,
             source: "google_tasks".to_string(),
             status,
+            priority: None,
             url,
             updated_at,
             description: task.notes.clone(),
@@ -777,6 +818,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count,
                 subtasks,
                 links,
+                priority: None,
             },
         });
     }
@@ -974,6 +1016,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title: issue.title,
             source: "github".to_string(),
             status,
+            priority: None,
             url: issue.html_url,
             updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
             description: issue.body,
@@ -996,6 +1039,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count: None,
                 subtasks: None,
                 links: None,
+                priority: None,
             },
         });
     }
@@ -1575,6 +1619,10 @@ fn reset_window_geometry(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load developer environment variables from .env / .env.local
+    let _ = dotenvy::dotenv();
+    let _ = dotenvy::from_filename(".env.local");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -1702,9 +1750,38 @@ mod tests {
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            github_from_env: false,
+            google_from_env: false,
         };
         assert!(status.has_github);
         assert!(!status.has_google);
+        assert!(!status.github_from_env);
+        assert!(!status.google_from_env);
+    }
+
+    #[test]
+    fn test_auth_status_serialization_with_env_flags() {
+        let status = AuthStatus {
+            has_github: true,
+            has_google: false,
+            github_from_env: true,
+            google_from_env: false,
+        };
+        let json = serde_json::to_string(&status).expect("Serialization failed");
+        assert!(json.contains("github_from_env"));
+        let deserialized: AuthStatus = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(status, deserialized);
+    }
+
+    #[test]
+    fn test_get_env_credential_helper() {
+        std::env::set_var("TEST_WIDKANBAN_KEY_A", "  test_token_123  ");
+        assert_eq!(
+            get_env_credential(&["NON_EXISTENT_KEY", "TEST_WIDKANBAN_KEY_A"]),
+            Some("test_token_123".to_string())
+        );
+        assert_eq!(get_env_credential(&["NON_EXISTENT_KEY"]), None);
+        std::env::remove_var("TEST_WIDKANBAN_KEY_A");
     }
 
     #[test]
