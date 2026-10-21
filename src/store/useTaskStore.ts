@@ -12,8 +12,48 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  BoardColumn,
+  DEFAULT_COLUMNS,
+  COLUMN_PRESETS,
+  ColumnColor,
+  ColumnActionTrigger,
+  ColumnReverseRoutingRule,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
+
+export const routeTaskToColumn = (task: UnifiedTask, columns: BoardColumn[]): TaskStatus => {
+  if (!columns || columns.length === 0) return 'todo';
+
+  for (const col of columns) {
+    if (!col.routingRules) continue;
+
+    if (task.source === 'github' && col.routingRules.githubLabels && task.sourceMeta?.labels) {
+      const taskLabelNames = task.sourceMeta.labels.map((l) => l.name.toLowerCase());
+      for (const ruleLabel of col.routingRules.githubLabels) {
+        if (taskLabelNames.includes(ruleLabel.toLowerCase())) {
+          return col.id;
+        }
+      }
+    }
+
+    if (task.source === 'google_tasks' && col.routingRules.googleStatus) {
+      const isDone = task.status === 'done';
+      if (
+        (col.routingRules.googleStatus === 'completed' && isDone) ||
+        (col.routingRules.googleStatus === 'needsAction' && !isDone)
+      ) {
+        return col.id;
+      }
+    }
+  }
+
+  if (columns.some((c) => c.id === task.status)) {
+    return task.status;
+  }
+
+  const todoCol = columns.find((c) => c.id === 'todo');
+  return todoCol ? todoCol.id : columns[0].id;
+};
 
 interface IpcResult<T = void> {
   success: boolean;
@@ -57,6 +97,9 @@ interface TaskState {
   authStatus: AuthStatus;
   githubSyncSettings: GitHubSyncSettings;
 
+  // Board Columns & Workflows
+  columns: BoardColumn[];
+
   // Local trash & deletion modal state
   locallyDeletedTasks: UnifiedTask[];
   deleteModalTask: UnifiedTask | null;
@@ -68,6 +111,18 @@ interface TaskState {
   customization: WidgetCustomizationSettings;
 
   // Actions
+  setColumns: (columns: BoardColumn[]) => void;
+  addColumn: (column: {
+    title: string;
+    color?: ColumnColor;
+    triggers?: ColumnActionTrigger;
+    routingRules?: ColumnReverseRoutingRule;
+  }) => void;
+  updateColumn: (columnId: string, updates: Partial<BoardColumn>) => void;
+  removeColumn: (columnId: string) => void;
+  reorderColumns: (startIndex: number, endIndex: number) => void;
+  applyColumnPreset: (presetIndex: number) => void;
+
   setCustomization: (settings: Partial<WidgetCustomizationSettings>) => void;
   toggleTheme: () => void;
   setWindowSizePreset: (preset: 'compact' | 'wide' | 'expanded') => Promise<void>;
@@ -136,6 +191,10 @@ export const useTaskStore = create<TaskState>()(
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
+
+      // Board Columns & Workflows
+      columns: DEFAULT_COLUMNS,
+
       locallyDeletedTasks: [],
       deleteModalTask: null,
       deletePreference: null,
@@ -145,9 +204,78 @@ export const useTaskStore = create<TaskState>()(
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
 
+      // Column management actions
+      setColumns: (columns) => set({ columns }),
+
+      addColumn: (col) => {
+        set((state) => {
+          let baseId = col.title.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+          if (!baseId) baseId = 'col';
+          let id = baseId;
+          let counter = 1;
+          while (state.columns.some((c) => c.id === id)) {
+            id = `${baseId}_${counter++}`;
+          }
+          const newCol: BoardColumn = {
+            id,
+            title: col.title.trim(),
+            color: col.color || 'slate',
+            triggers: col.triggers,
+            routingRules: col.routingRules,
+          };
+          return { columns: [...state.columns, newCol] };
+        });
+      },
+
+      updateColumn: (columnId, updates) => {
+        set((state) => ({
+          columns: state.columns.map((c) => (c.id === columnId ? { ...c, ...updates } : c)),
+        }));
+      },
+
+      removeColumn: (columnId) => {
+        set((state) => {
+          if (state.columns.length <= 1) return state;
+          const newColumns = state.columns.filter((c) => c.id !== columnId);
+          const fallbackCol = newColumns.find((c) => c.id === 'todo')?.id || newColumns[0].id;
+          const updatedTasks = state.tasks.map((t) =>
+            t.status === columnId
+              ? { ...t, status: fallbackCol, updatedAt: new Date().toISOString() }
+              : t
+          );
+          return { columns: newColumns, tasks: updatedTasks };
+        });
+      },
+
+      reorderColumns: (startIndex, endIndex) => {
+        set((state) => {
+          if (
+            startIndex < 0 ||
+            startIndex >= state.columns.length ||
+            endIndex < 0 ||
+            endIndex >= state.columns.length
+          ) {
+            return state;
+          }
+          const newCols = [...state.columns];
+          const [removed] = newCols.splice(startIndex, 1);
+          newCols.splice(endIndex, 0, removed);
+          return { columns: newCols };
+        });
+      },
+
+      applyColumnPreset: (presetIndex) => {
+        const preset = COLUMN_PRESETS[presetIndex];
+        if (preset) {
+          set({ columns: preset.columns });
+        }
+      },
+
       moveTask: (taskId, targetStatus, targetIndex) => {
         // --- Optimistic UI update ---
         const prevTasks = get().tasks;
+        const currentColumns = get().columns;
+        const targetCol = currentColumns.find((c) => c.id === targetStatus);
 
         set((state) => {
           const taskIndex = state.tasks.findIndex((t) => t.id === taskId);
@@ -158,40 +286,64 @@ export const useTaskStore = create<TaskState>()(
 
           let updatedSourceMeta = movedTask.sourceMeta;
           const syncSettings = state.githubSyncSettings;
-          if (
-            movedTask.source === 'github' &&
-            syncSettings.manageLabels &&
-            (targetStatus === 'todo' || targetStatus === 'in_progress')
-          ) {
-            const currentLabels = movedTask.sourceMeta?.labels || [];
-            const todoTrim = syncSettings.todoLabel.trim().toLowerCase();
-            const inProgTrim = syncSettings.inProgressLabel.trim().toLowerCase();
 
+          if (movedTask.source === 'github') {
+            const currentLabels = movedTask.sourceMeta?.labels || [];
             let newLabels = [...currentLabels];
-            if (targetStatus === 'in_progress') {
-              if (todoTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
+
+            // 1. Check custom column triggers
+            if (
+              syncSettings.manageLabels &&
+              (targetCol?.triggers?.githubAddLabel || targetCol?.triggers?.githubRemoveLabel)
+            ) {
+              if (targetCol.triggers.githubRemoveLabel) {
+                const rem = targetCol.triggers.githubRemoveLabel.trim().toLowerCase();
+                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== rem);
               }
-              if (inProgTrim && !newLabels.some((l) => l.name.toLowerCase() === inProgTrim)) {
-                newLabels.push({
-                  name: syncSettings.inProgressLabel.trim(),
-                  color: 'd93f0b',
-                  description: 'Work currently in progress (managed by WidKanban)',
-                });
+              if (targetCol.triggers.githubAddLabel) {
+                const add = targetCol.triggers.githubAddLabel.trim();
+                if (!newLabels.some((l) => l.name.toLowerCase() === add.toLowerCase())) {
+                  newLabels.push({
+                    name: add,
+                    color: '6366f1',
+                    description: 'Managed by WidKanban column trigger',
+                  });
+                }
               }
-            } else if (targetStatus === 'todo') {
-              if (inProgTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
+              updatedSourceMeta = { ...movedTask.sourceMeta, labels: newLabels };
+            } else if (
+              syncSettings.manageLabels &&
+              (targetStatus === 'todo' || targetStatus === 'in_progress')
+            ) {
+              // 2. Fall back to standard To-Do / In-Progress label sync
+              const todoTrim = syncSettings.todoLabel.trim().toLowerCase();
+              const inProgTrim = syncSettings.inProgressLabel.trim().toLowerCase();
+
+              if (targetStatus === 'in_progress') {
+                if (todoTrim) {
+                  newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
+                }
+                if (inProgTrim && !newLabels.some((l) => l.name.toLowerCase() === inProgTrim)) {
+                  newLabels.push({
+                    name: syncSettings.inProgressLabel.trim(),
+                    color: 'd93f0b',
+                    description: 'Work currently in progress (managed by WidKanban)',
+                  });
+                }
+              } else if (targetStatus === 'todo') {
+                if (inProgTrim) {
+                  newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
+                }
+                if (todoTrim && !newLabels.some((l) => l.name.toLowerCase() === todoTrim)) {
+                  newLabels.push({
+                    name: syncSettings.todoLabel.trim(),
+                    color: '0075ca',
+                    description: 'Tasks ready to be worked on (managed by WidKanban)',
+                  });
+                }
               }
-              if (todoTrim && !newLabels.some((l) => l.name.toLowerCase() === todoTrim)) {
-                newLabels.push({
-                  name: syncSettings.todoLabel.trim(),
-                  color: '0075ca',
-                  description: 'Tasks ready to be worked on (managed by WidKanban)',
-                });
-              }
+              updatedSourceMeta = { ...movedTask.sourceMeta, labels: newLabels };
             }
-            updatedSourceMeta = { ...movedTask.sourceMeta, labels: newLabels };
           }
 
           const updatedTask: UnifiedTask = {
@@ -210,14 +362,20 @@ export const useTaskStore = create<TaskState>()(
           return { tasks: updatedTasks };
         });
 
-        // --- Background write-back for Google Tasks ---
         const task = prevTasks.find((t) => t.id === taskId);
-        if (task && task.source === 'google_tasks' && task.sourceMeta?.listId) {
+        if (!task) return;
+
+        // --- Background write-back for Google Tasks ---
+        if (task.source === 'google_tasks' && task.sourceMeta?.listId) {
           const rawId = task.id.replace(/^gt_/, '');
+          let googleStatusArg = targetStatus;
+          if (targetCol?.triggers?.googleStatus) {
+            googleStatusArg = targetCol.triggers.googleStatus === 'completed' ? 'done' : 'todo';
+          }
           safeInvokeWithResult<void>('update_google_task', {
             taskId: rawId,
             listId: task.sourceMeta.listId,
-            newStatus: targetStatus,
+            newStatus: googleStatusArg,
           }).then((res) => {
             if (!res.success) {
               console.warn(`[Sync] Background update failed for Google Task ${rawId}. Reverting...`);
@@ -226,17 +384,35 @@ export const useTaskStore = create<TaskState>()(
           });
         }
 
-        // --- Background write-back for GitHub Tasks (To-Do <-> In-Progress only; Done remains strictly local) ---
-        if (
-          task &&
-          task.source === 'github' &&
-          task.sourceMeta?.repo &&
-          task.sourceMeta?.issueNumber &&
-          (targetStatus === 'todo' || targetStatus === 'in_progress') &&
-          (task.status === 'todo' || task.status === 'in_progress')
-        ) {
-          const settings = get().githubSyncSettings;
-          if (settings.manageLabels) {
+        // --- Background write-back for GitHub Tasks ---
+        if (task.source === 'github' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
+          const triggers = targetCol?.triggers;
+
+          // Action: Custom Label Trigger or Default Label Sync
+          if (
+            get().githubSyncSettings.manageLabels &&
+            (triggers?.githubAddLabel || triggers?.githubRemoveLabel)
+          ) {
+            safeInvokeWithResult<void>('update_github_issue_labels', {
+              repo: task.sourceMeta.repo,
+              issueNumber: task.sourceMeta.issueNumber,
+              targetLabel: triggers.githubAddLabel?.trim() || null,
+              opposingLabel: triggers.githubRemoveLabel?.trim() || null,
+              postCommentFallback: get().githubSyncSettings.postCommentsFallback,
+            }).then((res) => {
+              if (!res.success) {
+                console.warn(
+                  `[Sync] Background label trigger failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
+                );
+                set({ tasks: prevTasks });
+              }
+            });
+          } else if (
+            get().githubSyncSettings.manageLabels &&
+            (targetStatus === 'todo' || targetStatus === 'in_progress') &&
+            (task.status === 'todo' || task.status === 'in_progress')
+          ) {
+            const settings = get().githubSyncSettings;
             const targetLabel =
               targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
             const opposingLabel =
@@ -252,6 +428,22 @@ export const useTaskStore = create<TaskState>()(
               if (!res.success) {
                 console.warn(
                   `[Sync] Background label update failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
+                );
+                set({ tasks: prevTasks });
+              }
+            });
+          }
+
+          // Action: Remote GitHub State Trigger (open / closed)
+          if (triggers?.githubState) {
+            safeInvokeWithResult<void>('set_github_issue_state', {
+              repo: task.sourceMeta.repo,
+              issueNumber: task.sourceMeta.issueNumber,
+              state: triggers.githubState,
+            }).then((res) => {
+              if (!res.success) {
+                console.warn(
+                  `[Sync] Background state trigger failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
                 );
                 set({ tasks: prevTasks });
               }
@@ -492,9 +684,15 @@ export const useTaskStore = create<TaskState>()(
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_google_tasks');
         if (!fetched) return;
 
+        const currentCols = get().columns;
+        const routedFetched = fetched.map((task) => ({
+          ...task,
+          status: routeTaskToColumn(task, currentCols),
+        }));
+
         set((state) => {
           const nonGoogleTasks = state.tasks.filter((t) => t.source !== 'google_tasks');
-          return { tasks: [...fetched, ...nonGoogleTasks] };
+          return { tasks: [...routedFetched, ...nonGoogleTasks] };
         });
       },
 
@@ -502,9 +700,15 @@ export const useTaskStore = create<TaskState>()(
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
         if (!fetched) return;
 
+        const currentCols = get().columns;
+        const routedFetched = fetched.map((task) => ({
+          ...task,
+          status: routeTaskToColumn(task, currentCols),
+        }));
+
         set((state) => {
           const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
-          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
+          const activeFetched = routedFetched.filter((t) => !locallyDeletedIds.has(t.id));
           const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
           return { tasks: [...nonGithubTasks, ...activeFetched] };
         });
@@ -571,6 +775,7 @@ export const useTaskStore = create<TaskState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         tasks: state.tasks,
+        columns: state.columns,
         filterSource: state.filterSource,
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -586,6 +791,14 @@ export const useTaskStore = create<TaskState>()(
           merged.tasks = merged.tasks.filter(
             (t) => !['gh_101', 'gh_102', 'gh_103'].includes(t.id)
           );
+        }
+        if (
+          Array.isArray((persistedState as Partial<TaskState>)?.columns) &&
+          (persistedState as Partial<TaskState>)?.columns?.length
+        ) {
+          merged.columns = (persistedState as Partial<TaskState>).columns!;
+        } else {
+          merged.columns = DEFAULT_COLUMNS;
         }
         if ((persistedState as Partial<TaskState>)?.githubSyncSettings) {
           merged.githubSyncSettings = {

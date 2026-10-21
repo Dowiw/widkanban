@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useTaskStore } from './useTaskStore';
+import { useTaskStore, routeTaskToColumn } from './useTaskStore';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
-import { UnifiedTask } from '../types/task';
+import { UnifiedTask, BoardColumn, DEFAULT_COLUMNS } from '../types/task';
 
 // Access the mocked invoke so we can control its return value per-test
 import { invoke } from '@tauri-apps/api/core';
@@ -13,11 +13,13 @@ describe('useTaskStore', () => {
     localStorage.clear();
 
     // Reset the invoke mock to default (returns null → safeInvoke returns null)
+    mockInvoke.mockClear();
     mockInvoke.mockResolvedValue(null);
 
     // Reset store state before each test
     useTaskStore.setState({
       tasks: INITIAL_MOCK_TASKS,
+      columns: DEFAULT_COLUMNS,
       searchQuery: '',
       filterSource: 'all',
       isPinned: true,
@@ -754,6 +756,206 @@ describe('useTaskStore', () => {
       expect(mockInvoke).toHaveBeenCalledWith('reset_window_geometry', undefined);
       expect(useTaskStore.getState().customization.defaultWidth).toBe(380);
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
+    });
+  });
+
+  describe('Board columns, custom action triggers, and reverse routing', () => {
+    it('initializes with default 3-column setup', () => {
+      const state = useTaskStore.getState();
+      expect(state.columns).toHaveLength(3);
+      expect(state.columns.map((c) => c.id)).toEqual(['todo', 'in_progress', 'done']);
+    });
+
+    it('adds a new custom column and formats ID cleanly', () => {
+      const { addColumn } = useTaskStore.getState();
+      addColumn({
+        title: 'QA Testing',
+        color: 'indigo',
+        triggers: { githubAddLabel: 'qa-ready' },
+      });
+
+      const cols = useTaskStore.getState().columns;
+      expect(cols).toHaveLength(4);
+      const newCol = cols.find((c) => c.id === 'qa_testing');
+      expect(newCol).toBeDefined();
+      expect(newCol?.title).toBe('QA Testing');
+      expect(newCol?.color).toBe('indigo');
+      expect(newCol?.triggers?.githubAddLabel).toBe('qa-ready');
+    });
+
+    it('updates column title, color, and triggers', () => {
+      const { updateColumn } = useTaskStore.getState();
+      updateColumn('todo', {
+        title: 'Backlog Queue',
+        color: 'purple',
+        triggers: { githubAddLabel: 'backlog' },
+      });
+
+      const updated = useTaskStore.getState().columns.find((c) => c.id === 'todo');
+      expect(updated?.title).toBe('Backlog Queue');
+      expect(updated?.color).toBe('purple');
+      expect(updated?.triggers?.githubAddLabel).toBe('backlog');
+    });
+
+    it('removes a column and reassigns orphaned tasks to fallback column', () => {
+      const { addColumn, removeColumn } = useTaskStore.getState();
+      addColumn({ title: 'Temporary Review', color: 'rose' });
+      const tempId = useTaskStore.getState().columns.find((c) => c.title === 'Temporary Review')!.id;
+
+      const orphanTask: UnifiedTask = {
+        id: 'gh_orphan',
+        title: 'Orphan Issue',
+        source: 'github',
+        status: tempId,
+        url: 'https://github.com/org/repo/issues/1',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+      useTaskStore.setState({ tasks: [...useTaskStore.getState().tasks, orphanTask] });
+
+      removeColumn(tempId);
+
+      const stateAfter = useTaskStore.getState();
+      expect(stateAfter.columns.some((c) => c.id === tempId)).toBe(false);
+      const migratedTask = stateAfter.tasks.find((t) => t.id === 'gh_orphan');
+      expect(migratedTask?.status).toBe('todo');
+    });
+
+    it('reorders columns correctly', () => {
+      const { reorderColumns } = useTaskStore.getState();
+      // Initially: ['todo', 'in_progress', 'done']
+      reorderColumns(0, 1);
+      const cols = useTaskStore.getState().columns.map((c) => c.id);
+      expect(cols).toEqual(['in_progress', 'todo', 'done']);
+    });
+
+    it('applies column preset workflow', () => {
+      const { applyColumnPreset } = useTaskStore.getState();
+      // Preset 1: Developer Workflow (5 columns: backlog, todo, in_progress, review, done)
+      applyColumnPreset(1);
+
+      const cols = useTaskStore.getState().columns;
+      expect(cols).toHaveLength(5);
+      expect(cols.map((c) => c.id)).toEqual(['backlog', 'todo', 'in_progress', 'review', 'done']);
+    });
+
+    it('executes custom column triggers and updates labels and remote state', () => {
+      const { addColumn, moveTask } = useTaskStore.getState();
+      addColumn({
+        title: 'Review',
+        color: 'purple',
+        triggers: {
+          githubAddLabel: 'needs-review',
+          githubRemoveLabel: 'in-progress',
+          githubState: 'open',
+        },
+      });
+
+      const ghTask: UnifiedTask = {
+        id: 'gh_trigger_test',
+        title: 'Trigger Issue',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/repo/issues/45',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {
+          repo: 'org/repo',
+          issueNumber: 45,
+          labels: [{ name: 'in-progress', color: 'd93f0b' }],
+        },
+      };
+
+      useTaskStore.setState({ tasks: [ghTask] });
+      moveTask('gh_trigger_test', 'review');
+
+      const updated = useTaskStore.getState().tasks.find((t) => t.id === 'gh_trigger_test')!;
+      expect(updated.status).toBe('review');
+      expect(updated.sourceMeta?.labels?.some((l) => l.name === 'needs-review')).toBe(true);
+      expect(updated.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(false);
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'update_github_issue_labels',
+        expect.objectContaining({
+          repo: 'org/repo',
+          issueNumber: 45,
+          targetLabel: 'needs-review',
+          opposingLabel: 'in-progress',
+        })
+      );
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'set_github_issue_state',
+        expect.objectContaining({
+          repo: 'org/repo',
+          issueNumber: 45,
+          state: 'open',
+        })
+      );
+    });
+
+    it('routes incoming tasks with reverse routing rules', () => {
+      const testColumns: BoardColumn[] = [
+        {
+          id: 'todo',
+          title: 'To Do',
+          color: 'sky',
+          routingRules: { githubLabels: ['to-do', 'todo'] },
+        },
+        {
+          id: 'review',
+          title: 'Review',
+          color: 'purple',
+          routingRules: { githubLabels: ['needs-review', 'in-review', 'review'] },
+        },
+        {
+          id: 'done',
+          title: 'Done',
+          color: 'emerald',
+          routingRules: {
+            githubLabels: ['done', 'closed'],
+            googleStatus: 'completed',
+          },
+        },
+      ];
+
+      // 1. Task with 'review' label
+      const reviewTask: UnifiedTask = {
+        id: 'gh_rev',
+        title: 'PR waiting for review',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/pull/10',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {
+          labels: [{ name: 'needs-review', color: '123456' }],
+        },
+      };
+      expect(routeTaskToColumn(reviewTask, testColumns)).toBe('review');
+
+      // 2. Google task with completed status
+      const completedGtask: UnifiedTask = {
+        id: 'gt_comp',
+        title: 'Finished Task',
+        source: 'google_tasks',
+        status: 'done',
+        url: 'https://tasks.google.com',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+      expect(routeTaskToColumn(completedGtask, testColumns)).toBe('done');
+
+      // 3. Fallback task with no matching labels
+      const unroutedTask: UnifiedTask = {
+        id: 'gh_misc',
+        title: 'Random Bug',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/issues/88',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {
+          labels: [{ name: 'bug', color: 'd73a4a' }],
+        },
+      };
+      expect(routeTaskToColumn(unroutedTask, testColumns)).toBe('todo');
     });
   });
 });

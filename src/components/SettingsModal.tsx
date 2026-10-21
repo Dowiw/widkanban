@@ -22,11 +22,21 @@ import {
   RotateCcw,
   Square,
   Sparkles,
-  Type
+  Type,
+  Columns3,
+  Plus,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
-import { FontFamilyOption, CardDensity, ThemeMode } from '../types/task';
+import { 
+  FontFamilyOption, 
+  CardDensity, 
+  ThemeMode, 
+  ColumnColor, 
+  COLUMN_PRESETS 
+} from '../types/task';
 
-type SettingsTab = 'integrations' | 'appearance' | 'window' | 'advanced';
+type SettingsTab = 'integrations' | 'columns' | 'appearance' | 'window' | 'advanced';
 
 export const SettingsModal: React.FC = () => {
   const { 
@@ -44,6 +54,12 @@ export const SettingsModal: React.FC = () => {
     isPinned,
     setWindowSizePreset,
     resetWindowPositionAndSize,
+    columns,
+    addColumn,
+    updateColumn,
+    removeColumn,
+    reorderColumns,
+    applyColumnPreset,
   } = useTaskStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
@@ -56,6 +72,12 @@ export const SettingsModal: React.FC = () => {
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
+
+  // Column management state
+  const [expandedColumnId, setExpandedColumnId] = useState<string | null>(null);
+  const [newColumnTitle, setNewColumnTitle] = useState('');
+  const [newColumnColor, setNewColumnColor] = useState<ColumnColor>('indigo');
+  const [showAddColumn, setShowAddColumn] = useState(false);
 
   if (!isSettingsOpen) return null;
 
@@ -106,6 +128,18 @@ export const SettingsModal: React.FC = () => {
     setResetWindowDone(true);
     setTimeout(() => setResetWindowDone(false), 1200);
   };
+
+  const COLOR_OPTIONS: { id: ColumnColor; label: string; bg: string }[] = [
+    { id: 'sky', label: 'Sky', bg: 'bg-sky-500' },
+    { id: 'rose', label: 'Rose', bg: 'bg-rose-500' },
+    { id: 'emerald', label: 'Emerald', bg: 'bg-emerald-500' },
+    { id: 'indigo', label: 'Indigo', bg: 'bg-indigo-500' },
+    { id: 'amber', label: 'Amber', bg: 'bg-amber-500' },
+    { id: 'purple', label: 'Purple', bg: 'bg-purple-500' },
+    { id: 'cyan', label: 'Cyan', bg: 'bg-cyan-500' },
+    { id: 'blue', label: 'Blue', bg: 'bg-blue-500' },
+    { id: 'slate', label: 'Slate', bg: 'bg-slate-500' },
+  ];
 
   const fontOptions: { id: FontFamilyOption; label: string; preview: string; description: string }[] = [
     { id: 'outfit', label: 'Modern Sans', preview: 'Outfit', description: 'Clean, elegant, modern UI' },
@@ -162,6 +196,19 @@ export const SettingsModal: React.FC = () => {
           >
             <KeyRound className="h-3.5 w-3.5" />
             <span>Integrations</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('columns')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+              activeTab === 'columns'
+                ? 'bg-indigo-600 text-white shadow-xs dark:bg-indigo-600 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Columns3 className="h-3.5 w-3.5" />
+            <span>Columns</span>
           </button>
 
           <button
@@ -415,6 +462,343 @@ export const SettingsModal: React.FC = () => {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* TAB: COLUMNS & WORKFLOWS */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {activeTab === 'columns' && (
+            <div className="space-y-4">
+              {/* Presets */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                    Workflow Presets
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Quick column layouts
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {COLUMN_PRESETS.map((preset, idx) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => applyColumnPreset(idx)}
+                      className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-indigo-500 dark:hover:border-indigo-400 text-left transition-all"
+                    >
+                      <div className="text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate">
+                        {preset.name}
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {preset.columns.length} columns
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Active Columns List */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                    Active Board Columns
+                  </span>
+                  <span className="text-[11px] text-slate-400">{columns.length} columns</span>
+                </div>
+
+                {columns.map((col, index) => {
+                  const isExpanded = expandedColumnId === col.id;
+                  const currentColor =
+                    COLOR_OPTIONS.find((c) => c.id === col.color)?.bg || 'bg-slate-500';
+
+                  return (
+                    <div
+                      key={col.id}
+                      className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-2.5 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center space-x-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => reorderColumns(index, index - 1)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move Up"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={index === columns.length - 1}
+                            onClick={() => reorderColumns(index, index + 1)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move Down"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Color Selector */}
+                        <div className="relative group shrink-0">
+                          <span
+                            className={`inline-block w-4 h-4 rounded-full ${currentColor} border border-black/10 dark:border-white/10`}
+                          />
+                          <select
+                            value={col.color}
+                            onChange={(e) =>
+                              updateColumn(col.id, { color: e.target.value as ColumnColor })
+                            }
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            title="Change color"
+                          >
+                            {COLOR_OPTIONS.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Title input */}
+                        <input
+                          type="text"
+                          value={col.title}
+                          onChange={(e) => updateColumn(col.id, { title: e.target.value })}
+                          className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+
+                        <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 shrink-0">
+                          #{col.id}
+                        </span>
+
+                        {/* Triggers toggle */}
+                        <button
+                          type="button"
+                          onClick={() => setExpandedColumnId(isExpanded ? null : col.id)}
+                          className={`p-1 rounded-md text-xs font-medium transition-colors ${
+                            isExpanded
+                              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                              : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                          title="Triggers & Reverse Routing"
+                        >
+                          <SlidersHorizontal className="h-3.5 w-3.5" />
+                        </button>
+
+                        {/* Remove button */}
+                        <button
+                          type="button"
+                          disabled={columns.length <= 1}
+                          onClick={() => removeColumn(col.id)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="Delete Column"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Expanded Triggers & Reverse Routing */}
+                      {isExpanded && (
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-750 space-y-2.5 text-[11px] animate-in fade-in duration-150">
+                          <div className="font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5">
+                            <Github className="h-3 w-3" />
+                            <span>GitHub Action Triggers</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-slate-400 block mb-0.5">
+                                Apply Label
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. in-progress"
+                                value={col.triggers?.githubAddLabel || ''}
+                                onChange={(e) =>
+                                  updateColumn(col.id, {
+                                    triggers: {
+                                      ...col.triggers,
+                                      githubAddLabel: e.target.value || undefined,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-slate-800 dark:text-slate-200 text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-400 block mb-0.5">
+                                Remove Label
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. to-do"
+                                value={col.triggers?.githubRemoveLabel || ''}
+                                onChange={(e) =>
+                                  updateColumn(col.id, {
+                                    triggers: {
+                                      ...col.triggers,
+                                      githubRemoveLabel: e.target.value || undefined,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-slate-800 dark:text-slate-200 text-xs"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-400 block mb-0.5">
+                              GitHub Remote State
+                            </label>
+                            <select
+                              value={col.triggers?.githubState || ''}
+                              onChange={(e) =>
+                                updateColumn(col.id, {
+                                  triggers: {
+                                    ...col.triggers,
+                                    githubState:
+                                      (e.target.value as 'open' | 'closed') || undefined,
+                                  },
+                                })
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded px-2 py-1 text-slate-800 dark:text-slate-200 text-xs"
+                            >
+                              <option value="">Keep current issue state</option>
+                              <option value="open">Open issue / PR</option>
+                              <option value="closed">Close issue / PR</option>
+                            </select>
+                          </div>
+
+                          <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-750/60">
+                            <div className="font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 mb-1.5">
+                              <CheckSquare className="h-3 w-3" />
+                              <span>Google Tasks Trigger</span>
+                            </div>
+                            <select
+                              value={col.triggers?.googleStatus || ''}
+                              onChange={(e) =>
+                                updateColumn(col.id, {
+                                  triggers: {
+                                    ...col.triggers,
+                                    googleStatus:
+                                      (e.target.value as 'needsAction' | 'completed') ||
+                                      undefined,
+                                  },
+                                })
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded px-2 py-1 text-slate-800 dark:text-slate-200 text-xs"
+                            >
+                              <option value="">Keep current task status</option>
+                              <option value="needsAction">Needs Action (Pending)</option>
+                              <option value="completed">Completed</option>
+                            </select>
+                          </div>
+
+                          <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-750/60">
+                            <div className="font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 mb-1">
+                              <span>Reverse Routing (Incoming Tasks)</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mb-1">
+                              Incoming GitHub tasks with these labels route into this column:
+                            </p>
+                            <input
+                              type="text"
+                              placeholder="e.g. review, needs-review, qa"
+                              value={col.routingRules?.githubLabels?.join(', ') || ''}
+                              onChange={(e) => {
+                                const labels = e.target.value
+                                  .split(',')
+                                  .map((l) => l.trim())
+                                  .filter(Boolean);
+                                updateColumn(col.id, {
+                                  routingRules: {
+                                    ...col.routingRules,
+                                    githubLabels: labels.length > 0 ? labels : undefined,
+                                  },
+                                });
+                              }}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-slate-800 dark:text-slate-200 text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Add Column Section */}
+                {showAddColumn ? (
+                  <div className="rounded-xl border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50/40 dark:bg-indigo-950/30 p-3 space-y-2.5 animate-in fade-in duration-150">
+                    <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                      Add New Column
+                    </span>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Column Name (e.g. QA, In Review, Backlog)"
+                        value={newColumnTitle}
+                        onChange={(e) => setNewColumnTitle(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <label className="text-[10px] text-slate-500 dark:text-slate-400 block mb-1">
+                          Column Color
+                        </label>
+                        <div className="flex items-center space-x-1.5">
+                          {COLOR_OPTIONS.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => setNewColumnColor(c.id)}
+                              className={`w-5 h-5 rounded-full ${c.bg} transition-all ${
+                                newColumnColor === c.id
+                                  ? 'ring-2 ring-indigo-600 scale-110'
+                                  : 'opacity-80 hover:opacity-100'
+                              }`}
+                              title={c.label}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end space-x-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddColumn(false);
+                            setNewColumnTitle('');
+                          }}
+                          className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!newColumnTitle.trim()}
+                          onClick={() => {
+                            if (!newColumnTitle.trim()) return;
+                            addColumn({ title: newColumnTitle.trim(), color: newColumnColor });
+                            setNewColumnTitle('');
+                            setShowAddColumn(false);
+                          }}
+                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg disabled:opacity-40"
+                        >
+                          Create Column
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddColumn(true)}
+                    className="w-full py-2 border border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center justify-center space-x-1.5 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Custom Column</span>
+                  </button>
+                )}
+              </div>
+            </div>
           )}
 
           {/* ═══════════════════════════════════════════════════════════ */}
