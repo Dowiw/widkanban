@@ -109,6 +109,8 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export type FontFamilyOption = 'outfit' | 'unifont' | 'system' | 'mono';
 export type CardDensity = 'compact' | 'normal' | 'relaxed';
 
+export type PinMode = 'always-on-top' | 'desktop-layer' | 'normal';
+
 export interface WidgetCustomizationSettings {
   // Appearance
   theme: ThemeMode;
@@ -121,10 +123,11 @@ export interface WidgetCustomizationSettings {
   columnMinWidth: number; // 200 to 400px (default 260px)
   cardDensity: CardDensity;
 
-  // Window Defaults
+  // Window Defaults & Pin Mode
   defaultWidth: number;
   defaultHeight: number;
   rememberWindowPlacement: boolean;
+  pinMode: PinMode; // 'always-on-top' | 'desktop-layer' | 'normal'
 }
 
 export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
@@ -138,6 +141,19 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   defaultWidth: 380,
   defaultHeight: 680,
   rememberWindowPlacement: true,
+  pinMode: 'always-on-top',
+};
+
+export interface StartupSettings {
+  autostartEnabled: boolean;
+  startMinimized: boolean;
+  hasPrompted: boolean;
+}
+
+export const DEFAULT_STARTUP_SETTINGS: StartupSettings = {
+  autostartEnabled: false,
+  startMinimized: false,
+  hasPrompted: false,
 };
 
 export interface AutoSyncSettings {

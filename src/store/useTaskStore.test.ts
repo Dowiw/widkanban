@@ -787,20 +787,54 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.theme).toBe('system');
     });
 
-    it('toggles pin and triggers set_window_resizable with inverse pin state', () => {
-      const { togglePin } = useTaskStore.getState();
+    it('toggles pin and triggers set_window_pin_mode with appropriate mode', async () => {
+      const { togglePin, setPinMode } = useTaskStore.getState();
       expect(useTaskStore.getState().isPinned).toBe(true);
 
-      // Unpin: should enable resizing (resizable: true)
-      togglePin();
+      // Unpin: should set normal window mode
+      await togglePin();
       expect(useTaskStore.getState().isPinned).toBe(false);
-      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: true });
-      expect(mockInvoke).toHaveBeenCalledWith('toggle_always_on_top', undefined);
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'normal' });
 
-      // Pin: should lock resizing (resizable: false)
-      togglePin();
+      // Pin with always-on-top
+      await togglePin();
       expect(useTaskStore.getState().isPinned).toBe(true);
-      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: false });
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'always-on-top' });
+
+      // Switch pin mode to desktop-layer while pinned
+      await setPinMode('desktop-layer');
+      expect(useTaskStore.getState().customization.pinMode).toBe('desktop-layer');
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'desktop-layer' });
+    });
+
+    it('handles autostart status check and enable/disable', async () => {
+      const { checkAutostartStatus, enableAutostart, disableAutostart } =
+        useTaskStore.getState();
+
+      mockInvoke.mockResolvedValueOnce(true);
+      const isEnabled = await checkAutostartStatus();
+      expect(isEnabled).toBe(true);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(true);
+
+      mockInvoke.mockResolvedValueOnce(undefined);
+      const enabled = await enableAutostart(true);
+      expect(enabled).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('enable_autostart', { startMinimized: true });
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(true);
+      expect(useTaskStore.getState().startupSettings.startMinimized).toBe(true);
+      expect(useTaskStore.getState().startupSettings.hasPrompted).toBe(true);
+
+      mockInvoke.mockResolvedValueOnce(undefined);
+      const disabled = await disableAutostart();
+      expect(disabled).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('disable_autostart', undefined);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
+
+      // When external task manager disables autostart, checkAutostartStatus returns false and unticks
+      mockInvoke.mockResolvedValueOnce(false);
+      const detectedStatus = await checkAutostartStatus();
+      expect(detectedStatus).toBe(false);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
     });
 
     it('applies window size presets and updates defaultWidth/defaultHeight', async () => {

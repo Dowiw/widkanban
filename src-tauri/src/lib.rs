@@ -720,6 +720,249 @@ fn toggle_always_on_top(window: tauri::Window) -> Result<bool, String> {
     Ok(!is_on_top)
 }
 
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn SetWindowPos(
+        hwnd: isize,
+        hwnd_insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
+}
+
+#[tauri::command]
+fn set_window_pin_mode(window: tauri::Window, mode: String) -> Result<String, String> {
+    match mode.as_str() {
+        "always-on-top" => {
+            window.set_always_on_top(true).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            Ok("always-on-top".to_string())
+        }
+        "desktop-layer" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(h) = window.hwnd() {
+                    let raw = h.0 as isize;
+                    unsafe {
+                        SetWindowPos(raw, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                    }
+                }
+            }
+            Ok("desktop-layer".to_string())
+        }
+        "normal" | "unpinned" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(true).map_err(|e| e.to_string())?;
+            Ok("normal".to_string())
+        }
+        other => Err(format!("Unknown pin mode: {}", other)),
+    }
+}
+
+pub fn build_linux_desktop_entry(exe_path: &str, start_minimized: bool) -> String {
+    let exec_cmd = if start_minimized {
+        format!("{} --minimized", exe_path)
+    } else {
+        exe_path.to_string()
+    };
+    format!(
+        "[Desktop Entry]\nType=Application\nName=WidKanban\nComment=Lightweight desktop Kanban widget\nExec={}\nTerminal=false\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n",
+        exec_cmd
+    )
+}
+
+pub fn build_macos_plist(exe_path: &str, start_minimized: bool) -> String {
+    let arg_element = if start_minimized {
+        "        <string>--minimized</string>\n"
+    } else {
+        ""
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.widkanban.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+{}    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+"#,
+        exe_path, arg_element
+    )
+}
+
+#[tauri::command]
+fn is_autostart_enabled(_app_handle: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = r#"$r = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if (-not $r) { 'false' } else { $a = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if ($null -ne $a -and $a.Length -gt 0 -and ($a[0] -band 1)) { 'false' } else { 'true' } }"#;
+
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        if let Ok(out) = cmd.output() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            return Ok(s == "true");
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("X-GNOME-Autostart-enabled=false") || content.contains("Hidden=true") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("<key>Disabled</key>") && content.contains("<true/>") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn enable_autostart(_app_handle: tauri::AppHandle, start_minimized: bool) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| format!("Failed to get current executable path: {}", e))?;
+    let exe_path = current_exe.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let val = if start_minimized {
+            format!("\"{}\" --minimized", exe_path)
+        } else {
+            format!("\"{}\"", exe_path)
+        };
+        let ps_cmd = format!(
+            "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -Value '{}' -Type String; \
+             try {{ Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -Value ([byte[]](0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)) -Type Binary -ErrorAction Stop }} catch {{}}",
+            val.replace("'", "''")
+        );
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to execute powershell registry command: {}", e))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Registry autostart enable failed: {}", err));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let autostart_dir = std::path::PathBuf::from(&home).join(".config/autostart");
+        let _ = std::fs::create_dir_all(&autostart_dir);
+        let file_path = autostart_dir.join("widkanban.desktop");
+        let content = build_linux_desktop_entry(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write autostart desktop file: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let launch_dir = std::path::PathBuf::from(&home).join("Library/LaunchAgents");
+        let _ = std::fs::create_dir_all(&launch_dir);
+        let file_path = launch_dir.join("com.widkanban.desktop.plist");
+        let content = build_macos_plist(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write macOS launch agent plist: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err("Unsupported operating system for autostart".to_string())
+    }
+}
+
+#[tauri::command]
+fn disable_autostart(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = "try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; \
+                      try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; exit 0";
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let _ = cmd.output();
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 fn minimize_window(window: tauri::Window) -> Result<(), String> {
     window.minimize().map_err(|e| e.to_string())
@@ -2376,11 +2619,15 @@ pub fn run() {
             get_api_health,
             send_desktop_notification,
             toggle_always_on_top,
+            set_window_pin_mode,
             minimize_window,
             close_app,
             set_window_resizable,
             set_window_size,
             reset_window_geometry,
+            is_autostart_enabled,
+            enable_autostart,
+            disable_autostart,
             get_auth_status,
             save_credentials,
             clear_credentials,
@@ -2395,11 +2642,20 @@ pub fn run() {
             open_oauth_preview,
         ])
         .setup(|app| {
+            let is_minimized_arg = std::env::args().any(|arg| arg == "--minimized" || arg == "--hidden");
+            if is_minimized_arg {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
-            let pin_i = MenuItem::with_id(app, "pin", "Toggle Always on Top", true, None::<&str>)?;
+            let pin_top_i = MenuItem::with_id(app, "pin_top", "Pin: Always on Top", true, None::<&str>)?;
+            let pin_desk_i = MenuItem::with_id(app, "pin_desktop", "Pin: Desktop Layer", true, None::<&str>)?;
+            let unpin_i = MenuItem::with_id(app, "unpin", "Unpin (Enable Resizing)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit WidKanban", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&toggle_i, &pin_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&toggle_i, &pin_top_i, &pin_desk_i, &unpin_i, &quit_i])?;
 
             let mut builder = TrayIconBuilder::new()
                 .menu(&menu)
@@ -2435,10 +2691,37 @@ pub fn run() {
                             }
                         }
                     }
+                    "pin_top" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(true);
+                            let _ = window.set_resizable(false);
+                        }
+                    }
+                    "pin_desktop" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(false);
+                            #[cfg(target_os = "windows")]
+                            {
+                                if let Ok(h) = window.hwnd() {
+                                    unsafe {
+                                        SetWindowPos(h.0 as isize, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "unpin" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(true);
+                        }
+                    }
                     "pin" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let is_on_top = window.is_always_on_top().unwrap_or(false);
                             let _ = window.set_always_on_top(!is_on_top);
+                            let _ = window.set_resizable(is_on_top);
                         }
                     }
                     "quit" => {
@@ -2750,6 +3033,28 @@ mod tests {
         assert!(serialized.contains("query"));
         assert!(serialized.contains("variables"));
         assert!(serialized.contains("foo"));
+    }
+
+    #[test]
+    fn test_build_linux_desktop_entry() {
+        let entry_normal = build_linux_desktop_entry("/usr/bin/widkanban", false);
+        assert!(entry_normal.contains("Exec=/usr/bin/widkanban\n"));
+        assert!(entry_normal.contains("Name=WidKanban"));
+        assert!(!entry_normal.contains("--minimized"));
+
+        let entry_min = build_linux_desktop_entry("/usr/bin/widkanban", true);
+        assert!(entry_min.contains("Exec=/usr/bin/widkanban --minimized\n"));
+    }
+
+    #[test]
+    fn test_build_macos_plist() {
+        let plist_normal = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", false);
+        assert!(plist_normal.contains("<string>/Applications/WidKanban.app/Contents/MacOS/widkanban</string>"));
+        assert!(!plist_normal.contains("<string>--minimized</string>"));
+        assert!(plist_normal.contains("<key>RunAtLoad</key>"));
+
+        let plist_min = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", true);
+        assert!(plist_min.contains("<string>--minimized</string>"));
     }
 
     #[test]
