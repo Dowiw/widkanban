@@ -6,6 +6,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { DeleteTaskModal } from './components/DeleteTaskModal';
 import { StartupPromptModal } from './components/StartupPromptModal';
+import { AutoSyncPromptModal } from './components/AutoSyncPromptModal';
 import { useTaskStore } from './store/useTaskStore';
 
 export const App: React.FC = () => {
@@ -19,6 +20,10 @@ export const App: React.FC = () => {
     startupSettings,
     setStartupPromptOpen,
     checkAutostartStatus,
+    autoSyncSettings,
+    setAutoSyncPromptOpen,
+    refreshTasksWithDiff,
+    fetchApiHealth,
   } = useTaskStore();
 
   const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
@@ -59,11 +64,19 @@ export const App: React.FC = () => {
     checkAuthStatus().then((status) => {
       if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
         setSettingsOpen(true);
-      } else if ((status.has_github || status.has_google) && !startupSettings.hasPrompted) {
-        setStartupPromptOpen(true);
+      } else if (status.has_github || status.has_google) {
+        if (!autoSyncSettings.hasPrompted) {
+          setAutoSyncPromptOpen(true);
+        } else if (!startupSettings.hasPrompted) {
+          setStartupPromptOpen(true);
+        }
+      }
+      if (status.has_github || status.has_google) {
+        refreshTasksWithDiff();
       }
     });
     checkAutostartStatus();
+    fetchApiHealth();
   }, [
     checkAuthStatus,
     hasCompletedOnboarding,
@@ -71,7 +84,23 @@ export const App: React.FC = () => {
     startupSettings.hasPrompted,
     setStartupPromptOpen,
     checkAutostartStatus,
+    autoSyncSettings.hasPrompted,
+    setAutoSyncPromptOpen,
+    fetchApiHealth,
+    refreshTasksWithDiff,
   ]);
+
+  // Periodic Auto-Sync Polling Engine
+  useEffect(() => {
+    if (!autoSyncSettings.enabled) return;
+
+    const intervalMs = Math.max(1, autoSyncSettings.intervalMinutes) * 60 * 1000;
+    const timer = setInterval(() => {
+      refreshTasksWithDiff();
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [autoSyncSettings.enabled, autoSyncSettings.intervalMinutes, refreshTasksWithDiff]);
 
   const fontClass =
     customization.fontFamily === 'unifont'
@@ -108,6 +137,7 @@ export const App: React.FC = () => {
       <GitHubSetupModal />
       <DeleteTaskModal />
       <StartupPromptModal />
+      <AutoSyncPromptModal />
     </div>
   );
 };

@@ -138,6 +138,18 @@ As a contributor, **you do not need to register a Google Cloud project or use pe
    - **Administration** *(optional)*: `Read and write` (only if testing permanent hard-delete GraphQL mutations).
 5. Copy the `github_pat_...` string and paste it into Settings.
 
+### Developer Environment Credentials via `.env` (Fastest Setup)
+For rapid local testing during development, you can avoid manual entry in the Settings UI by creating a `.env` or `.env.local` file in the project root:
+```bash
+cp .env.example .env
+```
+Populate your test keys:
+```env
+GITHUB_TOKEN=ghp_yourTestGithubTokenHere
+GOOGLE_TASKS_TOKEN=ya29.yourTestGoogleTasksAccessTokenHere
+```
+When running `npm run tauri dev`, WidKanban automatically detects and loads these credentials into memory via `dotenvy`, with zero manual input needed. Note that tokens in `.env` are strictly loaded in memory by the native Rust backend and are never written to `credentials.json` or bundled into frontend assets.
+
 ### Cleaning Up Credentials After Testing
 In the widget header, click **Settings (⚙)** and click **"Disconnect"** on the provider. This immediately purges the tokens from your local `credentials.json` file.
 

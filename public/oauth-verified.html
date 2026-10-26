@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Authentication Verified</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/unifont@5.3.0/index.min.css">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #f4f4f4;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      padding: 64px 48px;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #121315;
+        color: #b5b8be;
+      }
+    }
+    .container {
+      max-width: 600px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: normal;
+      color: #007acc;
+      margin-bottom: 24px;
+      letter-spacing: -0.5px;
+    }
+    @media (prefers-color-scheme: dark) {
+      h1 {
+        color: #38bdf8;
+      }
+    }
+    p {
+      margin-bottom: 12px;
+    }
+    .actions {
+      margin-top: 28px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 8px 18px;
+      border: 1px solid #4b4d51;
+      background: transparent;
+      color: #4b4d51;
+      font-family: 'Unifont', 'GNU Unifont', 'Courier New', Courier, monospace;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 0;
+      text-decoration: none;
+      outline: none;
+    }
+    .btn:hover {
+      background: #e2e2e2;
+    }
+    .btn:focus-visible {
+      outline: 1px dashed #007acc;
+      outline-offset: 2px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .btn {
+        border-color: #888888;
+        color: #d0d0d0;
+      }
+      .btn:hover {
+        background: #25282c;
+      }
+    }
+    .hint {
+      display: none;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #797d84;
+    }
+    @media (prefers-color-scheme: dark) {
+      .hint {
+        color: #94a3b8;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Google Authentication Verified</h1>
+    <p>Your Google account has been connected to WidKanban.</p>
+    <p>You can return to the app or close this tab.</p>
+    <div class="actions">
+      <button id="close-btn" class="btn" onclick="closeTab()">close tab</button>
+      <p id="close-hint" class="hint">Press <strong>Ctrl+W</strong> (or <strong>⌘W</strong>) to close this tab.</p>
+    </div>
+  </div>
+  <script>
+    function closeTab() {
+      try { window.close(); } catch (e) {}
+      try { window.open('', '_self', ''); window.close(); } catch (e) {}
+      setTimeout(function() {
+        var hint = document.getElementById('close-hint');
+        var btn = document.getElementById('close-btn');
+        if (hint) hint.style.display = 'block';
+        if (btn) btn.textContent = 'close tab (Ctrl+W)';
+      }, 100);
+    }
+    window.onload = function() {
+      var btn = document.getElementById('close-btn');
+      if (btn) btn.focus();
+    };
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        closeTab();
+      }
+    });
+  </script>
+</body>
+</html>

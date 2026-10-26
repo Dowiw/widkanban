@@ -66,26 +66,63 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] Remote change detection with in-app banner and native OS desktop notifications (`tauri-plugin-notification`).
 
 ### GitHub Flavored Markdown (GFM) Parsing ([#7](https://github.com/Dowiw/widkanban/issues/7))
-- [ ] Standard GFM rendering for task descriptions and issue bodies (`react-markdown` + `remark-gfm`).
-- [ ] Support headings, lists, code blocks, tables, blockquotes, and task checklists (`- [ ]`, `- [x]`).
-- [ ] Safe external link delegation opening in the user's default browser via `@tauri-apps/plugin-opener`.
-- [ ] HTML sanitization via `rehype-sanitize` to protect frameless desktop webview.
+- [x] Standard GFM rendering for task descriptions and issue bodies (`react-markdown` + `remark-gfm`).
+- [x] Support headings, lists, code blocks, tables, blockquotes, and task checklists (`- [ ]`, `- [x]`).
+- [x] Safe external link delegation opening in the user's default browser via `@tauri-apps/plugin-opener`.
+- [x] HTML sanitization via `rehype-sanitize` to protect frameless desktop webview.
 
 ### Universal Font Family Synchronization ([#8](https://github.com/Dowiw/widkanban/issues/8))
-- [ ] Ensure user-selected font family (`Outfit`, `GNU Unifont`, `System UI`, `Coding Mono`) cascades across all UI text (headers, app title, task descriptions, IDs, badges, modals).
-- [ ] Remove hardcoded font overrides in `TaskCard.tsx` (`font-sans`), `Header.tsx` (`font-unifont`), and metadata tags.
-- [ ] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
+- [x] Ensure user-selected font family (`Outfit`, `GNU Unifont`, `System UI`, `Coding Mono`) cascades across all UI text (headers, app title, task descriptions, IDs, badges, modals).
+- [x] Remove hardcoded font overrides in `TaskCard.tsx` (`font-sans`), `Header.tsx` (`font-unifont`), and metadata tags.
+- [x] Preserve fixed-pitch monospace strictly for code snippets, commit SHAs, and diff counters (`+` / `-`).
 
 ### Production Add Task Workflow ([#9](https://github.com/Dowiw/widkanban/issues/9))
-- [ ] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.
-- [ ] Support production fields: Title, Provider (GitHub / Google Tasks), Status column, target repo/list, and description notes.
-- [ ] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
+- [x] Remove all "Mock" developer labels and placeholders from Add Task modal and UI tooltips.
+- [x] Support production fields: Title, Provider (GitHub / Google Tasks), Status column, target repo/list, and description notes.
+- [x] Form validation and clean client ID generation conforming to `UnifiedTask` schema.
+
+### Smart Container Discovery & Organization Permissions ([#25](https://github.com/Dowiw/widkanban/issues/25))
+- [ ] Searchable repository dropdown for GitHub (owned repos + assigned issue/PR repos).
+- [ ] Dropdown for all Google Tasks and Microsoft To Do lists with inline `+ Create New List` feature.
+- [ ] Role detection for Teams assignments and Blackboard Learn: show `Disabled by organization` for student roles.
+- [ ] Pre-fetch and background caching of available containers for instant modal opening.
+
 
 ### API Rate Limit & Token Expiration Tracking ([#11](https://github.com/Dowiw/widkanban/issues/11))
 - [ ] GitHub PAT rate limit header tracking (`x-ratelimit-*`) and expiration date tracking (`github-authentication-token-expiration`).
 - [ ] Google Tasks OAuth token lifetime inspection via tokeninfo (`expires_in`).
 - [ ] Expandable "API Quota & Token Health" drawer inside each provider card in Settings modal.
 - [ ] Header warning indicator when rate limits drop below 10% or tokens are near expiration (< 24h).
+
+### GitHub Issue & PR Deadlines via 'Widkanban:' Tag ([#18](https://github.com/Dowiw/widkanban/issues/18))
+- [ ] Parse `Widkanban: deadline` tags from issue and PR description bodies into `sourceMeta.dueDate`.
+- [ ] Interactive date/time picker writing back to GitHub description bodies with visible markdown and machine HTML comment.
+
+### Configurable GitHub Done Action ([#19](https://github.com/Dowiw/widkanban/issues/19))
+- [ ] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
+- [ ] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
+
+### GitHub PR-to-Issue Linking & Board De-cluttering ([#20](https://github.com/Dowiw/widkanban/issues/20))
+- [ ] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
+- [ ] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
+
+### Multi-Column Board Configuration & Action Triggers ([#21](https://github.com/Dowiw/widkanban/issues/21))
+- [ ] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
+- [ ] Configurable integration action triggers per column (GitHub labels/state, PR review state, Google/Microsoft statuses).
+- [ ] Reverse routing rules mapping incoming external tasks into custom columns.
+
+### Filter and Sort by Deadline ([#22](https://github.com/Dowiw/widkanban/issues/22))
+- [ ] Header dropdown controls for deadline presets (`Overdue`, `Today`, `This Week`, `Earliest First`).
+- [ ] Dynamic color-coded urgency badges on cards (red for overdue, amber for <24h).
+
+### Interactive Google Tasks Subtasks ([#23](https://github.com/Dowiw/widkanban/issues/23))
+- [ ] In-card checkbox completion with immediate 60fps local update and Google Tasks API write-back.
+- [ ] In-card subtask creation (`POST ...?parent=...`) and hover deletion.
+
+### Blackboard Learn LMS Integration ([#24](https://github.com/Dowiw/widkanban/issues/24))
+- [ ] Ingest Blackboard assignments, assessments, and calendar due dates (`GET /learn/api/public/v1/...`).
+- [ ] Settings connection card for institution domain and personal token.
+- [ ] Dedicated Blackboard filter tab and direct assignment submission links.
 
 ### Native Desktop Notifications
 - [ ] System notifications when new issues or tasks are assigned to the user.
@@ -95,8 +132,11 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [ ] **Linux**: `.AppImage` and `.deb` distribution packages.
 - [ ] **macOS**: Signed `.dmg` application packages.
 
-### In-App OAuth Loopback Flow
-- [ ] Built-in local HTTP callback server (`http://localhost:<port>/callback`) for seamless Google sign-in without needing the OAuth Playground.
+### In-App OAuth Loopback Flow & Token Refresh ([#32](https://github.com/Dowiw/widkanban/issues/32))
+- [ ] Ephemeral local HTTP loopback server (`http://127.0.0.1:<port>`) for 1-click Google OAuth sign-in.
+- [ ] PKCE flow capturing permanent refresh token (`1//...`) alongside access token in native Rust storage.
+- [ ] Automatic background token renewal before API requests, eliminating 1-hour expiration dropouts.
+- [ ] Branded "Sign in with Google" button in `SettingsModal.tsx` and first-connect onboarding.
 
 ### Cross-Platform OS Autostart & Persistence ([#4](https://github.com/Dowiw/widkanban/issues/4))
 - [x] Cross-platform launch at startup for Windows (Registry HKCU), macOS (LaunchAgent), and Linux (XDG Autostart).
@@ -110,8 +150,8 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [x] Seamless switching between Always on Top, Desktop Layer, and Standard Window modes in Settings and System Tray.
 
 ### Developer Credential Overrides via `.env` ([#6](https://github.com/Dowiw/widkanban/issues/6))
-- [ ] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
-- [ ] Add `.env.example` template with dummy keys and update contributor onboarding guides.
+- [x] Allow developers to pass API tokens (`GITHUB_TOKEN`, `GOOGLE_TASKS_TOKEN`) via local `.env` / `.env.local` for rapid local testing in dev mode.
+- [x] Add `.env.example` template with dummy keys and update contributor onboarding guides.
 
 ---
 
@@ -119,7 +159,6 @@ This document tracks completed capabilities, active milestones, and planned feat
 
 - **Microsoft 365 & Teams Integration** ([#3](https://github.com/Dowiw/widkanban/issues/3)): Support for Teams for Education Assignments, Microsoft Planner ("Assigned to Me"), Microsoft To Do, and Outlook Flagged Emails across personal and school/organization accounts.
 - **GitLab & Jira Integrations**: Optional adapters following the same `UnifiedTask` normalization schema.
-- **Custom Board Columns**: Allowing user-defined workflow columns beyond the default 3 columns.
 - **Offline Mode & Queue**: Queuing write-back actions during offline network states and replaying on reconnect.
 
 ---
