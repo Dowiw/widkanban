@@ -12,6 +12,13 @@ import {
   ThemeMode,
   WidgetCustomizationSettings,
   DEFAULT_CUSTOMIZATION_SETTINGS,
+  PinMode,
+  StartupSettings,
+  DEFAULT_STARTUP_SETTINGS,
+  AutoSyncSettings,
+  DEFAULT_AUTOSYNC_SETTINGS,
+  ApiHealthState,
+  DEFAULT_API_HEALTH_STATE,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -57,6 +64,10 @@ interface TaskState {
   authStatus: AuthStatus;
   githubSyncSettings: GitHubSyncSettings;
 
+  // Autostart & System Launch
+  startupSettings: StartupSettings;
+  isStartupPromptOpen: boolean;
+
   // Local trash & deletion modal state
   locallyDeletedTasks: UnifiedTask[];
   deleteModalTask: UnifiedTask | null;
@@ -69,10 +80,18 @@ interface TaskState {
 
   // Actions
   setCustomization: (settings: Partial<WidgetCustomizationSettings>) => void;
+  setPinMode: (mode: PinMode) => Promise<void>;
   toggleTheme: () => void;
   setWindowSizePreset: (preset: 'compact' | 'wide' | 'expanded') => Promise<void>;
   resetWindowPositionAndSize: () => Promise<void>;
   syncWindowResizable: (resizable: boolean) => Promise<void>;
+
+  // Startup actions
+  setStartupPromptOpen: (isOpen: boolean) => void;
+  setStartupSettings: (settings: Partial<StartupSettings>) => void;
+  checkAutostartStatus: () => Promise<boolean>;
+  enableAutostart: (startMinimized?: boolean) => Promise<boolean>;
+  disableAutostart: () => Promise<boolean>;
 
   moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
   addTask: (task: Omit<UnifiedTask, 'id' | 'updatedAt'>) => void;
@@ -111,8 +130,29 @@ interface TaskState {
   fetchGithubTasks: () => Promise<void>;
   fetchMicrosoftTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
-  saveCredentials: (creds: { githubToken?: string; googleToken?: string; microsoftToken?: string }) => Promise<boolean>;
+  saveCredentials: (creds: {
+    githubToken?: string;
+    googleToken?: string;
+    googleRefreshToken?: string;
+    googleClientId?: string;
+    googleClientSecret?: string;
+    microsoftToken?: string;
+  }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
+  startGoogleOAuthFlow: (creds?: {
+    clientId?: string;
+    clientSecret?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  autoSyncSettings: AutoSyncSettings;
+  isAutoSyncPromptOpen: boolean;
+  apiHealth: ApiHealthState;
+  syncBanner: string | null;
+  setAutoSyncSettings: (settings: Partial<AutoSyncSettings>) => void;
+  setAutoSyncPromptOpen: (isOpen: boolean) => void;
+  setSyncBanner: (banner: string | null) => void;
+  fetchApiHealth: () => Promise<ApiHealthState | null>;
+  sendDesktopNotification: (title: string, body: string) => Promise<void>;
+  refreshTasksWithDiff: () => Promise<{ addedCount: number; newTasks: UnifiedTask[] }>;
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -138,6 +178,8 @@ export const useTaskStore = create<TaskState>()(
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
+      startupSettings: DEFAULT_STARTUP_SETTINGS,
+      isStartupPromptOpen: false,
       locallyDeletedTasks: [],
       deleteModalTask: null,
       deletePreference: null,
@@ -146,6 +188,18 @@ export const useTaskStore = create<TaskState>()(
 
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
+
+      // Auto-Sync & API Health initial state
+      autoSyncSettings: DEFAULT_AUTOSYNC_SETTINGS,
+      isAutoSyncPromptOpen: false,
+      apiHealth: DEFAULT_API_HEALTH_STATE,
+      syncBanner: null,
+      setAutoSyncSettings: (settings) =>
+        set((state) => ({
+          autoSyncSettings: { ...state.autoSyncSettings, ...settings },
+        })),
+      setAutoSyncPromptOpen: (isOpen) => set({ isAutoSyncPromptOpen: isOpen }),
+      setSyncBanner: (banner) => set({ syncBanner: banner }),
 
       moveTask: (taskId, targetStatus, targetIndex) => {
         // --- Optimistic UI update ---
@@ -279,13 +333,17 @@ export const useTaskStore = create<TaskState>()(
       },
 
       addTask: (newTaskData) => {
+        const rawUuid =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+            : Date.now().toString(36);
         const prefix =
           newTaskData.source === 'github'
             ? 'gh'
             : newTaskData.source === 'microsoft_teams'
             ? 'ms'
             : 'gt';
-        const id = `${prefix}_${Date.now()}`;
+        const id = `${prefix}_${rawUuid}`;
         const task: UnifiedTask = {
           ...newTaskData,
           id,
@@ -359,14 +417,77 @@ export const useTaskStore = create<TaskState>()(
 
       setSearchQuery: (query) => set({ searchQuery: query }),
       setFilterSource: (source) => set({ filterSource: source }),
-      togglePin: () => {
+      setPinMode: async (mode: PinMode) => {
+        set((state) => ({
+          customization: { ...state.customization, pinMode: mode },
+        }));
+        if (get().isPinned) {
+          await safeInvoke('set_window_pin_mode', { mode });
+        }
+      },
+      togglePin: async () => {
         const nextPinned = !get().isPinned;
         set({ isPinned: nextPinned });
-        safeInvoke('set_window_resizable', { resizable: !nextPinned });
-        safeInvoke('toggle_always_on_top');
+        if (nextPinned) {
+          const currentMode = get().customization.pinMode || 'always-on-top';
+          await safeInvoke('set_window_pin_mode', { mode: currentMode });
+        } else {
+          await safeInvoke('set_window_pin_mode', { mode: 'normal' });
+        }
       },
       syncWindowResizable: async (resizable: boolean) => {
         await safeInvoke('set_window_resizable', { resizable });
+      },
+      setStartupPromptOpen: (isOpen) => set({ isStartupPromptOpen: isOpen }),
+      setStartupSettings: (settings) =>
+        set((state) => ({
+          startupSettings: { ...state.startupSettings, ...settings },
+        })),
+      checkAutostartStatus: async () => {
+        const res = await safeInvokeWithResult<boolean>('is_autostart_enabled');
+        if (res.success && res.data !== undefined) {
+          const isEnabled = res.data ?? false;
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: isEnabled,
+            },
+          }));
+          return isEnabled;
+        }
+        return false;
+      },
+      enableAutostart: async (startMinimized) => {
+        const minimized = startMinimized ?? get().startupSettings.startMinimized;
+        const res = await safeInvokeWithResult<void>('enable_autostart', {
+          startMinimized: minimized,
+        });
+        if (res.success) {
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: true,
+              startMinimized: minimized,
+              hasPrompted: true,
+            },
+          }));
+          return true;
+        }
+        return false;
+      },
+      disableAutostart: async () => {
+        const res = await safeInvokeWithResult<void>('disable_autostart');
+        if (res.success) {
+          set((state) => ({
+            startupSettings: {
+              ...state.startupSettings,
+              autostartEnabled: false,
+              hasPrompted: true,
+            },
+          }));
+          return true;
+        }
+        return false;
       },
       setCustomization: (settings) =>
         set((state) => ({
@@ -504,35 +625,125 @@ export const useTaskStore = create<TaskState>()(
         await get().fetchGithubTasks();
       },
 
-      refreshTasks: async () => {
+      sendDesktopNotification: async (title: string, body: string) => {
+        await safeInvoke('send_desktop_notification', { title, body });
+        if (typeof window !== 'undefined' && 'Notification' in window) {
+          if (Notification.permission === 'granted') {
+            try {
+              new Notification(title, { body });
+            } catch (_) {}
+          } else if (Notification.permission !== 'denied') {
+            try {
+              const perm = await Notification.requestPermission();
+              if (perm === 'granted') {
+                new Notification(title, { body });
+              }
+            } catch (_) {}
+          }
+        }
+      },
+
+      fetchApiHealth: async () => {
+        const res = await safeInvoke<ApiHealthState>('get_api_health');
+        if (res) {
+          if (res.github.tokenExpiresAt) {
+            try {
+              const expTime = Date.parse(res.github.tokenExpiresAt);
+              if (!isNaN(expTime)) {
+                const diffDays = (expTime - Date.now()) / (1000 * 60 * 60 * 24);
+                res.github.isExpiringSoon = diffDays > 0 && diffDays <= 7;
+              }
+            } catch (_) {}
+          }
+          set({ apiHealth: res });
+          return res;
+        }
+        return get().apiHealth;
+      },
+
+      refreshTasksWithDiff: async () => {
+        const prevTasks = get().tasks;
+        const prevTaskIds = new Set(prevTasks.map((t) => t.id));
+
+        const health = get().apiHealth;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const isGithubRateLimited =
+          health.github.isRateLimited &&
+          health.github.rateLimitReset &&
+          health.github.rateLimitReset > nowSec;
+
         const status = await get().checkAuthStatus();
         const promises: Promise<void>[] = [];
         if (status.has_google) promises.push(get().fetchGoogleTasks());
-        if (status.has_github) promises.push(get().fetchGithubTasks());
-        if (status.has_microsoft) promises.push(get().fetchMicrosoftTasks());
-        await Promise.all(promises);
+        if (status.has_github && !isGithubRateLimited) {
+          promises.push(get().fetchGithubTasks());
+        }
+        if (status.has_microsoft) {
+          promises.push(get().fetchMicrosoftTasks());
+        }
+
+        await Promise.allSettled(promises);
+        await get().fetchApiHealth();
+
+        const nextTasks = get().tasks;
+        const newTasks = nextTasks.filter(
+          (t) =>
+            !prevTaskIds.has(t.id) &&
+            (t.source === 'github' || t.source === 'google_tasks' || t.source === 'microsoft_teams')
+        );
+
+        if (newTasks.length > 0) {
+          const bannerMsg =
+            newTasks.length === 1
+              ? `New task synced: ${newTasks[0].title}`
+              : `${newTasks.length} new tasks synced from remote`;
+
+          set({ syncBanner: bannerMsg });
+
+          if (get().autoSyncSettings.notifyOnNewTasks) {
+            const notifTitle =
+              newTasks.length === 1
+                ? 'WidKanban: New Task Assigned'
+                : `WidKanban: ${newTasks.length} New Tasks Assigned`;
+            const notifBody =
+              newTasks.length === 1
+                ? newTasks[0].title
+                : newTasks.map((t) => t.title).slice(0, 3).join(', ');
+            await get().sendDesktopNotification(notifTitle, notifBody);
+          }
+        }
+
+        return { addedCount: newTasks.length, newTasks };
+      },
+
+      refreshTasks: async () => {
+        await get().refreshTasksWithDiff();
       },
 
       fetchGoogleTasks: async () => {
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_google_tasks');
-        if (!fetched) return;
-
-        set((state) => {
-          const nonGoogleTasks = state.tasks.filter((t) => t.source !== 'google_tasks');
-          return { tasks: [...fetched, ...nonGoogleTasks] };
-        });
+        if (fetched) {
+          set((state) => {
+            const nonGoogleTasks = state.tasks.filter((t) => t.source !== 'google_tasks');
+            return { tasks: [...fetched, ...nonGoogleTasks] };
+          });
+        }
+        await get().fetchApiHealth();
+        await get().checkAuthStatus();
       },
 
       fetchGithubTasks: async () => {
         const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
-        if (!fetched) return;
-
-        set((state) => {
-          const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
-          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
-          const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
-          return { tasks: [...nonGithubTasks, ...activeFetched] };
-        });
+        if (fetched) {
+          set((state) => {
+            const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
+            const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
+            const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
+            return { tasks: [...nonGithubTasks, ...activeFetched] };
+          });
+        }
+        await get().fetchApiHealth();
+        await get().checkAuthStatus();
       },
 
       fetchMicrosoftTasks: async () => {
@@ -556,20 +767,33 @@ export const useTaskStore = create<TaskState>()(
         return get().authStatus;
       },
 
-      saveCredentials: async ({ githubToken, googleToken, microsoftToken }) => {
+      saveCredentials: async ({
+        githubToken,
+        googleToken,
+        googleRefreshToken,
+        googleClientId,
+        googleClientSecret,
+        microsoftToken,
+      }) => {
         const res = await safeInvoke<AuthStatus>('save_credentials', {
           githubToken: githubToken || null,
           googleToken: googleToken || null,
+          googleRefreshToken: googleRefreshToken || null,
+          googleClientId: googleClientId || null,
+          googleClientSecret: googleClientSecret || null,
           microsoftToken: microsoftToken || null,
         });
         if (res) {
           const isFirstGithubConnect =
             res.has_github && !get().githubSyncSettings.hasPromptedSetup;
+          const isFirstConnect =
+            (res.has_github || res.has_google || res.has_microsoft) && !get().autoSyncSettings.hasPrompted;
 
           set({
             authStatus: res,
             hasCompletedOnboarding: true,
             isGithubSetupOpen: isFirstGithubConnect ? true : get().isGithubSetupOpen,
+            isAutoSyncPromptOpen: isFirstConnect ? true : get().isAutoSyncPromptOpen,
           });
 
           const syncs: Promise<void>[] = [];
@@ -577,9 +801,38 @@ export const useTaskStore = create<TaskState>()(
           if (res.has_github) syncs.push(get().fetchGithubTasks());
           if (res.has_microsoft) syncs.push(get().fetchMicrosoftTasks());
           await Promise.all(syncs);
+          await get().fetchApiHealth();
           return true;
         }
         return false;
+      },
+
+      startGoogleOAuthFlow: async (creds) => {
+        const result = await safeInvokeWithResult<AuthStatus>('start_google_oauth_flow', {
+          clientId: creds?.clientId || null,
+          clientSecret: creds?.clientSecret || null,
+        });
+
+        if (result.success && result.data) {
+          const authStatus = result.data;
+          const isFirstConnect =
+            (authStatus.has_github || authStatus.has_google) && !get().autoSyncSettings.hasPrompted;
+
+          set({
+            authStatus,
+            hasCompletedOnboarding: true,
+            isAutoSyncPromptOpen: isFirstConnect ? true : get().isAutoSyncPromptOpen,
+          });
+
+          await get().fetchGoogleTasks();
+          await get().fetchApiHealth();
+          return { success: true };
+        }
+
+        return {
+          success: false,
+          error: result.error || 'Failed to complete Google authentication',
+        };
       },
 
       clearCredentials: async (provider) => {
@@ -603,6 +856,7 @@ export const useTaskStore = create<TaskState>()(
               tasks: updatedTasks,
             };
           });
+          await get().fetchApiHealth();
           return true;
         }
         return false;
@@ -617,10 +871,12 @@ export const useTaskStore = create<TaskState>()(
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
         githubSyncSettings: state.githubSyncSettings,
+        autoSyncSettings: state.autoSyncSettings,
         locallyDeletedTasks: state.locallyDeletedTasks,
         deletePreference: state.deletePreference,
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
+        startupSettings: state.startupSettings,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };
@@ -633,6 +889,12 @@ export const useTaskStore = create<TaskState>()(
           merged.githubSyncSettings = {
             ...currentState.githubSyncSettings,
             ...((persistedState as Partial<TaskState>).githubSyncSettings || {}),
+          };
+        }
+        if ((persistedState as Partial<TaskState>)?.autoSyncSettings) {
+          merged.autoSyncSettings = {
+            ...currentState.autoSyncSettings,
+            ...((persistedState as Partial<TaskState>).autoSyncSettings || {}),
           };
         }
         if (Array.isArray((persistedState as Partial<TaskState>)?.locallyDeletedTasks)) {
@@ -648,6 +910,12 @@ export const useTaskStore = create<TaskState>()(
           merged.customization = {
             ...DEFAULT_CUSTOMIZATION_SETTINGS,
             ...((persistedState as Partial<TaskState>).customization || {}),
+          };
+        }
+        if ((persistedState as Partial<TaskState>)?.startupSettings) {
+          merged.startupSettings = {
+            ...DEFAULT_STARTUP_SETTINGS,
+            ...((persistedState as Partial<TaskState>).startupSettings || {}),
           };
         }
         return merged;

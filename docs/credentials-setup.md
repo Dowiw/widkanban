@@ -1,32 +1,20 @@
-# WidKanban — Credentials Setup Guide
+# WidKanban — Credentials Reference & Storage Model
 
-This guide explains exactly what credentials WidKanban needs, why they are required, and how to obtain them for each provider.
+This document outlines the credential architecture, local storage paths, security invariants, and developer `.env` workflows for WidKanban.
 
 > [!NOTE]
-> WidKanban **never** stores tokens in your browser or frontend state. All credentials are saved in a local `credentials.json` file inside the app's data directory, with `600` (owner-read-only) file permissions on Unix/macOS. They are never transmitted anywhere except directly to the respective provider's API.
+> WidKanban **never** stores secrets in browser `localStorage`, `sessionStorage`, or frontend state. All tokens reside strictly in the native Rust backend and are persisted locally in `credentials.json` with restricted file permissions (`600`).
 
 ---
 
-## Table of Contents
+## Dedicated Provider Setup Guides
 
-- [Summary of Required Credentials](#summary-of-required-credentials)
-- [Contributor Quick-Start: Fast Testing with Short-Lived Keys](#contributor-quick-start-fast-testing-with-short-lived-keys)
-  - [1. Google Tasks (1-hour Ephemeral Token)](#1-google-tasks-1-hour-ephemeral-token--no-cloud-setup-required)
-  - [2. GitHub (Short-Lived & Scoped Test Token)](#2-github-short-lived--scoped-test-token)
-  - [3. Cleaning Up After Testing](#3-cleaning-up-after-testing)
-- [1. GitHub — Personal Access Token (PAT)](#1-github--personal-access-token-pat)
-  - [Required Scopes](#required-scopes)
-  - [How to Create a Classic PAT](#how-to-create-a-classic-pat)
-  - [How to Create a Fine-Grained PAT (Recommended)](#how-to-create-a-fine-grained-pat-recommended)
-  - [Entering the GitHub Token in WidKanban](#entering-the-github-token-in-widkanban)
-- [2. Google Tasks — OAuth 2.0 Access Token](#2-google-tasks--oauth-20-access-token)
-  - [Required OAuth Scope](#required-oauth-scope)
-  - [Option A — Google OAuth Playground (Recommended for Contributors)](#option-a--google-oauth-playground-recommended-for-contributors--testing)
-  - [Option B — Register Your Own Google Cloud OAuth Client](#option-b--register-your-own-google-cloud-oauth-client-for-production--long-term-use)
-  - [Entering the Google Tasks Token in WidKanban](#entering-the-google-tasks-token-in-widkanban)
-- [Where Credentials Are Stored](#where-credentials-are-stored)
-- [Revoking Credentials](#revoking-credentials)
-- [Related Documentation](#related-documentation)
+For complete, visual step-by-step setup instructions with screenshot walkthroughs:
+
+| Provider | Guide | Highlights |
+| :--- | :--- | :--- |
+| **GitHub** | **[GitHub Setup Guide](github-setup.md)** | Generating classic & fine-grained PATs, scope selection (`repo`, `read:user`), and rate limit monitoring. |
+| **Google Tasks** | **[Google Tasks Setup Guide](google-setup.md)** | Google Cloud project setup, Test Users configuration, Desktop OAuth credentials, and 1-click **Sign in with Google** with silent auto-refresh. |
 
 ---
 
@@ -35,170 +23,96 @@ This guide explains exactly what credentials WidKanban needs, why they are requi
 | Provider | Credential Type | Lifespan / Mode | Required For |
 |---|---|---|---|
 | **GitHub** | Personal Access Token (PAT) | 7–90 days (configurable) | Fetching assigned issues & PRs, updating status via labels, closing issues |
-| **Google Tasks** | OAuth 2.0 Access Token (`ya29.…`) | 1 hour (ephemeral) or refreshed | Fetching task lists and items, syncing task completion status |
+| **Google Tasks** | OAuth 2.0 Client & Refresh Token | Long-lived / silent auto-refresh | Fetching task lists, items, and syncing task completion status |
+| **Google Tasks (Fallback)** | OAuth 2.0 Access Token (`ya29.…`) | 1 hour (ephemeral) | Quick manual testing via OAuth Playground without Cloud Console setup |
 
 ---
 
-<a id="contributor-quick-start"></a>
-<a id="contributor-quick-start-fast-testing-with-short-lived-keys"></a>
-## Contributor Quick-Start: Fast Testing with Short-Lived Keys
+## Developer Quick-Start: Fast Testing via `.env`
 
-If you are a **contributor or developer** testing features, bug fixes, or PRs, **you do not need to set up a production Google Cloud project or create permanent credentials**:
+If you are a contributor developing or testing locally (`npm run tauri dev`), you do not need to enter credentials in the UI on every launch:
 
-### 1. Google Tasks (1-hour Ephemeral Token — No Cloud Setup Required)
-- You can obtain a working token in under 60 seconds without creating any Google Cloud Console projects, OAuth consent screens, or client IDs.
-- Follow **[Option A: Google OAuth Playground](#option-a--google-oauth-playground-recommended-for-contributors--testing)** below.
-- This produces a temporary access token (`ya29.…`) that **automatically expires after 1 hour**.
-- It is ideal for local testing, debugging sync logic, and running manual acceptance tests without leaving long-lived credentials on your development machine.
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Add your developer test tokens:
+   ```env
+   # GitHub Personal Access Token
+   GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
-### 2. GitHub (Short-Lived & Scoped Test Token)
-- For testing GitHub integration, generate a fine-grained PAT with a **7-day expiration** and access restricted only to a test/sandbox repository.
-- Follow **[Fine-Grained PAT instructions](#how-to-create-a-fine-grained-pat-recommended)** below.
+   # Google Tasks OAuth Desktop App Client
+   GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxxx
 
-### 3. Cleaning Up After Testing
-- In the widget header, click **Settings (⚙)** and click **"Disconnect"** on the provider.
-- This immediately deletes the token from your local `credentials.json` file.
-
----
-
-## 1. GitHub — Personal Access Token (PAT)
-
-WidKanban uses a GitHub **Personal Access Token** to authenticate with the GitHub REST API on your behalf. You create this token once in your GitHub account settings and paste it into the WidKanban settings modal.
-
-### Required Scopes
-
-You only need to grant the minimum scopes necessary:
-
-| Scope | Why it's needed |
-|---|---|
-| `repo` | Read issues/PRs from **private** repositories you own or are a member of |
-| `public_repo` | Read issues/PRs from **public** repositories (subset of `repo`) |
-| `read:user` | Identify which issues/PRs are assigned to you (`GET /user/issues`) |
-
-> [!TIP]
-> If you only work with public repositories, you can select only `public_repo` and `read:user` to minimise the token's blast radius.
-
-### How to Create a Classic PAT
-
-1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**
-   - Direct URL: https://github.com/settings/tokens
-2. Click **"Generate new token (classic)"**.
-3. Give it a descriptive **Note** (e.g., `WidKanban desktop widget`).
-4. Set an **Expiration** — recommended 90 days, or "No expiration" if you prefer not to rotate it.
-5. Under **Select scopes**, tick:
-   - `repo` (or just `public_repo` if you only use public repos)
-   - `read:user`
-6. Click **"Generate token"** at the bottom of the page.
-7. **Copy the token immediately** — GitHub will only show it once. It looks like `ghp_xxxxxxxxxxxxxxxxxxxx`.
-
-### How to Create a Fine-Grained PAT (recommended)
-
-Fine-grained PATs give you repository-level control and are more secure:
-
-1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**
-   - Direct URL: https://github.com/settings/tokens?type=beta
-2. Click **"Generate new token"**.
-3. Set a **Token name** (e.g., `WidKanban`), **Expiration**, and **Resource owner** (your account or an org).
-4. Under **Repository access**, choose "All repositories" or select specific ones.
-5. Under **Permissions → Repository permissions**, set:
-   - **Issues**: `Read and write` (needed to apply labels, comment, and close issues)
-   - **Pull requests**: `Read-only`
-   - **Metadata**: `Read-only` (auto-selected)
-   - **Administration** *(optional)*: `Read and write` (only required if you want the ability to permanently hard-delete issues via GraphQL; closing as "not planned" only needs Issues `Read and write`)
-6. Under **Permissions → Account permissions**, set:
-   - **User email addresses**: not needed — leave as `No access`
-7. Click **"Generate token"** and copy the result. Fine-grained tokens look like `github_pat_xxxxxxxxxxxx`.
-
-### Entering the GitHub Token in WidKanban
-
-1. Open WidKanban.
-2. Click the **Settings (⚙)** icon in the header.
-3. Paste your token into the **GitHub Personal Access Token** field.
-4. Click **Save**. WidKanban will verify the token and begin syncing your assigned issues.
+   # Or temporary 1-hour access token from OAuth Playground
+   GOOGLE_TASKS_TOKEN=ya29.a0A...
+   ```
+3. Rust loads these automatically on startup via `dotenvy`. In `SettingsModal`, the badge `.env (Dev Mode)` will confirm active environment credentials.
+4. Environment tokens remain purely in-memory in the Rust process and are never written to `credentials.json` or committed to git.
 
 ---
 
-## 2. Google Tasks — OAuth 2.0 Access Token
+## Credential Hierarchy & Precedence
 
-WidKanban connects to the Google Tasks REST API using an **OAuth 2.0 access token** (a short-lived credential that looks like `ya29.a0A…`). You generate this token once using the Google OAuth Playground and paste it into the WidKanban Settings modal.
+To maintain predictable behavior and avoid confusing badge states, WidKanban enforces a strict 3-tier hierarchy:
 
-> [!NOTE]
-> Access tokens from the OAuth Playground expire after **1 hour** by default. For a long-lived setup, tick **"Auto-refresh the token before it expires"** in the OAuth Playground settings, or use a proper OAuth client registered in Google Cloud Console (see Option B below).
+1. **Tier 1: Native In-App Credentials (`credentials.json`) — Highest Precedence**
+   - Whenever you enter a token in the app settings or complete **Sign in with Google**, your credentials are saved locally in `credentials.json`.
+   - **Active credentials in `credentials.json` always override any `.env` entries.**
+   - The `.env (Dev Mode)` and `.env` badges are **automatically removed** from the UI once credentials are saved in the app, giving you clear visual confirmation that your own stored keys are in active use.
 
-### Required OAuth Scope
+2. **Tier 2: Explicit Disconnection Guard**
+   - Clicking the **Trash (Disconnect) icon** in Settings marks the provider as explicitly disconnected.
+   - WidKanban will **not** fall back to `.env` variables after an explicit disconnect, respecting your decision until you re-authenticate or enter a new token in the app.
 
-| Scope | Why it's needed |
-|---|---|
-| `https://www.googleapis.com/auth/tasks` | Full read/write access to your Google Tasks (required to mark tasks complete and update status) |
-
-### Option A — Google OAuth Playground *(Recommended for Contributors & Testing)*
-
-1. Open the [Google OAuth Playground](https://developers.google.com/oauthplayground).
-2. In the **Step 1** panel on the left, find **"Tasks API v1"** and select:
-   - `https://www.googleapis.com/auth/tasks`
-3. Click **"Authorize APIs"** — a Google sign-in popup will appear.
-4. Sign in with the Google account whose tasks you want to sync and grant access.
-5. You will be returned to the Playground at **Step 2**. Click **"Exchange authorization code for tokens"**.
-6. In the **Step 2** response panel you will see the **Access token** field. It starts with `ya29.`. Copy it.
-7. Paste it into the **Google Tasks OAuth Token** field in WidKanban Settings and click **Save**.
-
-> [!TIP]
-> To get a longer-lived token, click the ⚙ gear icon in the OAuth Playground, tick **"Use your own OAuth credentials"**, enter your Google Cloud OAuth client ID and secret (see Option B), and tick **"Auto-refresh the token before it expires"**.
-
-### Option B — Register your own Google Cloud OAuth client *(for production / long-term use)*
-
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (or select an existing one).
-3. Navigate to **APIs & Services → Library** and enable the **"Tasks API"**.
-4. Navigate to **APIs & Services → OAuth consent screen**:
-   - Set User Type to **External** (for personal accounts) or **Internal** (for Workspace org).
-   - Add your Google account as a test user if your app is still in "Testing" publishing status.
-5. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**:
-   - Application type: **Desktop app**
-   - Name: `WidKanban`
-6. Copy the **Client ID** and **Client Secret**.
-7. Use these in the OAuth Playground (⚙ → "Use your own OAuth credentials") as described in Option A to generate a token with auto-refresh.
-
-### Entering the Google Tasks Token in WidKanban
-
-1. Open WidKanban.
-2. Click the **Settings (⚙)** icon in the header.
-3. Paste your `ya29.…` token into the **Google Tasks OAuth Token** field.
-4. Click **Save**. WidKanban will immediately fetch your tasks across all task lists.
-5. Use the **↻ sync button** next to "Connected" to refresh tasks manually at any time.
+3. **Tier 3: Developer Environment Variables (`.env`) — Initial Fallback Only**
+   - Used **only** when no active token exists in `credentials.json` and the provider has not been disconnected.
+   - When active, the purple `.env (Dev Mode)` badge is displayed in Settings.
 
 ---
 
 ## Where Credentials Are Stored
 
-WidKanban stores credentials locally in a JSON file:
+When credentials are saved via the in-app settings UI or captured through the Google OAuth loopback flow, WidKanban saves them in the local native OS app data directory:
 
-| Platform | Path |
-|---|---|
-| **Windows** | `%APPDATA%\com.widkanban.desktop\credentials.json` |
-| **macOS** | `~/Library/Application Support/com.widkanban.desktop/credentials.json` |
-| **Linux** | `~/.local/share/com.widkanban.desktop/credentials.json` |
+| Platform | Path | Permissions |
+|---|---|---|
+| **Windows** | `%APPDATA%\com.widkanban.desktop\credentials.json` | Protected by Windows user profile ACL |
+| **macOS** | `~/Library/Application Support/com.widkanban.desktop/credentials.json` | `600` (Owner read/write only) |
+| **Linux** | `~/.local/share/com.widkanban.desktop/credentials.json` | `600` (Owner read/write only) |
 
-On Unix/macOS the file permissions are set to `600` (only your user account can read it). You can delete this file at any time to revoke all stored credentials — WidKanban will fall back to the mock task dataset on next launch.
+---
+
+## Security Model & Invariants
+
+1. **Native Rust Isolation**:
+   All HTTP requests to GitHub and Google are executed exclusively by the Rust backend using `reqwest` with native TLS. The frontend webview never has direct access to API tokens.
+2. **Zero Auth Secrets in Frontend State**:
+   Tokens are never returned in full to the webview. The `get_auth_status` command only returns boolean presence flags (`has_github: true`, `has_google: true`, `google_has_refresh_token: true`).
+3. **Restricted File Permissions**:
+   On Unix systems, permissions are explicitly enforced using `chmod 600`.
+4. **Git Isolation**:
+   All token files (`credentials.json`, `client_secret*.json`, `.env`, `.env.*`) are strictly ignored in [`.gitignore`](../.gitignore).
 
 ---
 
 ## Revoking Credentials
 
 ### GitHub
-- In WidKanban Settings, click **"Disconnect GitHub"** to clear the stored token.
-- You should also delete the PAT from GitHub at https://github.com/settings/tokens to fully revoke API access.
+- In WidKanban Settings, click the **Trash icon** next to GitHub to delete the token from local storage.
+- To revoke the token entirely on GitHub's servers, delete it from [GitHub Personal Access Tokens](https://github.com/settings/tokens).
 
 ### Google Tasks
-- In WidKanban Settings, click **"Disconnect Google Tasks"**.
-- To fully revoke, visit https://myaccount.google.com/permissions and remove WidKanban from the list of connected apps.
+- In WidKanban Settings, click the **Trash icon** next to Google Tasks.
+- To revoke WidKanban's OAuth grant entirely, visit [Google Account Permissions](https://myaccount.google.com/permissions) and remove WidKanban.
 
 ---
 
 ## Related Documentation
 
-- [Project README](../README.md): High-level overview, key features, and quick start.
-- [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
-- [Architecture & System Design](architecture.md): Security model, data schemas, and Tauri IPC bridge.
-- [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
-- [Roadmap & Feature Checklist](todos.md): Feature checklist and development roadmap.
+- 🐙 **[GitHub Setup Guide](github-setup.md)**: Visual screenshot walkthrough for GitHub PAT generation.
+- 🔵 **[Google Tasks Setup Guide](google-setup.md)**: Visual screenshot walkthrough for Google Cloud OAuth loopback setup.
+- 🤝 **[Contributor Guide](../CONTRIBUTORS.md)**: Development workflows, testing guidelines, and PR checklists.
+- 🏛️ **[Architecture & System Design](architecture.md)**: Security architecture and Tauri IPC bridge.
+- 🛠️ **[Developer Notes](notes.md)**: Environment setup, frameless window behavior, and MSVC notes.

@@ -23,6 +23,8 @@ bin/
 .env.local
 .env.*.local
 *.pem
+client_secret*.json
+credentials.json
 
 # Editor & OS files
 .vscode/*

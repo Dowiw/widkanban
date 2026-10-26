@@ -23,6 +23,8 @@ import {
   GitFork,
   Users
 } from 'lucide-react';
+import { MarkdownViewer } from './MarkdownViewer';
+import { safeOpenUrl } from '../utils/openUrl';
 
 interface TaskCardProps {
   task: UnifiedTask;
@@ -100,7 +102,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
   const handleOpenUrl = (e: React.MouseEvent, urlToOpen?: string) => {
     e.stopPropagation();
-    window.open(urlToOpen || task.url, '_blank');
+    safeOpenUrl(urlToOpen || task.url);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -419,12 +421,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
             {/* PR Branch Comparison Chip */}
             {task.sourceMeta?.branchInfo && (
               <span
-                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-mono truncate max-w-[150px]"
+                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[9px] truncate max-w-[150px]"
                 title={`Comparing ${task.sourceMeta.branchInfo.headRef} into ${task.sourceMeta.branchInfo.baseRef}`}
               >
                 <GitBranch className="h-2.5 w-2.5 text-purple-600 shrink-0" />
                 <span className="truncate">{task.sourceMeta.branchInfo.headRef}</span>
-                <span className="text-purple-400 font-sans">→</span>
+                <span className="text-purple-400">→</span>
                 <span className="truncate">{task.sourceMeta.branchInfo.baseRef}</span>
               </span>
             )}
@@ -520,8 +522,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           {/* Provider Specific Details Header */}
           {!isGitHub && task.sourceMeta?.listId && (
             <div className="flex items-center justify-between text-[10px] text-slate-400">
-              <span>List: <strong className="text-slate-600">{task.sourceMeta.listTitle || 'Default'}</strong></span>
-              <span className="font-mono text-[9px] bg-slate-100 px-1 py-0.5 rounded">ID: {task.sourceMeta.listId}</span>
+              <span>List: <strong className="text-slate-600 dark:text-slate-300">{task.sourceMeta.listTitle || 'Default'}</strong></span>
+              <span className="text-[9px] bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">ID: {task.sourceMeta.listId}</span>
             </div>
           )}
 
@@ -532,31 +534,31 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 alt={task.sourceMeta.author.login}
                 className="h-3.5 w-3.5 rounded-full object-cover"
               />
-              <span>Opened by <strong className="text-slate-700">@{task.sourceMeta.author.login}</strong></span>
+              <span>Opened by <strong className="text-slate-700 dark:text-slate-300">@{task.sourceMeta.author.login}</strong></span>
             </div>
           )}
 
           {/* PR Branch Comparison Details */}
           {isGitHub && task.sourceMeta?.branchInfo && (
-            <div className="rounded-lg bg-purple-50/70 border border-purple-200/60 p-2 text-[10.5px] text-purple-900 space-y-1">
-              <div className="flex items-center justify-between font-mono text-[10px]">
+            <div className="rounded-lg bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200/60 dark:border-purple-800/60 p-2 text-[10.5px] text-purple-900 dark:text-purple-200 space-y-1">
+              <div className="flex items-center justify-between text-[10px]">
                 <span className="flex items-center space-x-1 truncate mr-1">
-                  <GitBranch className="h-3 w-3 text-purple-600 shrink-0" />
-                  <span className="font-semibold text-purple-800 truncate" title={task.sourceMeta.branchInfo.headRef}>
+                  <GitBranch className="h-3 w-3 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <span className="font-semibold text-purple-800 dark:text-purple-300 truncate" title={task.sourceMeta.branchInfo.headRef}>
                     {task.sourceMeta.branchInfo.headRef}
                   </span>
                   <span className="text-purple-400 shrink-0">into</span>
-                  <span className="font-semibold text-purple-800 truncate" title={task.sourceMeta.branchInfo.baseRef}>
+                  <span className="font-semibold text-purple-800 dark:text-purple-300 truncate" title={task.sourceMeta.branchInfo.baseRef}>
                     {task.sourceMeta.branchInfo.baseRef}
                   </span>
                 </span>
                 {task.sourceMeta.branchInfo.isDraft && (
-                  <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-sans font-bold shrink-0">
+                  <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[9px] font-bold shrink-0">
                     Draft PR
                   </span>
                 )}
               </div>
-              <div className="flex items-center justify-between text-[9.5px] text-purple-700/80 pt-1 border-t border-purple-200/40">
+              <div className="flex items-center justify-between text-[9.5px] text-purple-700/80 dark:text-purple-300/80 pt-1 border-t border-purple-200/40 dark:border-purple-800/40">
                 <span className="truncate">
                   {task.sourceMeta.branchInfo.isFork
                     ? `Fork: ${task.sourceMeta.branchInfo.headRepo}`
@@ -566,11 +568,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                   {task.sourceMeta.branchInfo.changedFiles !== undefined && (
                     <span>{task.sourceMeta.branchInfo.changedFiles} files · </span>
                   )}
-                  <span className="text-emerald-700 font-mono font-medium">
+                  <span className="text-emerald-700 dark:text-emerald-400 font-mono font-medium">
                     +{task.sourceMeta.branchInfo.additions || 0}
                   </span>
                   {' / '}
-                  <span className="text-rose-700 font-mono font-medium">
+                  <span className="text-rose-700 dark:text-rose-400 font-mono font-medium">
                     -{task.sourceMeta.branchInfo.deletions || 0}
                   </span>
                 </span>
@@ -580,8 +582,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
           {/* Formatted Notes / Markdown Body Snippet */}
           {(task.description || task.sourceMeta?.notes) && (
-            <div className="rounded-lg bg-slate-50/90 border border-slate-200/60 p-2 text-[11px] text-slate-700 max-h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text font-sans">
-              {task.description || task.sourceMeta?.notes}
+            <div className="rounded-lg bg-slate-50/90 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800 p-2 text-[11px] text-slate-700 dark:text-slate-200 leading-relaxed select-text">
+              <MarkdownViewer content={task.description || task.sourceMeta?.notes || ''} maxHeightClass="max-h-48" />
             </div>
           )}
 

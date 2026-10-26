@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -12,7 +14,22 @@ use tauri::{
 pub struct StoredCredentials {
     pub github_token: Option<String>,
     pub google_token: Option<String>,
+    #[serde(default)]
     pub microsoft_token: Option<String>,
+    #[serde(default)]
+    pub google_refresh_token: Option<String>,
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    #[serde(default)]
+    pub google_token_expiry: Option<u64>,
+    #[serde(default)]
+    pub github_disconnected: Option<bool>,
+    #[serde(default)]
+    pub google_disconnected: Option<bool>,
+    #[serde(default)]
+    pub microsoft_disconnected: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -20,6 +37,47 @@ pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
     pub has_microsoft: bool,
+    #[serde(default)]
+    pub github_from_env: bool,
+    #[serde(default)]
+    pub google_from_env: bool,
+    #[serde(default)]
+    pub google_has_refresh_token: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealth {
+    pub connected: bool,
+    pub rate_limit_remaining: Option<u32>,
+    pub rate_limit_limit: Option<u32>,
+    pub rate_limit_reset: Option<u64>,
+    pub token_expires_at: Option<String>,
+    pub is_expiring_soon: Option<bool>,
+    pub is_rate_limited: Option<bool>,
+    pub last_checked: Option<u64>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiHealthState {
+    pub github: ProviderHealth,
+    pub google: ProviderHealth,
+    #[serde(default)]
+    pub microsoft: Option<ProviderHealth>,
+}
+
+fn current_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn get_health_store() -> &'static Mutex<ApiHealthState> {
+    static STORE: std::sync::OnceLock<Mutex<ApiHealthState>> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(ApiHealthState::default()))
 }
 
 // ─── Provider Specific Detailed Models ──────────────────────────────────────
@@ -126,6 +184,8 @@ pub struct SourceMeta {
     pub percent_complete: Option<u8>,
     #[serde(rename = "submissionUrl")]
     pub submission_url: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -134,6 +194,8 @@ pub struct UnifiedTask {
     pub title: String,
     pub source: String,      // "github" | "google_tasks"
     pub status: String,      // "todo" | "in_progress" | "done"
+    #[serde(default)]
+    pub priority: Option<String>,
     pub url: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
@@ -413,7 +475,19 @@ fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::Path
     Ok(dir)
 }
 
-fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+fn get_env_credential(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(val) = std::env::var(key) {
+            let trimmed = val.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if let Ok(path) = get_credentials_path(app_handle) {
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(&path) {
@@ -424,6 +498,68 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
         }
     }
     StoredCredentials::default()
+}
+
+fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+    let mut creds = read_stored_credentials_file(app_handle);
+
+    // 1. GitHub: App-stored token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token exists
+    // and the user has not explicitly disconnected GitHub.
+    let has_stored_github = creds
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_github && creds.github_disconnected != Some(true) {
+        if let Some(gh) = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]) {
+            creds.github_token = Some(gh);
+        }
+    }
+
+    // 2. Google: App-stored token or refresh token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token or refresh token exists
+    // and the user has not explicitly disconnected Google.
+    let has_stored_google = creds
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || creds
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_google && creds.google_disconnected != Some(true) {
+        if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
+            creds.google_token = Some(gt);
+        }
+        if let Some(gr) = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]) {
+            creds.google_refresh_token = Some(gr);
+        }
+    }
+
+    // 3. Client ID & Secret: App-entered/stored takes precedence; fall back to .env if empty
+    let has_stored_cid = creds
+        .google_client_id
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_cid {
+        if let Some(cid) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]) {
+            creds.google_client_id = Some(cid);
+        }
+    }
+
+    let has_stored_sec = creds
+        .google_client_secret
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_sec {
+        if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
+            creds.google_client_secret = Some(sec);
+        }
+    }
+
+    creds
 }
 
 fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
@@ -534,10 +670,436 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, String> {
+    let creds = read_credentials(&app_handle);
+    let mut health = get_health_store().lock().map(|h| h.clone()).unwrap_or_default();
+
+    if let Some(token) = creds.github_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let now = current_epoch_seconds();
+        let should_check = health.github.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get("https://api.github.com/rate_limit")
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                {
+                    let rate_limit_limit = resp
+                        .headers()
+                        .get("x-ratelimit-limit")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_remaining = resp
+                        .headers()
+                        .get("x-ratelimit-remaining")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_reset = resp
+                        .headers()
+                        .get("x-ratelimit-reset")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok());
+                    let token_expires_at = resp
+                        .headers()
+                        .get("github-authentication-token-expiration")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+                    let is_success = resp.status().is_success();
+                    let status_code = resp.status().as_u16();
+
+                    let updated = ProviderHealth {
+                        connected: is_success,
+                        rate_limit_remaining,
+                        rate_limit_limit,
+                        rate_limit_reset,
+                        token_expires_at,
+                        is_expiring_soon: Some(false),
+                        is_rate_limited: Some(is_rate_limited),
+                        last_checked: Some(now),
+                        error_message: if is_success {
+                            None
+                        } else if status_code == 401 {
+                            Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
+                        } else if status_code == 403 && is_rate_limited {
+                            Some("GitHub API rate limit exceeded".to_string())
+                        } else {
+                            Some(format!("HTTP {}", resp.status()))
+                        },
+                    };
+
+                    if let Ok(mut store) = get_health_store().lock() {
+                        store.github = updated.clone();
+                    }
+                    health.github = updated;
+                }
+            }
+        }
+    } else {
+        health.github.connected = false;
+        health.github.error_message = None;
+    }
+
+    if let Some(token) = creds.google_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let now = current_epoch_seconds();
+        let should_check = health.google.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get(format!("https://oauth2.googleapis.com/tokeninfo?access_token={}", token))
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(info) = resp.json::<serde_json::Value>().await {
+                            let expires_in = info
+                                .get("expires_in")
+                                .and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| v.as_u64()));
+
+                            let token_expires_at = expires_in.map(|secs| chrono_epoch_to_iso(now + secs));
+                            let is_expiring_soon = expires_in.map(|secs| secs < 300).unwrap_or(false);
+
+                            let updated = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at,
+                                is_expiring_soon: Some(is_expiring_soon),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+
+                            if let Ok(mut store) = get_health_store().lock() {
+                                store.google = updated.clone();
+                            }
+                            health.google = updated;
+                        }
+                    } else {
+                        let is_invalid = resp.status().as_u16() == 400 || resp.status().as_u16() == 401;
+                        let updated = ProviderHealth {
+                            connected: false,
+                            rate_limit_remaining: None,
+                            rate_limit_limit: None,
+                            rate_limit_reset: None,
+                            token_expires_at: Some("Expired".to_string()),
+                            is_expiring_soon: Some(true),
+                            is_rate_limited: Some(false),
+                            last_checked: Some(now),
+                            error_message: if is_invalid {
+                                Some("Google OAuth access token expired or revoked".to_string())
+                            } else {
+                                Some(format!("HTTP {}", resp.status()))
+                            },
+                        };
+
+                        if let Ok(mut store) = get_health_store().lock() {
+                            store.google = updated.clone();
+                        }
+                        health.google = updated;
+                    }
+                }
+            }
+        }
+    } else if creds.google_refresh_token.is_some() {
+        health.google.connected = false;
+        if health.google.error_message.is_none() {
+            health.google.error_message = Some("Google access token expired. Sync to refresh.".to_string());
+        }
+    } else {
+        health.google.connected = false;
+        health.google.error_message = None;
+    }
+
+    Ok(health)
+}
+
+#[tauri::command]
+fn send_desktop_notification(title: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_title = title.replace('\'', "''").replace('"', "`\"");
+        let escaped_body = body.replace('\'', "''").replace('"', "`\"");
+        let script = format!(
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
+             $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); \
+             $textNodes = $template.GetElementsByTagName('text'); \
+             $textNodes.Item(0).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $textNodes.Item(1).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('WidKanban'); \
+             $notification = [Windows.UI.Notifications.ToastNotification]::new($template); \
+             $notifier.Show($notification);",
+            escaped_title,
+            escaped_body
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("notify-send")
+            .args([&title, &body])
+            .spawn();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn toggle_always_on_top(window: tauri::Window) -> Result<bool, String> {
     let is_on_top = window.is_always_on_top().unwrap_or(false);
     window.set_always_on_top(!is_on_top).map_err(|e| e.to_string())?;
     Ok(!is_on_top)
+}
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn SetWindowPos(
+        hwnd: isize,
+        hwnd_insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
+}
+
+#[tauri::command]
+fn set_window_pin_mode(window: tauri::Window, mode: String) -> Result<String, String> {
+    match mode.as_str() {
+        "always-on-top" => {
+            window.set_always_on_top(true).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            Ok("always-on-top".to_string())
+        }
+        "desktop-layer" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(h) = window.hwnd() {
+                    let raw = h.0 as isize;
+                    unsafe {
+                        SetWindowPos(raw, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                    }
+                }
+            }
+            Ok("desktop-layer".to_string())
+        }
+        "normal" | "unpinned" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(true).map_err(|e| e.to_string())?;
+            Ok("normal".to_string())
+        }
+        other => Err(format!("Unknown pin mode: {}", other)),
+    }
+}
+
+pub fn build_linux_desktop_entry(exe_path: &str, start_minimized: bool) -> String {
+    let exec_cmd = if start_minimized {
+        format!("{} --minimized", exe_path)
+    } else {
+        exe_path.to_string()
+    };
+    format!(
+        "[Desktop Entry]\nType=Application\nName=WidKanban\nComment=Lightweight desktop Kanban widget\nExec={}\nTerminal=false\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n",
+        exec_cmd
+    )
+}
+
+pub fn build_macos_plist(exe_path: &str, start_minimized: bool) -> String {
+    let arg_element = if start_minimized {
+        "        <string>--minimized</string>\n"
+    } else {
+        ""
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.widkanban.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+{}    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+"#,
+        exe_path, arg_element
+    )
+}
+
+#[tauri::command]
+fn is_autostart_enabled(_app_handle: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = r#"$r = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if (-not $r) { 'false' } else { $a = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if ($null -ne $a -and $a.Length -gt 0 -and ($a[0] -band 1)) { 'false' } else { 'true' } }"#;
+
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        if let Ok(out) = cmd.output() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            return Ok(s == "true");
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("X-GNOME-Autostart-enabled=false") || content.contains("Hidden=true") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("<key>Disabled</key>") && content.contains("<true/>") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn enable_autostart(_app_handle: tauri::AppHandle, start_minimized: bool) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| format!("Failed to get current executable path: {}", e))?;
+    let exe_path = current_exe.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let val = if start_minimized {
+            format!("\"{}\" --minimized", exe_path)
+        } else {
+            format!("\"{}\"", exe_path)
+        };
+        let ps_cmd = format!(
+            "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -Value '{}' -Type String; \
+             try {{ Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -Value ([byte[]](0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)) -Type Binary -ErrorAction Stop }} catch {{}}",
+            val.replace("'", "''")
+        );
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to execute powershell registry command: {}", e))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Registry autostart enable failed: {}", err));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let autostart_dir = std::path::PathBuf::from(&home).join(".config/autostart");
+        let _ = std::fs::create_dir_all(&autostart_dir);
+        let file_path = autostart_dir.join("widkanban.desktop");
+        let content = build_linux_desktop_entry(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write autostart desktop file: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let launch_dir = std::path::PathBuf::from(&home).join("Library/LaunchAgents");
+        let _ = std::fs::create_dir_all(&launch_dir);
+        let file_path = launch_dir.join("com.widkanban.desktop.plist");
+        let content = build_macos_plist(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write macOS launch agent plist: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err("Unsupported operating system for autostart".to_string())
+    }
+}
+
+#[tauri::command]
+fn disable_autostart(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = "try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; \
+                      try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; exit 0";
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let _ = cmd.output();
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -552,11 +1114,52 @@ fn close_app(app_handle: tauri::AppHandle) {
 
 #[tauri::command]
 fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
+    let stored = read_stored_credentials_file(&app_handle);
     let creds = read_credentials(&app_handle);
+
+    let has_stored_github = stored
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    let has_stored_google = stored
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || stored
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    let env_github = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]);
+    let env_google = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]);
+    let env_google_refresh = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]);
+
+    let has_github = creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_google_token = creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_refresh_token = creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_google = has_google_token || has_refresh_token;
+
+    // Sourced from env ONLY if NOT stored in credentials.json, NOT explicitly disconnected, and env provided the active credential
+    let github_from_env = !has_stored_github
+        && stored.github_disconnected != Some(true)
+        && env_github.is_some()
+        && has_github;
+
+    let google_from_env = !has_stored_google
+        && stored.google_disconnected != Some(true)
+        && (env_google.is_some() || env_google_refresh.is_some())
+        && has_google;
+
+    let has_microsoft = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
     Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_github,
+        has_google,
+        has_microsoft,
+        github_from_env,
+        google_from_env,
+        google_has_refresh_token: has_refresh_token,
     })
 }
 
@@ -565,40 +1168,89 @@ fn save_credentials(
     app_handle: tauri::AppHandle,
     github_token: Option<String>,
     google_token: Option<String>,
+    google_refresh_token: Option<String>,
+    google_client_id: Option<String>,
+    google_client_secret: Option<String>,
     microsoft_token: Option<String>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
-    if let Some(gh) = github_token {
+    let mut creds = read_stored_credentials_file(&app_handle);
+    if let Some(gh) = github_token.as_ref() {
         let trimmed = gh.trim().to_string();
         if trimmed.is_empty() {
             creds.github_token = None;
+            creds.github_disconnected = Some(true);
         } else {
             creds.github_token = Some(trimmed);
+            creds.github_disconnected = Some(false);
         }
     }
-    if let Some(gt) = google_token {
+    if let Some(gt) = google_token.as_ref() {
         let trimmed = gt.trim().to_string();
         if trimmed.is_empty() {
             creds.google_token = None;
+            creds.google_disconnected = Some(true);
         } else {
             creds.google_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
         }
     }
-    if let Some(ms) = microsoft_token {
+    if let Some(gr) = google_refresh_token.as_ref() {
+        let trimmed = gr.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_refresh_token = None;
+            creds.google_disconnected = Some(true);
+        } else {
+            creds.google_refresh_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
+        }
+    }
+    if let Some(cid) = google_client_id.as_ref() {
+        let trimmed = cid.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_id = None;
+        } else {
+            creds.google_client_id = Some(trimmed);
+        }
+    }
+    if let Some(cs) = google_client_secret.as_ref() {
+        let trimmed = cs.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_secret = None;
+        } else {
+            creds.google_client_secret = Some(trimmed);
+        }
+    }
+    if let Some(ms) = microsoft_token.as_ref() {
         let trimmed = ms.trim().to_string();
         if trimmed.is_empty() {
             creds.microsoft_token = None;
+            creds.microsoft_disconnected = Some(true);
         } else {
             creds.microsoft_token = Some(trimmed);
+            creds.microsoft_disconnected = Some(false);
         }
     }
     write_credentials(&app_handle, &creds)?;
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    let full_creds = read_credentials(&app_handle);
+    if let Ok(mut health) = get_health_store().lock() {
+        if github_token.is_some() {
+            health.github.connected = full_creds.github_token.is_some();
+            health.github.error_message = None;
+        }
+        if google_token.is_some() || google_refresh_token.is_some() {
+            health.google.connected = full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some();
+            health.google.error_message = None;
+        }
+        if microsoft_token.is_some() {
+            health.microsoft = Some(ProviderHealth {
+                connected: full_creds.microsoft_token.is_some(),
+                ..Default::default()
+            });
+        }
+    }
+
+    get_auth_status(app_handle)
 }
 
 #[tauri::command]
@@ -606,35 +1258,488 @@ fn clear_credentials(
     app_handle: tauri::AppHandle,
     provider: Option<String>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
+    let mut creds = read_stored_credentials_file(&app_handle);
     match provider.as_deref() {
-        Some("github") => creds.github_token = None,
-        Some("google") => creds.google_token = None,
-        Some("microsoft") => creds.microsoft_token = None,
+        Some("github") => {
+            creds.github_token = None;
+            creds.github_disconnected = Some(true);
+        }
+        Some("google") => {
+            creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
+            creds.google_disconnected = Some(true);
+        }
+        Some("microsoft") => {
+            creds.microsoft_token = None;
+            creds.microsoft_disconnected = Some(true);
+        }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
             creds.microsoft_token = None;
+            creds.github_disconnected = Some(true);
+            creds.google_disconnected = Some(true);
+            creds.microsoft_disconnected = Some(true);
         }
     }
     write_credentials(&app_handle, &creds)?;
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    let full_creds = read_credentials(&app_handle);
+    if let Ok(mut health) = get_health_store().lock() {
+        if provider.as_deref() == Some("github") || provider.is_none() {
+            health.github = ProviderHealth {
+                connected: full_creds.github_token.is_some(),
+                ..Default::default()
+            };
+        }
+        if provider.as_deref() == Some("google") || provider.is_none() {
+            health.google = ProviderHealth {
+                connected: full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some(),
+                ..Default::default()
+            };
+        }
+        if provider.as_deref() == Some("microsoft") || provider.is_none() {
+            health.microsoft = Some(ProviderHealth {
+                connected: full_creds.microsoft_token.is_some(),
+                ..Default::default()
+            });
+        }
+    }
+
+    get_auth_status(app_handle)
+}
+
+/// Ensures that a valid Google access token is available.
+/// If the current access token is expired (or will expire in < 5 minutes)
+/// and a refresh token is available, automatically requests a new access token
+/// from Google's OAuth 2.0 token endpoint and updates stored credentials.
+async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let creds = read_credentials(app_handle);
+    let now = current_epoch_seconds();
+
+    // Check if current token is still valid (has > 300s remaining)
+    let is_still_valid = match (creds.google_token.as_ref(), creds.google_token_expiry) {
+        (Some(tok), Some(expiry)) => !tok.trim().is_empty() && expiry > now + 300,
+        (Some(tok), None) => !tok.trim().is_empty(), // Legacy or manual token without known expiry
+        _ => false,
+    };
+
+    if is_still_valid {
+        if let Some(tok) = creds.google_token {
+            return Ok(tok);
+        }
+    }
+
+    // If we have a refresh token, attempt silent background refresh
+    if let Some(refresh_tok) = creds.google_refresh_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let client_id = creds.google_client_id.as_deref().unwrap_or("");
+        let client_secret = creds.google_client_secret.as_deref().unwrap_or("");
+
+        if !client_id.is_empty() {
+            let client = reqwest::Client::builder()
+                .use_native_tls()
+                .build()
+                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+            let mut params = vec![
+                ("client_id", client_id),
+                ("refresh_token", refresh_tok.as_str()),
+                ("grant_type", "refresh_token"),
+            ];
+            if !client_secret.is_empty() {
+                params.push(("client_secret", client_secret));
+            }
+
+            let resp = client
+                .post("https://oauth2.googleapis.com/token")
+                .form(&params)
+                .header("User-Agent", "WidKanban-Desktop")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send token refresh request: {}", e))?;
+
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(new_access_token) = data.get("access_token").and_then(|v| v.as_str()) {
+                        let expires_in = data
+                            .get("expires_in")
+                            .and_then(|v| v.as_u64())
+                            .or_else(|| data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+                            .unwrap_or(3600);
+
+                        let mut stored = read_stored_credentials_file(app_handle);
+                        stored.google_token = Some(new_access_token.to_string());
+                        stored.google_token_expiry = Some(now + expires_in);
+                        let _ = write_credentials(app_handle, &stored);
+
+                        // Update in-memory health
+                        if let Ok(mut health) = get_health_store().lock() {
+                            health.google = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+                                is_expiring_soon: Some(false),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+                        }
+
+                        return Ok(new_access_token.to_string());
+                    }
+                }
+            } else {
+                let err_body = resp.text().await.unwrap_or_default();
+                let is_deleted_or_revoked = err_body.contains("deleted_client")
+                    || err_body.contains("invalid_grant")
+                    || err_body.contains("invalid_client")
+                    || err_body.contains("unauthorized_client");
+
+                // Invalidate stored access token so we never re-use a stale dead token
+                let mut stored = read_stored_credentials_file(app_handle);
+                stored.google_token = None;
+                stored.google_token_expiry = None;
+                let _ = write_credentials(app_handle, &stored);
+
+                let error_msg = if is_deleted_or_revoked {
+                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
+                } else {
+                    format!("Google token refresh failed: {}", err_body)
+                };
+
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.google.connected = false;
+                    health.google.token_expires_at = Some("Expired".to_string());
+                    health.google.is_expiring_soon = Some(true);
+                    health.google.last_checked = Some(now);
+                    health.google.error_message = Some(error_msg.clone());
+                }
+                return Err(error_msg);
+            }
+        }
+    }
+
+    // Fall back to existing token if present
+    if let Some(tok) = creds.google_token {
+        if !tok.trim().is_empty() {
+            return Ok(tok);
+        }
+    }
+
+    Err("Google Tasks token not configured or expired. Please sign in with Google or enter a valid token in Settings.".to_string())
+}
+
+/// Generates a modern, responsive HTML page served by the local loopback OAuth server
+static OAUTH_VERIFIED_HTML: &str = include_str!("../../public/oauth-verified.html");
+static OAUTH_FAILED_HTML: &str = include_str!("../../public/oauth-failed.html");
+
+/// Generates a modern, responsive HTML page served by the local loopback OAuth server
+/// to confirm successful authentication or explain an authorization failure.
+fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> String {
+    if is_success {
+        OAUTH_VERIFIED_HTML.to_string()
+    } else {
+        let raw_error = error_msg.unwrap_or("Access was denied or the request was cancelled.");
+        let sanitized_error = raw_error
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+
+        let is_denied = raw_error.contains("access_denied");
+        let display_desc = if is_denied {
+            "You cancelled the Google sign-in request in your browser."
+        } else {
+            "Google authorization was not completed. Please check your OAuth Client settings in Settings."
+        };
+
+        OAUTH_FAILED_HTML
+            .replace("{{DESC}}", display_desc)
+            .replace("{{DETAIL}}", &sanitized_error)
+    }
+}
+
+/// Opens the OAuth callback page (verified or failed) in the default system browser for dev preview.
+/// Gated to debug mode; returns an error in production / release builds.
+#[tauri::command]
+fn open_oauth_preview(is_success: bool, error_msg: Option<String>) -> Result<(), String> {
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (is_success, error_msg);
+        return Err("OAuth preview is disabled in production builds.".to_string());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let url = if is_success {
+            "http://localhost:1420/oauth-verified.html".to_string()
+        } else {
+            match error_msg {
+                Some(err) if !err.trim().is_empty() => {
+                    format!("http://localhost:1420/oauth-failed.html?error={}", url_encode(&err))
+                }
+                _ => "http://localhost:1420/oauth-failed.html".to_string(),
+            }
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!("Start-Process '{}'", url.replace('\'', "''"));
+            let _ = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        }
+        Ok(())
+    }
+}
+
+/// Start an in-app "Sign in with Google" OAuth loopback flow.
+/// Listens on an ephemeral localhost port, launches the browser, captures the auth code,
+/// exchanges it for both access and refresh tokens, and saves them securely in native credentials.
+#[tauri::command]
+async fn start_google_oauth_flow(
+    app_handle: tauri::AppHandle,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> Result<AuthStatus, String> {
+    let creds = read_credentials(&app_handle);
+    let resolved_client_id = client_id
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_id)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]))
+        .ok_or_else(|| "Google Client ID is required to start the OAuth flow. Please enter your OAuth Client ID in Settings.".to_string())?;
+
+    let resolved_client_secret = client_secret
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_secret)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]))
+        .unwrap_or_default();
+
+    // 1. Bind TCP listener on ephemeral port (127.0.0.1:0)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to start local OAuth loopback server: {}", e))?;
+
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local port: {}", e))?
+        .port();
+
+    let redirect_uri = format!("http://127.0.0.1:{}", port);
+    let state = format!("widkanban_{}", current_epoch_seconds());
+
+    // 2. Build Google authorization URL
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?\
+        client_id={}&\
+        redirect_uri={}&\
+        response_type=code&\
+        scope={}&\
+        access_type=offline&\
+        prompt=consent&\
+        state={}",
+        url_encode(&resolved_client_id),
+        url_encode(&redirect_uri),
+        url_encode("https://www.googleapis.com/auth/tasks"),
+        url_encode(&state),
+    );
+
+    // 3. Open browser
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_url = auth_url.replace('\'', "''");
+        let script = format!("Start-Process '{}'", escaped_url);
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    }
+
+    // 4. Wait for incoming redirect with 120-second timeout
+    let timeout_duration = std::time::Duration::from_secs(120);
+    let code = match tokio::time::timeout(timeout_duration, async {
+        loop {
+            let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            let mut buf = [0u8; 4096];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if let Some(first_line) = req_str.lines().next() {
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "GET" {
+                    let path = parts[1];
+                    let query = path.split('?').nth(1).unwrap_or("");
+                    let mut code_val: Option<String> = None;
+                    let mut error_val: Option<String> = None;
+
+                    for param in query.split('&') {
+                        let mut kv = param.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" {
+                                code_val = Some(v.to_string());
+                            } else if k == "error" {
+                                error_val = Some(v.to_string());
+                            }
+                        }
+                    }
+
+                    let (html_body, status_line) = if code_val.is_some() {
+                        (
+                            render_oauth_callback_html(true, None),
+                            "HTTP/1.1 200 OK",
+                        )
+                    } else {
+                        (
+                            render_oauth_callback_html(false, error_val.as_deref()),
+                            "HTTP/1.1 400 Bad Request",
+                        )
+                    };
+
+                    let html_bytes = html_body.as_bytes();
+                    let response = format!(
+                        "{}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        html_bytes.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+
+                    if let Some(err) = error_val {
+                        return Err(format!("Google OAuth authorization error: {}", err));
+                    }
+                    if let Some(c) = code_val {
+                        return Ok(c);
+                    }
+                }
+            }
+        }
+    }).await {
+        Ok(res) => res?,
+        Err(_) => return Err("Google OAuth flow timed out (2 minutes elapsed). Please try again.".to_string()),
+    };
+
+    // 5. Exchange code for access & refresh tokens
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut token_params = vec![
+        ("client_id", resolved_client_id.as_str()),
+        ("code", code.as_str()),
+        ("grant_type", "authorization_code"),
+        ("redirect_uri", redirect_uri.as_str()),
+    ];
+    if !resolved_client_secret.is_empty() {
+        token_params.push(("client_secret", resolved_client_secret.as_str()));
+    }
+
+    let token_resp = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&token_params)
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to exchange authorization code: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        let err_body = token_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to retrieve Google tokens: {}", err_body));
+    }
+
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = token_data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Google token response did not contain an access_token".to_string())?
+        .to_string();
+
+    let refresh_token = token_data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let expires_in = token_data
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .or_else(|| token_data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(3600);
+
+    let now = current_epoch_seconds();
+
+    // 6. Save in native OS credentials
+    let mut stored = read_stored_credentials_file(&app_handle);
+    stored.google_token = Some(access_token);
+    if refresh_token.is_some() {
+        stored.google_refresh_token = refresh_token;
+    }
+    stored.google_client_id = Some(resolved_client_id);
+    if !resolved_client_secret.is_empty() {
+        stored.google_client_secret = Some(resolved_client_secret);
+    }
+    stored.google_token_expiry = Some(now + expires_in);
+    stored.google_disconnected = Some(false);
+    write_credentials(&app_handle, &stored)?;
+
+    // 7. Update health state
+    if let Ok(mut health) = get_health_store().lock() {
+        health.google = ProviderHealth {
+            connected: true,
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: None,
+        };
+    }
+
+    get_auth_status(app_handle)
 }
 
 /// Fetch all Google Tasks across all task lists for the authenticated user,
 /// resolving subtask hierarchy and deep links.
 #[tauri::command]
 async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+    let mut token = match ensure_valid_google_token(&app_handle).await {
+        Ok(t) => t,
+        Err(e) => {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.google.connected = false;
+                health.google.error_message = Some(e.clone());
+                health.google.last_checked = Some(current_epoch_seconds());
+            }
+            return Err(e);
+        }
+    };
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -642,12 +1747,86 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
     // 1. Fetch all task lists
-    let lists_resp = client
+    let mut lists_resp = client
         .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch task lists: {}", e))?;
+        .map_err(|e| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.google.connected = false;
+                health.google.error_message = Some(format!("Network error: {}", e));
+                health.google.last_checked = Some(current_epoch_seconds());
+            }
+            format!("Failed to fetch task lists: {}", e)
+        })?;
+
+    // If 401 Unauthorized, the access token is dead or revoked.
+    // Invalidate cached token immediately and attempt silent refresh.
+    if lists_resp.status().as_u16() == 401 {
+        let mut stored = read_stored_credentials_file(&app_handle);
+        stored.google_token = None;
+        stored.google_token_expiry = None;
+        let _ = write_credentials(&app_handle, &stored);
+
+        match ensure_valid_google_token(&app_handle).await {
+            Ok(new_token) => {
+                token = new_token;
+                lists_resp = client
+                    .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to fetch task lists after refresh: {}", e))?;
+            }
+            Err(refresh_err) => {
+                let is_deleted = refresh_err.contains("deleted_client")
+                    || refresh_err.contains("invalid_grant")
+                    || refresh_err.contains("invalid_client")
+                    || refresh_err.contains("credentials deleted or revoked");
+                let err_msg = if is_deleted {
+                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
+                } else {
+                    format!("Google authentication failed: {}", refresh_err)
+                };
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.google.connected = false;
+                    health.google.token_expires_at = Some("Expired".to_string());
+                    health.google.is_expiring_soon = Some(true);
+                    health.google.last_checked = Some(current_epoch_seconds());
+                    health.google.error_message = Some(err_msg.clone());
+                }
+                return Err(err_msg);
+            }
+        }
+    }
+
+    let lists_status = lists_resp.status();
+    let now = current_epoch_seconds();
+    if let Ok(mut health) = get_health_store().lock() {
+        let is_unauthorized = lists_status.as_u16() == 401;
+        health.google = ProviderHealth {
+            connected: lists_status.is_success(),
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: if is_unauthorized {
+                Some("Expired".to_string())
+            } else {
+                health.google.token_expires_at.clone()
+            },
+            is_expiring_soon: Some(is_unauthorized),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: if lists_status.is_success() {
+                None
+            } else if is_unauthorized {
+                Some("Google token expired or revoked (401 Unauthorized)".to_string())
+            } else {
+                Some(format!("HTTP {}", lists_status))
+            },
+        };
+    }
 
     if !lists_resp.status().is_success() {
         let status = lists_resp.status();
@@ -770,6 +1949,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title,
             source: "google_tasks".to_string(),
             status,
+            priority: None,
             url,
             updated_at,
             description: task.notes.clone(),
@@ -798,7 +1978,13 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
     let token = creds
         .github_token
         .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
+        .ok_or_else(|| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.github.connected = false;
+                health.github.error_message = Some("GitHub token not configured".to_string());
+            }
+            "GitHub token not configured".to_string()
+        })?;
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -812,7 +1998,61 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch GitHub issues: {}", e))?;
+        .map_err(|e| {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.github.connected = false;
+                health.github.error_message = Some(format!("Network error: {}", e));
+            }
+            format!("Failed to fetch GitHub issues: {}", e)
+        })?;
+
+    let rate_limit_limit = resp
+        .headers()
+        .get("x-ratelimit-limit")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+    let rate_limit_remaining = resp
+        .headers()
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+    let rate_limit_reset = resp
+        .headers()
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    let token_expires_at = resp
+        .headers()
+        .get("github-authentication-token-expiration")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+    let now = current_epoch_seconds();
+    let is_success = resp.status().is_success();
+    let status_code = resp.status().as_u16();
+
+    if let Ok(mut health) = get_health_store().lock() {
+        health.github = ProviderHealth {
+            connected: is_success,
+            rate_limit_remaining,
+            rate_limit_limit,
+            rate_limit_reset,
+            token_expires_at,
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(is_rate_limited),
+            last_checked: Some(now),
+            error_message: if is_success {
+                None
+            } else if status_code == 401 {
+                Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
+            } else if status_code == 403 && is_rate_limited {
+                Some("GitHub API rate limit exceeded".to_string())
+            } else {
+                Some(format!("HTTP {}", resp.status()))
+            },
+        };
+    }
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -927,6 +2167,7 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             title: issue.title,
             source: "github".to_string(),
             status,
+            priority: None,
             url: issue.html_url,
             updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
             description: issue.body,
@@ -956,11 +2197,7 @@ async fn update_google_task(
     list_id: String,
     new_status: String,
 ) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+    let token = ensure_valid_google_token(&app_handle).await?;
 
     let google_status = task_status_to_google_status(&new_status);
     let payload = GTaskPatchPayload { status: google_status };
@@ -1090,6 +2327,7 @@ async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<Unifi
                                         title,
                                         source: "microsoft_teams".to_string(),
                                         status,
+                                        priority: None,
                                         url: web_url,
                                         updated_at: chrono_now_iso(),
                                         description: task.body.and_then(|b| b.content),
@@ -1138,6 +2376,7 @@ async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<Unifi
                         title,
                         source: "microsoft_teams".to_string(),
                         status,
+                        priority: None,
                         url: "https://tasks.office.com/".to_string(),
                         updated_at: chrono_now_iso(),
                         description: None,
@@ -1179,6 +2418,7 @@ async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<Unifi
                         title,
                         source: "microsoft_teams".to_string(),
                         status,
+                        priority: None,
                         url: web_url.clone(),
                         updated_at: chrono_now_iso(),
                         description: assignment.instructions.and_then(|i| i.content),
@@ -1732,6 +2972,11 @@ async fn delete_github_issue_permanently(
     Ok(())
 }
 
+fn chrono_epoch_to_iso(secs: u64) -> String {
+    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+}
+
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
 fn chrono_now_iso() -> String {
@@ -1740,9 +2985,7 @@ fn chrono_now_iso() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // Basic ISO-8601 formatter (seconds precision, UTC)
-    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+    chrono_epoch_to_iso(secs)
 }
 
 fn unix_to_ymd_hms(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
@@ -1816,20 +3059,31 @@ fn reset_window_geometry(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load developer environment variables from .env / .env.local
+    let _ = dotenvy::dotenv();
+    let _ = dotenvy::from_filename(".env.local");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_api_health,
+            send_desktop_notification,
             toggle_always_on_top,
+            set_window_pin_mode,
             minimize_window,
             close_app,
             set_window_resizable,
             set_window_size,
             reset_window_geometry,
+            is_autostart_enabled,
+            enable_autostart,
+            disable_autostart,
             get_auth_status,
             save_credentials,
             clear_credentials,
+            start_google_oauth_flow,
             fetch_google_tasks,
             fetch_github_tasks,
             fetch_microsoft_tasks,
@@ -1839,13 +3093,23 @@ pub fn run() {
             update_github_issue_labels,
             close_github_issue,
             delete_github_issue_permanently,
+            open_oauth_preview,
         ])
         .setup(|app| {
+            let is_minimized_arg = std::env::args().any(|arg| arg == "--minimized" || arg == "--hidden");
+            if is_minimized_arg {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
-            let pin_i = MenuItem::with_id(app, "pin", "Toggle Always on Top", true, None::<&str>)?;
+            let pin_top_i = MenuItem::with_id(app, "pin_top", "Pin: Always on Top", true, None::<&str>)?;
+            let pin_desk_i = MenuItem::with_id(app, "pin_desktop", "Pin: Desktop Layer", true, None::<&str>)?;
+            let unpin_i = MenuItem::with_id(app, "unpin", "Unpin (Enable Resizing)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit WidKanban", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&toggle_i, &pin_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&toggle_i, &pin_top_i, &pin_desk_i, &unpin_i, &quit_i])?;
 
             let mut builder = TrayIconBuilder::new()
                 .menu(&menu)
@@ -1881,10 +3145,37 @@ pub fn run() {
                             }
                         }
                     }
+                    "pin_top" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(true);
+                            let _ = window.set_resizable(false);
+                        }
+                    }
+                    "pin_desktop" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(false);
+                            #[cfg(target_os = "windows")]
+                            {
+                                if let Ok(h) = window.hwnd() {
+                                    unsafe {
+                                        SetWindowPos(h.0 as isize, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "unpin" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(true);
+                        }
+                    }
                     "pin" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let is_on_top = window.is_always_on_top().unwrap_or(false);
                             let _ = window.set_always_on_top(!is_on_top);
+                            let _ = window.set_resizable(is_on_top);
                         }
                     }
                     "quit" => {
@@ -1927,6 +3218,13 @@ mod tests {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
             microsoft_token: Some("eyJ0eXAi...".to_string()),
+            google_refresh_token: Some("1//refresh_token_test".to_string()),
+            google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
+            google_client_secret: Some("GOCSPX-secret".to_string()),
+            google_token_expiry: Some(1792615000),
+            github_disconnected: Some(false),
+            google_disconnected: Some(false),
+            microsoft_disconnected: Some(false),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -1941,15 +3239,101 @@ mod tests {
             github_token: Some("ghp_test123".to_string()),
             google_token: Some("   ".to_string()),
             microsoft_token: Some("ms_token_valid".to_string()),
+            google_refresh_token: Some("1//valid_refresh".to_string()),
+            google_client_id: None,
+            google_client_secret: None,
+            google_token_expiry: None,
+            github_disconnected: None,
+            google_disconnected: None,
+            microsoft_disconnected: None,
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-            has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_google: creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            github_from_env: false,
+            google_from_env: false,
+            google_has_refresh_token: true,
         };
         assert!(status.has_github);
-        assert!(!status.has_google);
+        assert!(status.has_google);
         assert!(status.has_microsoft);
+        assert!(status.google_has_refresh_token);
+        assert!(!status.github_from_env);
+        assert!(!status.google_from_env);
+    }
+
+    #[test]
+    fn test_credential_hierarchy_logic() {
+        // Case 1: Stored credentials exist -> env is ignored, from_env is false
+        let stored = StoredCredentials {
+            github_token: Some("ghp_stored".to_string()),
+            google_token: None,
+            google_refresh_token: Some("1//stored_refresh".to_string()),
+            ..Default::default()
+        };
+        let env_github = Some("ghp_env".to_string());
+        let env_google = Some("ya29.env".to_string());
+
+        let has_stored_github = stored.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+        let has_stored_google = stored.google_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            || stored.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
+        let github_from_env = !has_stored_github
+            && stored.github_disconnected != Some(true)
+            && env_github.is_some();
+        let google_from_env = !has_stored_google
+            && stored.google_disconnected != Some(true)
+            && env_google.is_some();
+
+        assert!(!github_from_env);
+        assert!(!google_from_env);
+
+        // Case 2: No stored credentials, not disconnected -> env is used, from_env is true
+        let stored_empty = StoredCredentials::default();
+        let gh_from_env_fallback = !stored_empty.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_empty.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(gh_from_env_fallback);
+
+        // Case 3: Explicitly disconnected -> env fallback is suppressed
+        let stored_disconnected = StoredCredentials {
+            github_disconnected: Some(true),
+            google_disconnected: Some(true),
+            ..Default::default()
+        };
+        let gh_suppressed = !stored_disconnected.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_disconnected.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(!gh_suppressed);
+    }
+
+    #[test]
+    fn test_auth_status_serialization_with_env_flags() {
+        let status = AuthStatus {
+            has_github: true,
+            has_google: false,
+            has_microsoft: false,
+            github_from_env: true,
+            google_from_env: false,
+            google_has_refresh_token: false,
+        };
+        let json = serde_json::to_string(&status).expect("Serialization failed");
+        assert!(json.contains("github_from_env"));
+        assert!(json.contains("google_has_refresh_token"));
+        let deserialized: AuthStatus = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(status, deserialized);
+    }
+
+    #[test]
+    fn test_get_env_credential_helper() {
+        std::env::set_var("TEST_WIDKANBAN_KEY_A", "  test_token_123  ");
+        assert_eq!(
+            get_env_credential(&["NON_EXISTENT_KEY", "TEST_WIDKANBAN_KEY_A"]),
+            Some("test_token_123".to_string())
+        );
+        assert_eq!(get_env_credential(&["NON_EXISTENT_KEY"]), None);
+        std::env::remove_var("TEST_WIDKANBAN_KEY_A");
     }
 
     #[test]
@@ -2133,6 +3517,79 @@ mod tests {
         assert_eq!(task_status_to_ms_planner_percent("in_progress"), 50);
         assert_eq!(task_status_to_ms_planner_percent("done"), 100);
     }
+
+    #[test]
+    fn test_build_linux_desktop_entry() {
+        let entry_normal = build_linux_desktop_entry("/usr/bin/widkanban", false);
+        assert!(entry_normal.contains("Exec=/usr/bin/widkanban\n"));
+        assert!(entry_normal.contains("Name=WidKanban"));
+        assert!(!entry_normal.contains("--minimized"));
+
+        let entry_min = build_linux_desktop_entry("/usr/bin/widkanban", true);
+        assert!(entry_min.contains("Exec=/usr/bin/widkanban --minimized\n"));
+    }
+
+    #[test]
+    fn test_build_macos_plist() {
+        let plist_normal = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", false);
+        assert!(plist_normal.contains("<string>/Applications/WidKanban.app/Contents/MacOS/widkanban</string>"));
+        assert!(!plist_normal.contains("<string>--minimized</string>"));
+        assert!(plist_normal.contains("<key>RunAtLoad</key>"));
+
+        let plist_min = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", true);
+        assert!(plist_min.contains("<string>--minimized</string>"));
+    }
+
+    #[test]
+    fn test_api_health_state_serialization() {
+        let health = ApiHealthState {
+            github: ProviderHealth {
+                connected: true,
+                rate_limit_remaining: Some(4950),
+                rate_limit_limit: Some(5000),
+                rate_limit_reset: Some(1792529000),
+                token_expires_at: Some("2026-11-20 00:00:00 UTC".to_string()),
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: Some(1792520000),
+                error_message: None,
+            },
+            google: ProviderHealth {
+                connected: false,
+                rate_limit_remaining: None,
+                rate_limit_limit: None,
+                rate_limit_reset: None,
+                token_expires_at: None,
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: None,
+                error_message: Some("Google Tasks token not configured".to_string()),
+            },
+            microsoft: None,
+        };
+        let serialized = serde_json::to_string(&health).expect("serialization failed");
+        assert!(serialized.contains("rateLimitRemaining"));
+        assert!(serialized.contains("4950"));
+        assert!(serialized.contains("tokenExpiresAt"));
+        assert!(serialized.contains("errorMessage"));
+        let deserialized: ApiHealthState = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(health, deserialized);
+    }
+
+    #[test]
+    fn test_render_oauth_callback_html() {
+        let success_html = render_oauth_callback_html(true, None);
+        assert!(success_html.contains("Google Authentication Verified"));
+        assert!(success_html.contains("close tab"));
+        assert!(success_html.contains("Unifont"));
+
+        let fail_html = render_oauth_callback_html(false, Some("access_denied"));
+        assert!(fail_html.contains("Google Authentication Failed"));
+        assert!(fail_html.contains("access_denied"));
+        assert!(fail_html.contains("close tab"));
+
+        let fail_generic = render_oauth_callback_html(false, Some("redirect_uri_mismatch"));
+        assert!(fail_generic.contains("Google Authentication Failed"));
+        assert!(fail_generic.contains("redirect_uri_mismatch"));
+    }
 }
-
-

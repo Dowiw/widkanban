@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useTaskStore } from './useTaskStore';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
-import { UnifiedTask } from '../types/task';
+import { UnifiedTask, DEFAULT_AUTOSYNC_SETTINGS, DEFAULT_API_HEALTH_STATE } from '../types/task';
 
 // Access the mocked invoke so we can control its return value per-test
 import { invoke } from '@tauri-apps/api/core';
@@ -13,6 +13,7 @@ describe('useTaskStore', () => {
     localStorage.clear();
 
     // Reset the invoke mock to default (returns null → safeInvoke returns null)
+    mockInvoke.mockClear();
     mockInvoke.mockResolvedValue(null);
 
     // Reset store state before each test
@@ -25,6 +26,10 @@ describe('useTaskStore', () => {
       isSettingsOpen: false,
       hasCompletedOnboarding: false,
       authStatus: { has_github: false, has_google: false, has_microsoft: false },
+      autoSyncSettings: DEFAULT_AUTOSYNC_SETTINGS,
+      isAutoSyncPromptOpen: false,
+      apiHealth: DEFAULT_API_HEALTH_STATE,
+      syncBanner: null,
     });
   });
 
@@ -369,6 +374,9 @@ describe('useTaskStore', () => {
     expect(mockInvoke).toHaveBeenCalledWith('save_credentials', {
       githubToken: null,
       googleToken: null,
+      googleRefreshToken: null,
+      googleClientId: null,
+      googleClientSecret: null,
       microsoftToken: 'ms_mock_token',
     });
     expect(mockInvoke).toHaveBeenCalledWith('fetch_microsoft_tasks', undefined);
@@ -464,6 +472,65 @@ describe('useTaskStore', () => {
     expect(githubLabelCalls).toHaveLength(0);
   });
 
+  it('addTask creates production-compliant UnifiedTask with UUID-based client ID, status, priority, and description', () => {
+    const { addTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'Production Task Feature',
+      source: 'github',
+      status: 'in_progress',
+      priority: 'urgent',
+      description: '### Plan\n- [ ] Step 1\n- [ ] Step 2',
+      url: 'https://github.com/Dowiw/widkanban/issues',
+      sourceMeta: {
+        repo: 'Dowiw/widkanban',
+        isPullRequest: false,
+        priority: 'urgent',
+        notes: '### Plan\n- [ ] Step 1\n- [ ] Step 2',
+      },
+    });
+
+    const tasks = useTaskStore.getState().tasks;
+    const created = tasks.find((t) => t.title === 'Production Task Feature');
+
+    expect(created).toBeDefined();
+    expect(created?.id).toMatch(/^gh_[a-zA-Z0-9]+$/);
+    expect(created?.status).toBe('in_progress');
+    expect(created?.priority).toBe('urgent');
+    expect(created?.description).toContain('### Plan');
+    expect(created?.sourceMeta.repo).toBe('Dowiw/widkanban');
+    expect(created?.updatedAt).toBeDefined();
+  });
+
+  it('addTask generates clean Google Task with list context, priority, and notes', () => {
+    const { addTask } = useTaskStore.getState();
+
+    addTask({
+      title: 'Team Meeting Prep',
+      source: 'google_tasks',
+      status: 'todo',
+      priority: 'high',
+      description: 'Review Q4 OKRs',
+      url: 'https://tasks.google.com',
+      sourceMeta: {
+        listTitle: 'Sprint 12',
+        listId: 'sprint-12',
+        dueDate: '2026-11-01T12:00:00.000Z',
+        priority: 'high',
+        notes: 'Review Q4 OKRs',
+      },
+    });
+
+    const tasks = useTaskStore.getState().tasks;
+    const created = tasks.find((t) => t.title === 'Team Meeting Prep');
+
+    expect(created).toBeDefined();
+    expect(created?.id).toMatch(/^gt_[a-zA-Z0-9]+$/);
+    expect(created?.source).toBe('google_tasks');
+    expect(created?.priority).toBe('high');
+    expect(created?.sourceMeta.listTitle).toBe('Sprint 12');
+  });
+
   it('saveCredentials triggers isGithubSetupOpen on first GitHub connection', async () => {
     mockInvoke.mockResolvedValueOnce({ has_github: true, has_google: false });
 
@@ -482,6 +549,23 @@ describe('useTaskStore', () => {
     await saveCredentials({ githubToken: 'ghp_sample123' });
 
     expect(useTaskStore.getState().isGithubSetupOpen).toBe(true);
+  });
+
+  it('checkAuthStatus updates store with env indicator flags', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      has_github: true,
+      has_google: true,
+      github_from_env: true,
+      google_from_env: false,
+    });
+
+    const { checkAuthStatus } = useTaskStore.getState();
+    const status = await checkAuthStatus();
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_auth_status', undefined);
+    expect(status.github_from_env).toBe(true);
+    expect(status.google_from_env).toBe(false);
+    expect(useTaskStore.getState().authStatus.github_from_env).toBe(true);
   });
 
   it('setupRepoLabels invokes setup_github_repo_labels command with configured labels', async () => {
@@ -750,6 +834,16 @@ describe('useTaskStore', () => {
       expect(state.customization.columnMinWidth).toBe(260);
     });
 
+    it('updates font family across all supported options (outfit, unifont, system, mono)', () => {
+      const { setCustomization } = useTaskStore.getState();
+      const fonts: ('outfit' | 'unifont' | 'system' | 'mono')[] = ['outfit', 'unifont', 'system', 'mono'];
+
+      for (const font of fonts) {
+        setCustomization({ fontFamily: font });
+        expect(useTaskStore.getState().customization.fontFamily).toBe(font);
+      }
+    });
+
     it('cycles theme through system -> light -> dark -> system via toggleTheme', () => {
       const { toggleTheme } = useTaskStore.getState();
       expect(useTaskStore.getState().customization.theme).toBe('system');
@@ -764,20 +858,54 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.theme).toBe('system');
     });
 
-    it('toggles pin and triggers set_window_resizable with inverse pin state', () => {
-      const { togglePin } = useTaskStore.getState();
+    it('toggles pin and triggers set_window_pin_mode with appropriate mode', async () => {
+      const { togglePin, setPinMode } = useTaskStore.getState();
       expect(useTaskStore.getState().isPinned).toBe(true);
 
-      // Unpin: should enable resizing (resizable: true)
-      togglePin();
+      // Unpin: should set normal window mode
+      await togglePin();
       expect(useTaskStore.getState().isPinned).toBe(false);
-      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: true });
-      expect(mockInvoke).toHaveBeenCalledWith('toggle_always_on_top', undefined);
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'normal' });
 
-      // Pin: should lock resizing (resizable: false)
-      togglePin();
+      // Pin with always-on-top
+      await togglePin();
       expect(useTaskStore.getState().isPinned).toBe(true);
-      expect(mockInvoke).toHaveBeenCalledWith('set_window_resizable', { resizable: false });
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'always-on-top' });
+
+      // Switch pin mode to desktop-layer while pinned
+      await setPinMode('desktop-layer');
+      expect(useTaskStore.getState().customization.pinMode).toBe('desktop-layer');
+      expect(mockInvoke).toHaveBeenCalledWith('set_window_pin_mode', { mode: 'desktop-layer' });
+    });
+
+    it('handles autostart status check and enable/disable', async () => {
+      const { checkAutostartStatus, enableAutostart, disableAutostart } =
+        useTaskStore.getState();
+
+      mockInvoke.mockResolvedValueOnce(true);
+      const isEnabled = await checkAutostartStatus();
+      expect(isEnabled).toBe(true);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(true);
+
+      mockInvoke.mockResolvedValueOnce(undefined);
+      const enabled = await enableAutostart(true);
+      expect(enabled).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('enable_autostart', { startMinimized: true });
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(true);
+      expect(useTaskStore.getState().startupSettings.startMinimized).toBe(true);
+      expect(useTaskStore.getState().startupSettings.hasPrompted).toBe(true);
+
+      mockInvoke.mockResolvedValueOnce(undefined);
+      const disabled = await disableAutostart();
+      expect(disabled).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('disable_autostart', undefined);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
+
+      // When external task manager disables autostart, checkAutostartStatus returns false and unticks
+      mockInvoke.mockResolvedValueOnce(false);
+      const detectedStatus = await checkAutostartStatus();
+      expect(detectedStatus).toBe(false);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
     });
 
     it('applies window size presets and updates defaultWidth/defaultHeight', async () => {
@@ -807,4 +935,227 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().customization.defaultHeight).toBe(680);
     });
   });
+
+  describe('Auto-Sync & API Health Tracking', () => {
+    it('initializes with default autoSyncSettings and apiHealth', () => {
+      const state = useTaskStore.getState();
+      expect(state.autoSyncSettings.enabled).toBe(false);
+      expect(state.autoSyncSettings.intervalMinutes).toBe(3);
+      expect(state.autoSyncSettings.notifyOnNewTasks).toBe(true);
+      expect(state.autoSyncSettings.hasPrompted).toBe(false);
+      expect(state.isAutoSyncPromptOpen).toBe(false);
+      expect(state.apiHealth.github.connected).toBe(false);
+      expect(state.syncBanner).toBeNull();
+    });
+
+    it('updates autoSyncSettings with partial updates', () => {
+      const { setAutoSyncSettings } = useTaskStore.getState();
+      setAutoSyncSettings({ enabled: true, intervalMinutes: 5 });
+
+      const state = useTaskStore.getState();
+      expect(state.autoSyncSettings.enabled).toBe(true);
+      expect(state.autoSyncSettings.intervalMinutes).toBe(5);
+      expect(state.autoSyncSettings.notifyOnNewTasks).toBe(true); // preserved
+    });
+
+    it('controls auto-sync prompt modal open and sync banner', () => {
+      const { setAutoSyncPromptOpen, setSyncBanner } = useTaskStore.getState();
+      setAutoSyncPromptOpen(true);
+      expect(useTaskStore.getState().isAutoSyncPromptOpen).toBe(true);
+
+      setSyncBanner('2 new tasks detected');
+      expect(useTaskStore.getState().syncBanner).toBe('2 new tasks detected');
+
+      setSyncBanner(null);
+      expect(useTaskStore.getState().syncBanner).toBeNull();
+    });
+
+    it('fetches api health and detects token expiring soon', async () => {
+      const futureDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_api_health') {
+          return {
+            github: {
+              connected: true,
+              rateLimitRemaining: 4800,
+              rateLimitLimit: 5000,
+              rateLimitReset: Math.floor(Date.now() / 1000) + 1800,
+              tokenExpiresAt: futureDate,
+              isExpiringSoon: false,
+              isRateLimited: false,
+            },
+            google: {
+              connected: true,
+            },
+          };
+        }
+        return null;
+      });
+
+      const { fetchApiHealth } = useTaskStore.getState();
+      const res = await fetchApiHealth();
+
+      expect(mockInvoke).toHaveBeenCalledWith('get_api_health', undefined);
+      expect(res?.github.rateLimitRemaining).toBe(4800);
+      expect(res?.github.isExpiringSoon).toBe(true); // accurately flagged because 3 days <= 7 days
+      expect(useTaskStore.getState().apiHealth.github.rateLimitRemaining).toBe(4800);
+    });
+
+    it('refreshTasksWithDiff detects new tasks, sets banner, and triggers notification', async () => {
+      const initialTask: UnifiedTask = {
+        id: 'gh_initial',
+        title: 'Initial Issue',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/issues/1',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+
+      const newTask: UnifiedTask = {
+        id: 'gh_new_99',
+        title: 'Brand New Assigned Issue',
+        source: 'github',
+        status: 'todo',
+        url: 'https://github.com/org/repo/issues/99',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+
+      useTaskStore.setState({
+        tasks: [initialTask],
+        autoSyncSettings: {
+          enabled: true,
+          intervalMinutes: 3,
+          notifyOnNewTasks: true,
+          hasPrompted: true,
+        },
+        authStatus: { has_github: true, has_google: false, has_microsoft: false },
+      });
+
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_auth_status') return { has_github: true, has_google: false, has_microsoft: false };
+        if (cmd === 'fetch_github_tasks') return [initialTask, newTask];
+        if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: false } };
+        if (cmd === 'send_desktop_notification') return null;
+        return null;
+      });
+
+      const { refreshTasksWithDiff } = useTaskStore.getState();
+      const diffResult = await refreshTasksWithDiff();
+
+      expect(diffResult.addedCount).toBe(1);
+      expect(diffResult.newTasks[0].id).toBe('gh_new_99');
+      expect(useTaskStore.getState().syncBanner).toBe('New task synced: Brand New Assigned Issue');
+      expect(mockInvoke).toHaveBeenCalledWith('send_desktop_notification', {
+        title: 'WidKanban: New Task Assigned',
+        body: 'Brand New Assigned Issue',
+      });
+    });
+
+    it('skips GitHub fetch during refresh when rate limited', async () => {
+      useTaskStore.setState({
+        authStatus: { has_github: true, has_google: false, has_microsoft: false },
+        apiHealth: {
+          github: {
+            connected: true,
+            isRateLimited: true,
+            rateLimitReset: Math.floor(Date.now() / 1000) + 3600, // 1 hour in the future
+          },
+          google: { connected: false },
+        },
+      });
+
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'get_auth_status') return { has_github: true, has_google: false };
+        if (cmd === 'get_api_health') return useTaskStore.getState().apiHealth;
+        return null;
+      });
+
+      mockInvoke.mockClear();
+
+      const { refreshTasksWithDiff } = useTaskStore.getState();
+      await refreshTasksWithDiff();
+
+      // fetch_github_tasks should NOT have been called because it is rate limited!
+      expect(mockInvoke).not.toHaveBeenCalledWith('fetch_github_tasks', undefined);
+    });
+
+    it('startGoogleOAuthFlow succeeds and updates auth status with refresh token', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_google_oauth_flow') {
+          return {
+            has_github: false,
+            has_google: true,
+            google_has_refresh_token: true,
+          };
+        }
+        if (cmd === 'fetch_google_tasks') return [];
+        if (cmd === 'get_api_health') return { github: { connected: false }, google: { connected: true } };
+        return null;
+      });
+
+      const { startGoogleOAuthFlow } = useTaskStore.getState();
+      const res = await startGoogleOAuthFlow({
+        clientId: 'custom-client-id.apps.googleusercontent.com',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('start_google_oauth_flow', {
+        clientId: 'custom-client-id.apps.googleusercontent.com',
+        clientSecret: null,
+      });
+      expect(useTaskStore.getState().authStatus.google_has_refresh_token).toBe(true);
+      expect(useTaskStore.getState().hasCompletedOnboarding).toBe(true);
+    });
+
+    it('startGoogleOAuthFlow handles rejection or cancellation gracefully', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_google_oauth_flow') {
+          throw new Error('OAuth flow timed out waiting for user response');
+        }
+        return null;
+      });
+
+      const { startGoogleOAuthFlow } = useTaskStore.getState();
+      const res = await startGoogleOAuthFlow();
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('timed out');
+    });
+
+    it('saveCredentials passes refresh token and client credentials to native backend', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'save_credentials') {
+          return {
+            has_github: true,
+            has_google: true,
+            google_has_refresh_token: true,
+          };
+        }
+        if (cmd === 'fetch_google_tasks') return [];
+        if (cmd === 'fetch_github_tasks') return [];
+        if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: true } };
+        return null;
+      });
+
+      const { saveCredentials } = useTaskStore.getState();
+      const ok = await saveCredentials({
+        githubToken: 'ghp_test123',
+        googleRefreshToken: '1//refresh_token_xyz',
+        googleClientId: 'test-client-id.apps.googleusercontent.com',
+      });
+
+      expect(ok).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith('save_credentials', {
+        githubToken: 'ghp_test123',
+        googleToken: null,
+        googleRefreshToken: '1//refresh_token_xyz',
+        googleClientId: 'test-client-id.apps.googleusercontent.com',
+        googleClientSecret: null,
+        microsoftToken: null,
+      });
+    });
+  });
 });
+
