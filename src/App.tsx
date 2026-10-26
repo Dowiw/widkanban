@@ -131,7 +131,7 @@ export const App: React.FC = () => {
   return (
     <div
       style={rootStyle}
-      className={`flex flex-col h-screen w-screen overflow-hidden rounded-widget border transition-colors duration-150 shadow-xl ${fontClass} ${
+      className={`flex flex-col h-screen h-[100dvh] w-screen overflow-hidden rounded-widget border transition-colors duration-150 shadow-xl ${fontClass} ${
         isDark
           ? 'bg-slate-950 border-slate-750 text-slate-100'
           : 'bg-white border-slate-200 text-slate-800'

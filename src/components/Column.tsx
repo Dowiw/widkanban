@@ -48,7 +48,7 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
         borderRadius: 'var(--col-radius, 12px)',
         minWidth: `${customization.columnMinWidth || 260}px`,
       }}
-      className={`flex flex-col flex-1 bg-slate-50 dark:bg-slate-900/60 border transition-all duration-200 overflow-hidden ${
+      className={`flex flex-col flex-1 shrink-0 w-[85vw] sm:w-auto snap-center bg-slate-50 dark:bg-slate-900/60 border transition-all duration-200 overflow-hidden ${
         isOver
           ? 'border-indigo-400 dark:border-indigo-500 shadow-inner'
           : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'

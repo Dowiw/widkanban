@@ -168,10 +168,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           <button
             {...attributes}
             {...listeners}
-            className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 shrink-0"
+            className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 bg-slate-100/90 dark:bg-slate-800/90 hover:bg-slate-200 dark:hover:bg-slate-700 p-1.5 -ml-0.5 rounded-md touch-none shrink-0 transition-colors shadow-2xs border border-slate-200/50 dark:border-slate-700/50"
             title="Drag task card"
+            aria-label="Drag task card"
           >
-            <GripVertical className="h-3.5 w-3.5" />
+            <GripVertical className="h-4 w-4" />
           </button>
 
           {/* Provider Badge */}
