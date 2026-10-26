@@ -25,7 +25,7 @@ describe('useTaskStore', () => {
       isAddTaskOpen: false,
       isSettingsOpen: false,
       hasCompletedOnboarding: false,
-      authStatus: { has_github: false, has_google: false },
+      authStatus: { has_github: false, has_google: false, has_microsoft: false },
       autoSyncSettings: DEFAULT_AUTOSYNC_SETTINGS,
       isAutoSyncPromptOpen: false,
       apiHealth: DEFAULT_API_HEALTH_STATE,
@@ -38,6 +38,7 @@ describe('useTaskStore', () => {
     expect(state.tasks).toHaveLength(INITIAL_MOCK_TASKS.length);
     expect(state.isPinned).toBe(true);
     expect(state.tasks.some((t) => t.source === 'github')).toBe(false);
+    expect(state.tasks.some((t) => t.source === 'microsoft_teams')).toBe(true);
   });
 
   it('moves task status from todo to in_progress', () => {
@@ -309,6 +310,76 @@ describe('useTaskStore', () => {
 
     const googleTasks = tasks.filter((t) => t.source === 'google_tasks');
     expect(googleTasks.length).toBeGreaterThan(0);
+  });
+
+  it('clearCredentials for microsoft removes all microsoft_teams tasks from board and preserves others', async () => {
+    mockInvoke.mockResolvedValueOnce({ has_github: false, has_google: false, has_microsoft: false });
+
+    const { clearCredentials } = useTaskStore.getState();
+    await clearCredentials('microsoft');
+
+    const tasks = useTaskStore.getState().tasks;
+    const msTasks = tasks.filter((t) => t.source === 'microsoft_teams');
+    expect(msTasks).toHaveLength(0);
+
+    const googleTasks = tasks.filter((t) => t.source === 'google_tasks');
+    expect(googleTasks.length).toBeGreaterThan(0);
+  });
+
+  it('fetchMicrosoftTasks replaces existing microsoft_teams tasks with fresh API data and keeps other tasks', async () => {
+    const freshMsTask: UnifiedTask = {
+      id: 'ms_fresh_001',
+      title: 'Fresh Teams Assignment',
+      source: 'microsoft_teams',
+      status: 'todo',
+      url: 'https://teams.microsoft.com',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { teamName: 'Math 101', isAssignment: true },
+    };
+
+    mockInvoke.mockResolvedValueOnce([freshMsTask]);
+
+    const { fetchMicrosoftTasks } = useTaskStore.getState();
+    await fetchMicrosoftTasks();
+
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks.some((t) => t.id === 'ms_fresh_001')).toBe(true);
+    expect(tasks.some((t) => t.id === 'ms_301')).toBe(false);
+    expect(tasks.some((t) => t.source === 'google_tasks')).toBe(true);
+  });
+
+  it('fires update_microsoft_task IPC when moving a Microsoft task', () => {
+    mockInvoke.mockClear();
+    const { moveTask } = useTaskStore.getState();
+
+    moveTask('ms_302', 'done');
+
+    expect(mockInvoke).toHaveBeenCalledWith('update_microsoft_task', {
+      taskId: 'ms_302',
+      listId: null,
+      newStatus: 'done',
+    });
+  });
+
+  it('saveCredentials accepts microsoftToken and triggers sync', async () => {
+    mockInvoke.mockClear();
+    mockInvoke
+      .mockResolvedValueOnce({ has_github: false, has_google: false, has_microsoft: true }) // save_credentials
+      .mockResolvedValueOnce([]); // fetch_microsoft_tasks
+
+    const { saveCredentials } = useTaskStore.getState();
+    const result = await saveCredentials({ microsoftToken: 'ms_mock_token' });
+
+    expect(result).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith('save_credentials', {
+      githubToken: null,
+      googleToken: null,
+      googleRefreshToken: null,
+      googleClientId: null,
+      googleClientSecret: null,
+      microsoftToken: 'ms_mock_token',
+    });
+    expect(mockInvoke).toHaveBeenCalledWith('fetch_microsoft_tasks', undefined);
   });
 
   it('fires update_github_issue_labels IPC when moving GitHub issue between todo and in_progress', () => {
@@ -959,11 +1030,11 @@ describe('useTaskStore', () => {
           notifyOnNewTasks: true,
           hasPrompted: true,
         },
-        authStatus: { has_github: true, has_google: false },
+        authStatus: { has_github: true, has_google: false, has_microsoft: false },
       });
 
       mockInvoke.mockImplementation(async (cmd) => {
-        if (cmd === 'get_auth_status') return { has_github: true, has_google: false };
+        if (cmd === 'get_auth_status') return { has_github: true, has_google: false, has_microsoft: false };
         if (cmd === 'fetch_github_tasks') return [initialTask, newTask];
         if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: false } };
         if (cmd === 'send_desktop_notification') return null;
@@ -984,7 +1055,7 @@ describe('useTaskStore', () => {
 
     it('skips GitHub fetch during refresh when rate limited', async () => {
       useTaskStore.setState({
-        authStatus: { has_github: true, has_google: false },
+        authStatus: { has_github: true, has_google: false, has_microsoft: false },
         apiHealth: {
           github: {
             connected: true,
@@ -1082,6 +1153,7 @@ describe('useTaskStore', () => {
         googleRefreshToken: '1//refresh_token_xyz',
         googleClientId: 'test-client-id.apps.googleusercontent.com',
         googleClientSecret: null,
+        microsoftToken: null,
       });
     });
   });
