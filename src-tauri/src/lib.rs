@@ -43,6 +43,8 @@ pub struct AuthStatus {
     pub google_from_env: bool,
     #[serde(default)]
     pub google_has_refresh_token: bool,
+    #[serde(default)]
+    pub microsoft_from_env: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -556,6 +558,20 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if !has_stored_sec {
         if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
             creds.google_client_secret = Some(sec);
+        }
+    }
+
+    // 4. Microsoft: App-stored token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token exists
+    // and the user has not explicitly disconnected Microsoft.
+    let has_stored_microsoft = creds
+        .microsoft_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_microsoft && creds.microsoft_disconnected != Some(true) {
+        if let Some(ms) = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]) {
+            creds.microsoft_token = Some(ms);
         }
     }
 
@@ -1151,7 +1167,18 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
         && (env_google.is_some() || env_google_refresh.is_some())
         && has_google;
 
+    let has_stored_microsoft = stored
+        .microsoft_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    let env_microsoft = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]);
     let has_microsoft = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
+    let microsoft_from_env = !has_stored_microsoft
+        && stored.microsoft_disconnected != Some(true)
+        && env_microsoft.is_some()
+        && has_microsoft;
 
     Ok(AuthStatus {
         has_github,
@@ -1160,6 +1187,7 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
         github_from_env,
         google_from_env,
         google_has_refresh_token: has_refresh_token,
+        microsoft_from_env,
     })
 }
 
@@ -3254,6 +3282,7 @@ mod tests {
             github_from_env: false,
             google_from_env: false,
             google_has_refresh_token: true,
+            microsoft_from_env: false,
         };
         assert!(status.has_github);
         assert!(status.has_google);
@@ -3317,10 +3346,12 @@ mod tests {
             github_from_env: true,
             google_from_env: false,
             google_has_refresh_token: false,
+            microsoft_from_env: false,
         };
         let json = serde_json::to_string(&status).expect("Serialization failed");
         assert!(json.contains("github_from_env"));
         assert!(json.contains("google_has_refresh_token"));
+        assert!(json.contains("microsoft_from_env"));
         let deserialized: AuthStatus = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(status, deserialized);
     }

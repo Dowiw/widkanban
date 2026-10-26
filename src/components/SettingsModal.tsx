@@ -765,6 +765,11 @@ export const SettingsModal: React.FC = () => {
                   </div>
                   {authStatus.has_microsoft ? (
                     <div className="flex items-center space-x-1.5">
+                      {authStatus.microsoft_from_env && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
+                          .env
+                        </span>
+                      )}
                       <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
                         <Check className="h-2.5 w-2.5" />
                         <span>Connected</span>
@@ -812,16 +817,27 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                  <span>Scopes: <code>Tasks.ReadWrite</code> <code>User.Read</code></span>
-                  <a
-                    href="https://developer.microsoft.com/en-us/graph/graph-explorer"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5 font-medium"
-                  >
-                    <span>Graph Explorer</span>
-                    <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
+                  <span>Scopes: <code>Tasks.ReadWrite</code> <code>EduAssignments.ReadBasic</code></span>
+                  <div className="flex items-center space-x-2">
+                    <a
+                      href="https://github.com/Dowiw/widkanban/blob/main/docs/teams-setup.md"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline flex items-center space-x-0.5"
+                    >
+                      <span>Setup Guide</span>
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                    <a
+                      href="https://developer.microsoft.com/en-us/graph/graph-explorer"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5 font-medium"
+                    >
+                      <span>Graph Explorer</span>
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  </div>
                 </div>
               </div>
 

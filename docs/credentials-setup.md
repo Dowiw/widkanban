@@ -15,6 +15,7 @@ For complete, visual step-by-step setup instructions with screenshot walkthrough
 | :--- | :--- | :--- |
 | **GitHub** | **[GitHub Setup Guide](github-setup.md)** | Generating classic & fine-grained PATs, scope selection (`repo`, `read:user`), and rate limit monitoring. |
 | **Google Tasks** | **[Google Tasks Setup Guide](google-setup.md)** | Google Cloud project setup, Test Users configuration, Desktop OAuth credentials, and 1-click **Sign in with Google** with silent auto-refresh. |
+| **Microsoft 365 & Teams** | **[Microsoft Teams Setup Guide](teams-setup.md)** | Fast 60-second setup via Microsoft Graph Explorer, Entra ID / Azure App Registration, Teams for Education assignments, Planner, and To Do sync. |
 
 ---
 
@@ -25,6 +26,7 @@ For complete, visual step-by-step setup instructions with screenshot walkthrough
 | **GitHub** | Personal Access Token (PAT) | 7–90 days (configurable) | Fetching assigned issues & PRs, updating status via labels, closing issues |
 | **Google Tasks** | OAuth 2.0 Client & Refresh Token | Long-lived / silent auto-refresh | Fetching task lists, items, and syncing task completion status |
 | **Google Tasks (Fallback)** | OAuth 2.0 Access Token (`ya29.…`) | 1 hour (ephemeral) | Quick manual testing via OAuth Playground without Cloud Console setup |
+| **Microsoft 365 & Teams** | Microsoft Graph OAuth Token (`eyJ0eXAi…`) | 60–90 min (Graph Explorer) / long-lived (App) | Syncing Teams for Education assignments, Planner cards, To Do tasks, and Flagged Emails |
 
 ---
 
@@ -47,6 +49,9 @@ If you are a contributor developing or testing locally (`npm run tauri dev`), yo
 
    # Or temporary 1-hour access token from OAuth Playground
    GOOGLE_TASKS_TOKEN=ya29.a0A...
+
+   # Microsoft 365 / Graph Access Token
+   MICROSOFT_TOKEN=eyJ0eXAiOiJKV1Qi...
    ```
 3. Rust loads these automatically on startup via `dotenvy`. In `SettingsModal`, the badge `.env (Dev Mode)` will confirm active environment credentials.
 4. Environment tokens remain purely in-memory in the Rust process and are never written to `credentials.json` or committed to git.
@@ -87,9 +92,9 @@ When credentials are saved via the in-app settings UI or captured through the Go
 ## Security Model & Invariants
 
 1. **Native Rust Isolation**:
-   All HTTP requests to GitHub and Google are executed exclusively by the Rust backend using `reqwest` with native TLS. The frontend webview never has direct access to API tokens.
+   All HTTP requests to GitHub, Google, and Microsoft Graph are executed exclusively by the Rust backend using `reqwest` with native TLS. The frontend webview never has direct access to API tokens.
 2. **Zero Auth Secrets in Frontend State**:
-   Tokens are never returned in full to the webview. The `get_auth_status` command only returns boolean presence flags (`has_github: true`, `has_google: true`, `google_has_refresh_token: true`).
+   Tokens are never returned in full to the webview. The `get_auth_status` command only returns boolean presence flags (`has_github: true`, `has_google: true`, `has_microsoft: true`).
 3. **Restricted File Permissions**:
    On Unix systems, permissions are explicitly enforced using `chmod 600`.
 4. **Git Isolation**:
@@ -107,12 +112,17 @@ When credentials are saved via the in-app settings UI or captured through the Go
 - In WidKanban Settings, click the **Trash icon** next to Google Tasks.
 - To revoke WidKanban's OAuth grant entirely, visit [Google Account Permissions](https://myaccount.google.com/permissions) and remove WidKanban.
 
+### Microsoft 365 & Teams
+- In WidKanban Settings, click the **Trash icon** next to Microsoft 365 & Teams.
+- To revoke authorization grants entirely, visit [Microsoft Account Consent Management](https://account.live.com/consent/Manage) (personal accounts) or [Microsoft My Apps](https://myapplications.microsoft.com/) (work/school accounts).
+
 ---
 
 ## Related Documentation
 
 - 🐙 **[GitHub Setup Guide](github-setup.md)**: Visual screenshot walkthrough for GitHub PAT generation.
 - 🔵 **[Google Tasks Setup Guide](google-setup.md)**: Visual screenshot walkthrough for Google Cloud OAuth loopback setup.
+- 🟣 **[Microsoft Teams Setup Guide](teams-setup.md)**: Setup guide for Microsoft Graph Explorer and Entra ID integration.
 - 🤝 **[Contributor Guide](../CONTRIBUTORS.md)**: Development workflows, testing guidelines, and PR checklists.
 - 🏛️ **[Architecture & System Design](architecture.md)**: Security architecture and Tauri IPC bridge.
 - 🛠️ **[Developer Notes](notes.md)**: Environment setup, frameless window behavior, and MSVC notes.
