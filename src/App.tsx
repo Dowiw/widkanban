@@ -102,6 +102,15 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [autoSyncSettings.enabled, autoSyncSettings.intervalMinutes, refreshTasksWithDiff]);
 
+  // Re-check autostart status when app window gains focus (e.g. user toggled in Task Manager or Settings)
+  useEffect(() => {
+    const handleFocus = () => {
+      checkAutostartStatus();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [checkAutostartStatus]);
+
   const fontClass =
     customization.fontFamily === 'unifont'
       ? 'font-unifont'

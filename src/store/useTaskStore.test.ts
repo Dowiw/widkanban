@@ -829,6 +829,12 @@ describe('useTaskStore', () => {
       expect(disabled).toBe(true);
       expect(mockInvoke).toHaveBeenCalledWith('disable_autostart', undefined);
       expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
+
+      // When external task manager disables autostart, checkAutostartStatus returns false and unticks
+      mockInvoke.mockResolvedValueOnce(false);
+      const detectedStatus = await checkAutostartStatus();
+      expect(detectedStatus).toBe(false);
+      expect(useTaskStore.getState().startupSettings.autostartEnabled).toBe(false);
     });
 
     it('applies window size presets and updates defaultWidth/defaultHeight', async () => {

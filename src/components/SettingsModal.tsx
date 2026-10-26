@@ -84,6 +84,7 @@ export const SettingsModal: React.FC = () => {
     startupSettings,
     enableAutostart,
     disableAutostart,
+    checkAutostartStatus,
     setStartupSettings,
     autoSyncSettings,
     setAutoSyncSettings,
@@ -116,6 +117,17 @@ export const SettingsModal: React.FC = () => {
   useEffect(() => {
     fetchApiHealth();
   }, [activeTab, fetchApiHealth]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    checkAutostartStatus();
+    if (activeTab === 'window') {
+      const interval = setInterval(() => {
+        checkAutostartStatus();
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [isSettingsOpen, activeTab, checkAutostartStatus]);
 
   if (!isSettingsOpen) return null;
 
