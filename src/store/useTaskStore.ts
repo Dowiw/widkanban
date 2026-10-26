@@ -28,6 +28,13 @@ interface IpcResult<T = void> {
   error?: string;
 }
 
+export const isTauriContext = (): boolean => {
+  if (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST)) {
+    return true;
+  }
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+};
+
 const safeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> => {
   try {
     return await invoke<T>(cmd, args);
@@ -265,6 +272,12 @@ export const useTaskStore = create<TaskState>()(
 
           return { tasks: updatedTasks };
         });
+
+        // In browser preview mode without native Tauri runtime,
+        // optimistic state updates remain local in Zustand without attempting background IPC or reverting mock tasks!
+        if (!isTauriContext()) {
+          return;
+        }
 
         // --- Background write-back for Google Tasks ---
         const task = prevTasks.find((t) => t.id === taskId);
