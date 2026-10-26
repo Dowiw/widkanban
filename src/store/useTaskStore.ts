@@ -128,7 +128,6 @@ interface TaskState {
   refreshTasks: () => Promise<void>;
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
-  fetchMicrosoftTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
   saveCredentials: (creds: {
     githubToken?: string;
@@ -136,7 +135,6 @@ interface TaskState {
     googleRefreshToken?: string;
     googleClientId?: string;
     googleClientSecret?: string;
-    microsoftToken?: string;
   }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
   startGoogleOAuthFlow: (creds?: {
@@ -169,7 +167,6 @@ export const useTaskStore = create<TaskState>()(
       authStatus: {
         has_github: false,
         has_google: false,
-        has_microsoft: false,
       },
       githubSyncSettings: {
         manageLabels: true,
@@ -314,22 +311,6 @@ export const useTaskStore = create<TaskState>()(
             });
           }
         }
-
-        // --- Background write-back for Microsoft 365 / Teams Tasks ---
-        if (task && task.source === 'microsoft_teams') {
-          safeInvokeWithResult<void>('update_microsoft_task', {
-            taskId: task.id,
-            listId: task.sourceMeta?.listId || null,
-            newStatus: targetStatus,
-          }).then((res) => {
-            if (!res.success) {
-              console.warn(
-                `[Sync] Background update failed for Microsoft task ${task.id}. Reverting...`
-              );
-              set({ tasks: prevTasks });
-            }
-          });
-        }
       },
 
       addTask: (newTaskData) => {
@@ -337,12 +318,7 @@ export const useTaskStore = create<TaskState>()(
           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
             ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
             : Date.now().toString(36);
-        const prefix =
-          newTaskData.source === 'github'
-            ? 'gh'
-            : newTaskData.source === 'microsoft_teams'
-            ? 'ms'
-            : 'gt';
+        const prefix = newTaskData.source === 'github' ? 'gh' : 'gt';
         const id = `${prefix}_${rawUuid}`;
         const task: UnifiedTask = {
           ...newTaskData,
@@ -678,18 +654,13 @@ export const useTaskStore = create<TaskState>()(
         if (status.has_github && !isGithubRateLimited) {
           promises.push(get().fetchGithubTasks());
         }
-        if (status.has_microsoft) {
-          promises.push(get().fetchMicrosoftTasks());
-        }
 
         await Promise.allSettled(promises);
         await get().fetchApiHealth();
 
         const nextTasks = get().tasks;
         const newTasks = nextTasks.filter(
-          (t) =>
-            !prevTaskIds.has(t.id) &&
-            (t.source === 'github' || t.source === 'google_tasks' || t.source === 'microsoft_teams')
+          (t) => !prevTaskIds.has(t.id) && (t.source === 'github' || t.source === 'google_tasks')
         );
 
         if (newTasks.length > 0) {
@@ -746,18 +717,6 @@ export const useTaskStore = create<TaskState>()(
         await get().checkAuthStatus();
       },
 
-      fetchMicrosoftTasks: async () => {
-        const fetched = await safeInvoke<UnifiedTask[]>('fetch_microsoft_tasks');
-        if (!fetched) return;
-
-        set((state) => {
-          const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
-          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
-          const nonMsTasks = state.tasks.filter((t) => t.source !== 'microsoft_teams');
-          return { tasks: [...nonMsTasks, ...activeFetched] };
-        });
-      },
-
       checkAuthStatus: async () => {
         const res = await safeInvoke<AuthStatus>('get_auth_status');
         if (res) {
@@ -773,7 +732,6 @@ export const useTaskStore = create<TaskState>()(
         googleRefreshToken,
         googleClientId,
         googleClientSecret,
-        microsoftToken,
       }) => {
         const res = await safeInvoke<AuthStatus>('save_credentials', {
           githubToken: githubToken || null,
@@ -781,13 +739,12 @@ export const useTaskStore = create<TaskState>()(
           googleRefreshToken: googleRefreshToken || null,
           googleClientId: googleClientId || null,
           googleClientSecret: googleClientSecret || null,
-          microsoftToken: microsoftToken || null,
         });
         if (res) {
           const isFirstGithubConnect =
             res.has_github && !get().githubSyncSettings.hasPromptedSetup;
           const isFirstConnect =
-            (res.has_github || res.has_google || res.has_microsoft) && !get().autoSyncSettings.hasPrompted;
+            (res.has_github || res.has_google) && !get().autoSyncSettings.hasPrompted;
 
           set({
             authStatus: res,
@@ -799,7 +756,6 @@ export const useTaskStore = create<TaskState>()(
           const syncs: Promise<void>[] = [];
           if (res.has_google) syncs.push(get().fetchGoogleTasks());
           if (res.has_github) syncs.push(get().fetchGithubTasks());
-          if (res.has_microsoft) syncs.push(get().fetchMicrosoftTasks());
           await Promise.all(syncs);
           await get().fetchApiHealth();
           return true;
@@ -847,9 +803,6 @@ export const useTaskStore = create<TaskState>()(
             }
             if (provider === 'github' || !provider) {
               updatedTasks = updatedTasks.filter((t) => t.source !== 'github');
-            }
-            if (provider === 'microsoft' || !provider) {
-              updatedTasks = updatedTasks.filter((t) => t.source !== 'microsoft_teams');
             }
             return {
               authStatus: res,

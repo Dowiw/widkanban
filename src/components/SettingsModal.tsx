@@ -23,7 +23,6 @@ import {
   Square,
   Sparkles,
   Type,
-  Users,
   Pin,
   Power,
   Layers,
@@ -75,7 +74,6 @@ export const SettingsModal: React.FC = () => {
     startGoogleOAuthFlow,
     fetchGoogleTasks,
     fetchGithubTasks,
-    fetchMicrosoftTasks,
     setCompletedOnboarding,
     customization,
     setCustomization,
@@ -98,12 +96,10 @@ export const SettingsModal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
   const [githubToken, setGithubToken] = useState('');
   const [googleToken, setGoogleToken] = useState('');
-  const [microsoftToken, setMicrosoftToken] = useState('');
   const [googleClientId, setGoogleClientId] = useState('');
   const [googleClientSecret, setGoogleClientSecret] = useState('');
   const [showGithub, setShowGithub] = useState(false);
   const [showGoogle, setShowGoogle] = useState(false);
-  const [showMicrosoft, setShowMicrosoft] = useState(false);
   const [showGoogleClientSecret, setShowGoogleClientSecret] = useState(false);
   const [showManualGoogle, setShowManualGoogle] = useState(false);
   const [showGoogleSetupGuide, setShowGoogleSetupGuide] = useState(false);
@@ -114,7 +110,6 @@ export const SettingsModal: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
-  const [isFetchingMicrosoft, setIsFetchingMicrosoft] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
   const [isTogglingAutostart, setIsTogglingAutostart] = useState(false);
@@ -146,14 +141,12 @@ export const SettingsModal: React.FC = () => {
       googleToken: googleToken.trim() || undefined,
       googleClientId: googleClientId.trim() || undefined,
       googleClientSecret: googleClientSecret.trim() || undefined,
-      microsoftToken: microsoftToken.trim() || undefined,
     });
 
     setIsSaving(false);
     setSaveSuccess(true);
     setGithubToken('');
     setGoogleToken('');
-    setMicrosoftToken('');
     setCompletedOnboarding(true);
 
     setTimeout(() => {
@@ -181,7 +174,7 @@ export const SettingsModal: React.FC = () => {
     }
   };
 
-  const handleDisconnect = async (provider: 'github' | 'google' | 'microsoft') => {
+  const handleDisconnect = async (provider: 'github' | 'google') => {
     await clearCredentials(provider);
   };
 
@@ -195,12 +188,6 @@ export const SettingsModal: React.FC = () => {
     setIsFetchingGithub(true);
     await fetchGithubTasks();
     setIsFetchingGithub(false);
-  };
-
-  const handleFetchMicrosoftTasks = async () => {
-    setIsFetchingMicrosoft(true);
-    await fetchMicrosoftTasks();
-    setIsFetchingMicrosoft(false);
   };
 
   const handleClose = () => {
@@ -756,75 +743,6 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Microsoft 365 / Teams OAuth Section */}
-              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Users className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Microsoft 365 & Teams</span>
-                  </div>
-                  {authStatus.has_microsoft ? (
-                    <div className="flex items-center space-x-1.5">
-                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
-                        <Check className="h-2.5 w-2.5" />
-                        <span>Connected</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleFetchMicrosoftTasks}
-                        disabled={isFetchingMicrosoft}
-                        title="Sync Microsoft Tasks"
-                        className="p-1 text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-slate-800 rounded transition-colors"
-                      >
-                        <RefreshCw className={`h-3 w-3 ${isFetchingMicrosoft ? 'animate-spin text-violet-600 dark:text-violet-400' : ''}`} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDisconnect('microsoft')}
-                        title="Disconnect Microsoft 365"
-                        className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 rounded transition-colors"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-300">
-                      Not Configured
-                    </span>
-                  )}
-                </div>
-
-                <div className="relative">
-                  <input
-                    type={showMicrosoft ? 'text' : 'password'}
-                    placeholder={authStatus.has_microsoft ? '•••••••••••••••• (Leave blank to keep current)' : 'eyJ0eXAiOiJKV1Qi...'}
-                    value={microsoftToken}
-                    onChange={(e) => setMicrosoftToken(e.target.value)}
-                    className="w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 py-1.5 pl-2.5 pr-8 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMicrosoft(!showMicrosoft)}
-                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  >
-                    {showMicrosoft ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                  <span>Scopes: <code>Tasks.ReadWrite</code> <code>User.Read</code></span>
-                  <a
-                    href="https://developer.microsoft.com/en-us/graph/graph-explorer"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5 font-medium"
-                  >
-                    <span>Graph Explorer</span>
-                    <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
-                </div>
-              </div>
-
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -842,8 +760,7 @@ export const SettingsModal: React.FC = () => {
                     (!githubToken.trim() &&
                       !googleToken.trim() &&
                       !googleClientId.trim() &&
-                      !googleClientSecret.trim() &&
-                      !microsoftToken.trim())
+                      !googleClientSecret.trim())
                   }
                   className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     saveSuccess
@@ -852,8 +769,7 @@ export const SettingsModal: React.FC = () => {
                         (!githubToken.trim() &&
                           !googleToken.trim() &&
                           !googleClientId.trim() &&
-                          !googleClientSecret.trim() &&
-                          !microsoftToken.trim())
+                          !googleClientSecret.trim())
                       ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-[0.98]'
                   }`}

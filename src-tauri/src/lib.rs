@@ -15,8 +15,6 @@ pub struct StoredCredentials {
     pub github_token: Option<String>,
     pub google_token: Option<String>,
     #[serde(default)]
-    pub microsoft_token: Option<String>,
-    #[serde(default)]
     pub google_refresh_token: Option<String>,
     #[serde(default)]
     pub google_client_id: Option<String>,
@@ -28,15 +26,12 @@ pub struct StoredCredentials {
     pub github_disconnected: Option<bool>,
     #[serde(default)]
     pub google_disconnected: Option<bool>,
-    #[serde(default)]
-    pub microsoft_disconnected: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
-    pub has_microsoft: bool,
     #[serde(default)]
     pub github_from_env: bool,
     #[serde(default)]
@@ -64,8 +59,6 @@ pub struct ProviderHealth {
 pub struct ApiHealthState {
     pub github: ProviderHealth,
     pub google: ProviderHealth,
-    #[serde(default)]
-    pub microsoft: Option<ProviderHealth>,
 }
 
 fn current_epoch_seconds() -> u64 {
@@ -168,22 +161,6 @@ pub struct SourceMeta {
     pub subtask_count: Option<usize>,
     pub subtasks: Option<Vec<SubtaskItem>>,
     pub links: Option<Vec<TaskLink>>,
-    #[serde(rename = "teamName")]
-    pub team_name: Option<String>,
-    #[serde(rename = "courseName")]
-    pub course_name: Option<String>,
-    #[serde(rename = "assignmentId")]
-    pub assignment_id: Option<String>,
-    #[serde(rename = "isAssignment")]
-    pub is_assignment: Option<bool>,
-    #[serde(rename = "isPlanner")]
-    pub is_planner: Option<bool>,
-    #[serde(rename = "isFlaggedEmail")]
-    pub is_flagged_email: Option<bool>,
-    #[serde(rename = "percentComplete")]
-    pub percent_complete: Option<u8>,
-    #[serde(rename = "submissionUrl")]
-    pub submission_url: Option<String>,
     #[serde(default)]
     pub priority: Option<String>,
 }
@@ -378,88 +355,6 @@ fn find_matching_label(existing: &[GHLabel], target: &str, synonyms: &[&str]) ->
     None
 }
 
-// ─── Microsoft 365 API Types ────────────────────────────────────────────────
-
-#[derive(Deserialize, Debug)]
-struct MSGraphCollection<T> {
-    value: Option<Vec<T>>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSEducationAssignmentInstructions {
-    content: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSEducationAssignment {
-    id: String,
-    display_name: Option<String>,
-    instructions: Option<MSEducationAssignmentInstructions>,
-    due_date_time: Option<String>,
-    status: Option<String>,
-    web_url: Option<String>,
-    class_id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSPlannerTask {
-    id: String,
-    title: Option<String>,
-    percent_complete: Option<u8>,
-    due_date_time: Option<String>,
-    #[allow(dead_code)]
-    plan_id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoList {
-    id: String,
-    display_name: Option<String>,
-    wellknown_list_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSToDoBody {
-    content: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSToDoDateTime {
-    #[serde(rename = "dateTime")]
-    date_time: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoChecklistItem {
-    id: String,
-    display_name: Option<String>,
-    is_checked: Option<bool>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoLinkedResource {
-    web_url: Option<String>,
-    application_name: Option<String>,
-    display_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoTask {
-    id: String,
-    title: Option<String>,
-    status: Option<String>,
-    body: Option<MSToDoBody>,
-    due_date_time: Option<MSToDoDateTime>,
-    checklist_items: Option<Vec<MSToDoChecklistItem>>,
-    linked_resources: Option<Vec<MSToDoLinkedResource>>,
-}
-
 // ─── Credential File Helpers ─────────────────────────────────────────────────
 
 fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -593,40 +488,6 @@ fn task_status_to_google_status(ts: &str) -> String {
     match ts {
         "done" => "completed".to_string(),
         _ => "needsAction".to_string(),
-    }
-}
-
-pub fn ms_status_to_task_status(status: Option<&str>, percent_complete: Option<u8>) -> String {
-    if let Some(pct) = percent_complete {
-        if pct == 100 {
-            return "done".to_string();
-        } else if pct > 0 {
-            return "in_progress".to_string();
-        } else {
-            return "todo".to_string();
-        }
-    }
-
-    match status.unwrap_or("").to_lowercase().as_str() {
-        "completed" | "submitted" | "returned" => "done".to_string(),
-        "inprogress" | "in_progress" => "in_progress".to_string(),
-        "notstarted" | "assigned" | "draft" | "scheduled" | _ => "todo".to_string(),
-    }
-}
-
-pub fn task_status_to_ms_todo_status(ts: &str) -> String {
-    match ts {
-        "done" => "completed".to_string(),
-        "in_progress" => "inProgress".to_string(),
-        _ => "notStarted".to_string(),
-    }
-}
-
-pub fn task_status_to_ms_planner_percent(ts: &str) -> u8 {
-    match ts {
-        "done" => 100,
-        "in_progress" => 50,
-        _ => 0,
     }
 }
 
@@ -1151,12 +1012,9 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
         && (env_google.is_some() || env_google_refresh.is_some())
         && has_google;
 
-    let has_microsoft = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
-
     Ok(AuthStatus {
         has_github,
         has_google,
-        has_microsoft,
         github_from_env,
         google_from_env,
         google_has_refresh_token: has_refresh_token,
@@ -1171,7 +1029,6 @@ fn save_credentials(
     google_refresh_token: Option<String>,
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
-    microsoft_token: Option<String>,
 ) -> Result<AuthStatus, String> {
     let mut creds = read_stored_credentials_file(&app_handle);
     if let Some(gh) = github_token.as_ref() {
@@ -1220,16 +1077,6 @@ fn save_credentials(
             creds.google_client_secret = Some(trimmed);
         }
     }
-    if let Some(ms) = microsoft_token.as_ref() {
-        let trimmed = ms.trim().to_string();
-        if trimmed.is_empty() {
-            creds.microsoft_token = None;
-            creds.microsoft_disconnected = Some(true);
-        } else {
-            creds.microsoft_token = Some(trimmed);
-            creds.microsoft_disconnected = Some(false);
-        }
-    }
     write_credentials(&app_handle, &creds)?;
 
     let full_creds = read_credentials(&app_handle);
@@ -1241,12 +1088,6 @@ fn save_credentials(
         if google_token.is_some() || google_refresh_token.is_some() {
             health.google.connected = full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some();
             health.google.error_message = None;
-        }
-        if microsoft_token.is_some() {
-            health.microsoft = Some(ProviderHealth {
-                connected: full_creds.microsoft_token.is_some(),
-                ..Default::default()
-            });
         }
     }
 
@@ -1270,19 +1111,13 @@ fn clear_credentials(
             creds.google_token_expiry = None;
             creds.google_disconnected = Some(true);
         }
-        Some("microsoft") => {
-            creds.microsoft_token = None;
-            creds.microsoft_disconnected = Some(true);
-        }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
             creds.google_refresh_token = None;
             creds.google_token_expiry = None;
-            creds.microsoft_token = None;
             creds.github_disconnected = Some(true);
             creds.google_disconnected = Some(true);
-            creds.microsoft_disconnected = Some(true);
         }
     }
     write_credentials(&app_handle, &creds)?;
@@ -1300,12 +1135,6 @@ fn clear_credentials(
                 connected: full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some(),
                 ..Default::default()
             };
-        }
-        if provider.as_deref() == Some("microsoft") || provider.is_none() {
-            health.microsoft = Some(ProviderHealth {
-                connected: full_creds.microsoft_token.is_some(),
-                ..Default::default()
-            });
         }
     }
 
@@ -1954,6 +1783,15 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             updated_at,
             description: task.notes.clone(),
             source_meta: SourceMeta {
+                repo: None,
+                issue_number: None,
+                labels: None,
+                is_pull_request: None,
+                comments_count: None,
+                milestone: None,
+                author: None,
+                assignees: None,
+                branch_info: None,
                 list_id: Some(entry.list_id),
                 list_title: Some(entry.list_title),
                 notes: task.notes,
@@ -1963,7 +1801,7 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 subtask_count,
                 subtasks,
                 links,
-                ..Default::default()
+                priority: None,
             },
         });
     }
@@ -2181,7 +2019,16 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 author,
                 assignees,
                 branch_info,
-                ..Default::default()
+                list_id: None,
+                list_title: None,
+                notes: None,
+                due_date: None,
+                parent_id: None,
+                has_subtasks: None,
+                subtask_count: None,
+                subtasks: None,
+                links: None,
+                priority: None,
             },
         });
     }
@@ -2222,305 +2069,6 @@ async fn update_google_task(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("Google Tasks API error (update) {}: {}", status, body));
-    }
-
-    Ok(())
-}
-
-/// Fetch tasks from Microsoft 365 / Microsoft Graph:
-/// 1. Microsoft To Do & Flagged Emails (/me/todo/lists and /me/todo/lists/{id}/tasks)
-/// 2. Microsoft Planner (/me/planner/tasks)
-/// 3. Teams for Education Assignments (/education/me/assignments)
-#[tauri::command]
-async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .microsoft_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Microsoft 365 token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
-
-    // 1. Fetch Microsoft To Do lists & tasks
-    let lists_resp = client
-        .get("https://graph.microsoft.com/v1.0/me/todo/lists")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = lists_resp {
-        if resp.status().is_success() {
-            if let Ok(lists_body) = resp.json::<MSGraphCollection<MSToDoList>>().await {
-                for list in lists_body.value.unwrap_or_default() {
-                    let is_flagged_list = list
-                        .wellknown_list_name
-                        .as_deref()
-                        .map(|w| w.eq_ignore_ascii_case("flaggedEmails"))
-                        .unwrap_or(false);
-
-                    let tasks_resp = client
-                        .get(format!(
-                            "https://graph.microsoft.com/v1.0/me/todo/lists/{}/tasks?$expand=checklistItems,linkedResources",
-                            list.id
-                        ))
-                        .bearer_auth(&token)
-                        .send()
-                        .await;
-
-                    if let Ok(t_resp) = tasks_resp {
-                        if t_resp.status().is_success() {
-                            if let Ok(tasks_body) = t_resp.json::<MSGraphCollection<MSToDoTask>>().await {
-                                for task in tasks_body.value.unwrap_or_default() {
-                                    let title = task.title.clone().unwrap_or_default();
-                                    if title.trim().is_empty() {
-                                        continue;
-                                    }
-
-                                    let status = ms_status_to_task_status(task.status.as_deref(), None);
-
-                                    let subtasks: Option<Vec<SubtaskItem>> = task.checklist_items.map(|items| {
-                                        items
-                                            .into_iter()
-                                            .map(|ci| SubtaskItem {
-                                                id: ci.id,
-                                                title: ci.display_name.unwrap_or_default(),
-                                                status: if ci.is_checked.unwrap_or(false) {
-                                                    "completed".to_string()
-                                                } else {
-                                                    "needsAction".to_string()
-                                                },
-                                            })
-                                            .collect()
-                                    });
-
-                                    let has_subtasks = subtasks.as_ref().map(|s| !s.is_empty());
-                                    let subtask_count = subtasks.as_ref().map(|s| s.len());
-
-                                    let links: Option<Vec<TaskLink>> = task.linked_resources.map(|res| {
-                                        res.into_iter()
-                                            .filter_map(|lr| {
-                                                let link = lr.web_url?;
-                                                Some(TaskLink {
-                                                    description: lr.display_name.or(lr.application_name),
-                                                    link,
-                                                    link_type: Some("url".to_string()),
-                                                })
-                                            })
-                                            .collect()
-                                    });
-
-                                    let web_url = links
-                                        .as_ref()
-                                        .and_then(|l| l.first())
-                                        .map(|l| l.link.clone())
-                                        .unwrap_or_else(|| {
-                                            format!("https://to-do.office.com/tasks/id/{}", task.id)
-                                        });
-
-                                    unified_tasks.push(UnifiedTask {
-                                        id: format!("ms_todo_{}", task.id),
-                                        title,
-                                        source: "microsoft_teams".to_string(),
-                                        status,
-                                        priority: None,
-                                        url: web_url,
-                                        updated_at: chrono_now_iso(),
-                                        description: task.body.and_then(|b| b.content),
-                                        source_meta: SourceMeta {
-                                            list_id: Some(list.id.clone()),
-                                            list_title: list.display_name.clone(),
-                                            due_date: task.due_date_time.and_then(|d| d.date_time),
-                                            has_subtasks,
-                                            subtask_count,
-                                            subtasks,
-                                            links,
-                                            is_flagged_email: if is_flagged_list { Some(true) } else { None },
-                                            ..Default::default()
-                                        },
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Fetch Microsoft Planner tasks
-    let planner_resp = client
-        .get("https://graph.microsoft.com/v1.0/me/planner/tasks")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = planner_resp {
-        if resp.status().is_success() {
-            if let Ok(planner_body) = resp.json::<MSGraphCollection<MSPlannerTask>>().await {
-                for task in planner_body.value.unwrap_or_default() {
-                    let title = task.title.clone().unwrap_or_default();
-                    if title.trim().is_empty() {
-                        continue;
-                    }
-
-                    let status = ms_status_to_task_status(None, task.percent_complete);
-                    let percent = task.percent_complete.unwrap_or(0);
-
-                    unified_tasks.push(UnifiedTask {
-                        id: format!("ms_planner_{}", task.id),
-                        title,
-                        source: "microsoft_teams".to_string(),
-                        status,
-                        priority: None,
-                        url: "https://tasks.office.com/".to_string(),
-                        updated_at: chrono_now_iso(),
-                        description: None,
-                        source_meta: SourceMeta {
-                            is_planner: Some(true),
-                            percent_complete: Some(percent),
-                            due_date: task.due_date_time,
-                            ..Default::default()
-                        },
-                    });
-                }
-            }
-        }
-    }
-
-    // 3. Fetch Teams for Education assignments (optional / school accounts)
-    let edu_resp = client
-        .get("https://graph.microsoft.com/v1.0/education/me/assignments")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = edu_resp {
-        if resp.status().is_success() {
-            if let Ok(edu_body) = resp.json::<MSGraphCollection<MSEducationAssignment>>().await {
-                for assignment in edu_body.value.unwrap_or_default() {
-                    let title = assignment.display_name.clone().unwrap_or_default();
-                    if title.trim().is_empty() {
-                        continue;
-                    }
-
-                    let status = ms_status_to_task_status(assignment.status.as_deref(), None);
-                    let web_url = assignment.web_url.clone().unwrap_or_else(|| {
-                        "https://teams.microsoft.com/l/entity/66aeee93-507d-479a-a3ef-ba44ac2e7735/classroom".to_string()
-                    });
-
-                    unified_tasks.push(UnifiedTask {
-                        id: format!("ms_assignment_{}", assignment.id),
-                        title,
-                        source: "microsoft_teams".to_string(),
-                        status,
-                        priority: None,
-                        url: web_url.clone(),
-                        updated_at: chrono_now_iso(),
-                        description: assignment.instructions.and_then(|i| i.content),
-                        source_meta: SourceMeta {
-                            is_assignment: Some(true),
-                            assignment_id: Some(assignment.id),
-                            due_date: assignment.due_date_time,
-                            submission_url: Some(web_url),
-                            course_name: assignment.class_id,
-                            ..Default::default()
-                        },
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(unified_tasks)
-}
-
-/// Update completion status for a Microsoft 365 task (To Do, Planner, or Assignment)
-#[tauri::command]
-async fn update_microsoft_task(
-    app_handle: tauri::AppHandle,
-    task_id: String,
-    list_id: Option<String>,
-    new_status: String,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .microsoft_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Microsoft 365 token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    if task_id.starts_with("ms_planner_") {
-        let raw_id = task_id.strip_prefix("ms_planner_").unwrap_or(&task_id);
-        let percent = task_status_to_ms_planner_percent(&new_status);
-
-        // Fetch task to get @odata.etag
-        let get_resp = client
-            .get(format!("https://graph.microsoft.com/v1.0/planner/tasks/{}", raw_id))
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch planner task: {}", e))?;
-
-        if !get_resp.status().is_success() {
-            let status = get_resp.status();
-            let body = get_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft Planner GET error ({}): {}", status, body));
-        }
-
-        let etag = get_resp
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("*");
-
-        let patch_resp = client
-            .patch(format!("https://graph.microsoft.com/v1.0/planner/tasks/{}", raw_id))
-            .header("If-Match", etag)
-            .bearer_auth(&token)
-            .json(&serde_json::json!({ "percentComplete": percent }))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to patch planner task: {}", e))?;
-
-        if !patch_resp.status().is_success() {
-            let status = patch_resp.status();
-            let body = patch_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft Planner PATCH error ({}): {}", status, body));
-        }
-    } else if task_id.starts_with("ms_assignment_") {
-        // Teams assignments: status update is managed via local state
-        return Ok(());
-    } else {
-        // Default to Microsoft To Do
-        let raw_id = task_id.strip_prefix("ms_todo_").unwrap_or(&task_id);
-        let target_list_id = list_id.ok_or_else(|| "list_id is required for Microsoft To Do task updates".to_string())?;
-        let ms_status = task_status_to_ms_todo_status(&new_status);
-
-        let patch_resp = client
-            .patch(format!(
-                "https://graph.microsoft.com/v1.0/me/todo/lists/{}/tasks/{}",
-                target_list_id, raw_id
-            ))
-            .bearer_auth(&token)
-            .json(&serde_json::json!({ "status": ms_status }))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to update To Do task: {}", e))?;
-
-        if !patch_resp.status().is_success() {
-            let status = patch_resp.status();
-            let body = patch_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft To Do API error ({}): {}", status, body));
-        }
     }
 
     Ok(())
@@ -3086,9 +2634,7 @@ pub fn run() {
             start_google_oauth_flow,
             fetch_google_tasks,
             fetch_github_tasks,
-            fetch_microsoft_tasks,
             update_google_task,
-            update_microsoft_task,
             setup_github_repo_labels,
             update_github_issue_labels,
             close_github_issue,
@@ -3217,14 +2763,12 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
-            microsoft_token: Some("eyJ0eXAi...".to_string()),
             google_refresh_token: Some("1//refresh_token_test".to_string()),
             google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
             google_client_secret: Some("GOCSPX-secret".to_string()),
             google_token_expiry: Some(1792615000),
             github_disconnected: Some(false),
             google_disconnected: Some(false),
-            microsoft_disconnected: Some(false),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -3238,26 +2782,22 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123".to_string()),
             google_token: Some("   ".to_string()),
-            microsoft_token: Some("ms_token_valid".to_string()),
             google_refresh_token: Some("1//valid_refresh".to_string()),
             google_client_id: None,
             google_client_secret: None,
             google_token_expiry: None,
             github_disconnected: None,
             google_disconnected: None,
-            microsoft_disconnected: None,
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             has_google: creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-            has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
             github_from_env: false,
             google_from_env: false,
             google_has_refresh_token: true,
         };
         assert!(status.has_github);
         assert!(status.has_google);
-        assert!(status.has_microsoft);
         assert!(status.google_has_refresh_token);
         assert!(!status.github_from_env);
         assert!(!status.google_from_env);
@@ -3270,7 +2810,11 @@ mod tests {
             github_token: Some("ghp_stored".to_string()),
             google_token: None,
             google_refresh_token: Some("1//stored_refresh".to_string()),
-            ..Default::default()
+            google_client_id: None,
+            google_client_secret: None,
+            google_token_expiry: None,
+            github_disconnected: None,
+            google_disconnected: None,
         };
         let env_github = Some("ghp_env".to_string());
         let env_google = Some("ya29.env".to_string());
@@ -3313,7 +2857,6 @@ mod tests {
         let status = AuthStatus {
             has_github: true,
             has_google: false,
-            has_microsoft: false,
             github_from_env: true,
             google_from_env: false,
             google_has_refresh_token: false,
@@ -3493,32 +3036,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ms_status_to_task_status() {
-        assert_eq!(ms_status_to_task_status(Some("notStarted"), None), "todo");
-        assert_eq!(ms_status_to_task_status(Some("inProgress"), None), "in_progress");
-        assert_eq!(ms_status_to_task_status(Some("completed"), None), "done");
-        assert_eq!(ms_status_to_task_status(Some("assigned"), None), "todo");
-        assert_eq!(ms_status_to_task_status(Some("submitted"), None), "done");
-        assert_eq!(ms_status_to_task_status(Some("returned"), None), "done");
-
-        // Percentage-based (Planner)
-        assert_eq!(ms_status_to_task_status(None, Some(0)), "todo");
-        assert_eq!(ms_status_to_task_status(None, Some(50)), "in_progress");
-        assert_eq!(ms_status_to_task_status(None, Some(100)), "done");
-    }
-
-    #[test]
-    fn test_task_status_to_ms_mappings() {
-        assert_eq!(task_status_to_ms_todo_status("todo"), "notStarted");
-        assert_eq!(task_status_to_ms_todo_status("in_progress"), "inProgress");
-        assert_eq!(task_status_to_ms_todo_status("done"), "completed");
-
-        assert_eq!(task_status_to_ms_planner_percent("todo"), 0);
-        assert_eq!(task_status_to_ms_planner_percent("in_progress"), 50);
-        assert_eq!(task_status_to_ms_planner_percent("done"), 100);
-    }
-
-    #[test]
     fn test_build_linux_desktop_entry() {
         let entry_normal = build_linux_desktop_entry("/usr/bin/widkanban", false);
         assert!(entry_normal.contains("Exec=/usr/bin/widkanban\n"));
@@ -3565,7 +3082,6 @@ mod tests {
                 last_checked: None,
                 error_message: Some("Google Tasks token not configured".to_string()),
             },
-            microsoft: None,
         };
         let serialized = serde_json::to_string(&health).expect("serialization failed");
         assert!(serialized.contains("rateLimitRemaining"));
@@ -3593,3 +3109,6 @@ mod tests {
         assert!(fail_generic.contains("redirect_uri_mismatch"));
     }
 }
+
+
+
