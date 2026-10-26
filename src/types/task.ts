@@ -1,4 +1,4 @@
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft_teams';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -37,7 +37,7 @@ export interface PRBranchInfo {
 }
 
 export interface UnifiedTask {
-  id: string;             // e.g., 'gh_102' or 'gt_abc123'
+  id: string;             // e.g., 'gh_102' or 'gt_abc123' or 'ms_xyz789'
   title: string;
   source: TaskSource;
   status: TaskStatus;
@@ -72,15 +72,27 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;
+
+    // --- Microsoft 365 & Teams ---
+    teamName?: string;           // Teams channel or team name
+    courseName?: string;         // Teams for Education class name
+    assignmentId?: string;       // Unique assignment ID
+    isAssignment?: boolean;      // Teams for Education Assignment
+    isPlanner?: boolean;         // Microsoft Planner card
+    isFlaggedEmail?: boolean;    // Outlook flagged email
+    percentComplete?: number;    // Planner task percentage (0 - 100)
+    submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
 
 export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
+  has_microsoft: boolean;
   github_from_env?: boolean;
   google_from_env?: boolean;
   google_has_refresh_token?: boolean;
+  microsoft_from_env?: boolean;
 }
 
 export interface GitHubSyncSettings {
@@ -185,6 +197,7 @@ export interface ProviderHealth {
 export interface ApiHealthState {
   github: ProviderHealth;
   google: ProviderHealth;
+  microsoft?: ProviderHealth;
 }
 
 export const DEFAULT_API_HEALTH_STATE: ApiHealthState = {
@@ -200,6 +213,17 @@ export const DEFAULT_API_HEALTH_STATE: ApiHealthState = {
     errorMessage: null,
   },
   google: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
+  microsoft: {
     connected: false,
     rateLimitRemaining: undefined,
     rateLimitLimit: undefined,

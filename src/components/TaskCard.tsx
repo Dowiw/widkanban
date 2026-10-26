@@ -21,6 +21,7 @@ import {
   Tag,
   GitBranch,
   GitFork,
+  Users
 } from 'lucide-react';
 import { MarkdownViewer } from './MarkdownViewer';
 import { safeOpenUrl } from '../utils/openUrl';
@@ -96,6 +97,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   };
 
   const isGitHub = task.source === 'github';
+  const isMicrosoft = task.source === 'microsoft_teams';
   const smartDue = getSmartDueDate(task.sourceMeta?.dueDate);
 
   const handleOpenUrl = (e: React.MouseEvent, urlToOpen?: string) => {
@@ -195,6 +197,24 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                   : 'Issue'}
               </span>
             </span>
+          ) : isMicrosoft ? (
+            <span
+              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/60 truncate"
+              title={task.sourceMeta?.teamName || task.sourceMeta?.courseName || 'Microsoft 365'}
+            >
+              <Users className="h-2.5 w-2.5 shrink-0 text-violet-600 dark:text-violet-400" />
+              <span className="truncate">
+                {task.sourceMeta?.teamName ||
+                  task.sourceMeta?.courseName ||
+                  (task.sourceMeta?.isAssignment
+                    ? 'Teams Assignment'
+                    : task.sourceMeta?.isPlanner
+                    ? 'Planner'
+                    : task.sourceMeta?.isFlaggedEmail
+                    ? 'Flagged Email'
+                    : 'Microsoft 365')}
+              </span>
+            </span>
           ) : (
             <span
               className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/60 truncate"
@@ -245,7 +265,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
       {/* Quick Micro-Badges Row */}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[10px]">
         {/* --- GOOGLE TASKS MICRO-BADGES --- */}
-        {!isGitHub && (
+        {task.source === 'google_tasks' && (
           <>
             {/* Smart Due Date */}
             {smartDue && (
@@ -282,6 +302,62 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 <span>{linkItem.linkType === 'email' ? 'Gmail' : linkItem.linkType === 'calendar' ? 'Calendar' : 'Link'}</span>
               </button>
             ))}
+
+            {/* Subtask Dropdown Toggle */}
+            {task.sourceMeta?.hasSubtasks && (
+              <button
+                type="button"
+                onClick={handleToggleSubtasks}
+                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium transition-colors"
+                title="View subtasks"
+              >
+                <CornerDownRight className="h-2.5 w-2.5" />
+                <span>
+                  {task.sourceMeta.subtaskCount} subtask{task.sourceMeta.subtaskCount === 1 ? '' : 's'} {isSubtasksOpen ? '▴' : '▾'}
+                </span>
+              </button>
+            )}
+          </>
+        )}
+
+        {/* --- MICROSOFT 365 MICRO-BADGES --- */}
+        {isMicrosoft && (
+          <>
+            {/* Smart Due Date */}
+            {smartDue && (
+              <span
+                className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded font-medium border ${
+                  smartDue.urgency === 'overdue'
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : smartDue.urgency === 'today'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-violet-50 text-violet-700 border-violet-200'
+                }`}
+              >
+                <Calendar className="h-2.5 w-2.5" />
+                <span>{smartDue.label}</span>
+              </span>
+            )}
+
+            {/* Sub-type Badges */}
+            {task.sourceMeta?.isAssignment && (
+              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/60 font-medium">
+                Assignment
+              </span>
+            )}
+
+            {task.sourceMeta?.isPlanner && (
+              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/60 font-medium">
+                Planner{typeof task.sourceMeta?.percentComplete === 'number' ? ` · ${task.sourceMeta.percentComplete}%` : ''}
+              </span>
+            )}
+
+            {task.sourceMeta?.isFlaggedEmail && (
+              <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/60 font-medium">
+                <Mail className="h-2.5 w-2.5 text-rose-500" />
+                <span>Flagged</span>
+              </span>
+            )}
 
             {/* Subtask Dropdown Toggle */}
             {task.sourceMeta?.hasSubtasks && (
