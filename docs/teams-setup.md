@@ -6,7 +6,8 @@ This guide walks you through connecting your **Microsoft 365** and **Microsoft T
 > WidKanban **never** stores tokens in your browser or frontend state. Your token is transmitted directly to the native Rust backend and saved securely in local OS storage (`credentials.json`) with restricted file permissions (`600`). All Microsoft Graph HTTP requests are performed natively in Rust with zero webview exposure.
 
 > **Status**: Verified & Active  
-> **Last Updated**: October 2026 (Verified with Microsoft Graph Explorer & Entra ID / Azure Portal UI)
+> **Last Updated**: October 2026 (Verified with Microsoft Graph Explorer & Entra ID / Azure Portal UI)  
+> **Visual Walkthrough Note**: Step-by-step UI screenshots are being added to `docs/images/teams/`. Image anchors (`images/teams/*.png`) are annotated below for each step.
 
 ---
 
@@ -63,6 +64,8 @@ Microsoft Graph Explorer provides a pre-consented sandbox that generates immedia
 2. Click **Sign in to Graph Explorer** in the top-right corner.
 3. Authenticate with your Microsoft personal, work, or university account.
 
+![Step 1: Signing in to Microsoft Graph Explorer](images/teams/01-graph-explorer-signin.png)
+
 ---
 
 ### Step 2: Consent to Permissions
@@ -74,11 +77,15 @@ Microsoft Graph Explorer provides a pre-consented sandbox that generates immedia
    - `User.Read`
 3. A Microsoft permission consent dialog will appear. Click **Accept**.
 
+![Step 2: Consenting to Tasks and Education permissions](images/teams/02-modify-permissions-consent.png)
+
 ---
 
 ### Step 3: Copy Your Access Token
 1. In Graph Explorer, click the **Access token** tab (located directly below the query box).
 2. Click the **Copy token** icon. The token is a standard JWT starting with `eyJ0eXAi...`.
+
+![Step 3: Copying Access Token from Graph Explorer](images/teams/03-copy-access-token.png)
 
 ---
 
@@ -90,6 +97,8 @@ Microsoft Graph Explorer provides a pre-consented sandbox that generates immedia
 5. Click **Save Credentials**.
 6. The badge will change to **Connected** (green) and your Microsoft 365 tasks will immediately populate the board!
 
+![Step 4: Pasting Microsoft token in WidKanban Settings](images/teams/04-settings-connected.png)
+
 ---
 
 ## Option 2: Microsoft Entra ID / Azure App Registration (Permanent Desktop Setup)
@@ -100,6 +109,8 @@ For permanent desktop widget usage with an organization or school tenant, you ca
 1. Navigate to the [Microsoft Entra Admin Center](https://entra.microsoft.com/) (or [Azure Portal](https://portal.azure.com/)).
 2. Log in with your organization or administrator account.
 3. In the left navigation, go to **Identity** → **Applications** → **App registrations**.
+
+![Step 2a: Navigating to App registrations in Microsoft Entra Admin Center](images/teams/05-entra-app-registrations.png)
 
 ---
 
@@ -113,6 +124,8 @@ For permanent desktop widget usage with an organization or school tenant, you ca
      http://localhost
      ```
 3. Click **Register**.
+
+![Step 2b: Registering application with public client desktop redirect](images/teams/06-entra-register-app.png)
 
 ---
 
@@ -128,12 +141,16 @@ For permanent desktop widget usage with an organization or school tenant, you ca
 5. Click **Add permissions**.
 6. *(Optional for Admins)* Click **Grant admin consent for [Your Organization]** to bypass individual user consent prompts.
 
+![Step 2c: Adding Microsoft Graph delegated permissions](images/teams/07-api-permissions.png)
+
 ---
 
 ### Step 4: Configure Desktop Authentication
 1. In the left navigation menu, click **Authentication**.
 2. Under **Advanced settings** → **Allow public client flows**, toggle **Enable the following mobile and desktop flows** to **Yes**.
 3. Click **Save**.
+
+![Step 2d: Enabling public client mobile and desktop flows](images/teams/08-enable-public-client.png)
 
 ---
 
