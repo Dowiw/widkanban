@@ -1109,7 +1109,7 @@ export const SettingsModal: React.FC = () => {
                             {apiHealth.github.rateLimitLimit ?? 5000}
                           </span>
                         </div>
-                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-750 overflow-hidden">
+                        <div className="w-full h-2 rounded-md bg-slate-200 dark:bg-slate-750 overflow-hidden">
                           <div
                             className={`h-full transition-all ${
                               apiHealth.github.isRateLimited
