@@ -62,16 +62,17 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     checkAuthStatus().then((status) => {
-      if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
+      const hasAnyProvider = status.has_github || status.has_google || status.has_microsoft;
+      if (!hasCompletedOnboarding && !hasAnyProvider) {
         setSettingsOpen(true);
-      } else if (status.has_github || status.has_google) {
+      } else if (hasAnyProvider) {
         if (!autoSyncSettings.hasPrompted) {
           setAutoSyncPromptOpen(true);
         } else if (!startupSettings.hasPrompted) {
           setStartupPromptOpen(true);
         }
       }
-      if (status.has_github || status.has_google) {
+      if (hasAnyProvider) {
         refreshTasksWithDiff();
       }
     });
@@ -122,8 +123,8 @@ export const App: React.FC = () => {
 
   const rootStyle: React.CSSProperties = {
     ['--widget-radius' as string]: `${customization.cornerRadius}px`,
-    ['--col-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.75))}px`,
-    ['--card-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.5))}px`,
+    ['--col-radius' as string]: `${customization.cornerRadius}px`,
+    ['--card-radius' as string]: `${customization.cornerRadius}px`,
     ['--col-header-height' as string]: `${customization.columnHeaderHeight}px`,
     ['--col-min-width' as string]: `${customization.columnMinWidth}px`,
   };
