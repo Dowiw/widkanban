@@ -64,7 +64,7 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
             {title}
           </h2>
         </div>
-        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-black/15 text-white/95">
+        <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-black/15 text-white/95">
           {tasks.length}
         </span>
       </div>

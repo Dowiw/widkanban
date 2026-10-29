@@ -113,7 +113,7 @@ export const PermissionsReviewModal: React.FC<PermissionsReviewModalProps> = ({
                           {p.userName || brand.title}
                         </span>
                         <span
-                          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${brand.badgeClass}`}
+                          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-md border ${brand.badgeClass}`}
                         >
                           {brand.title}
                         </span>
@@ -129,12 +129,12 @@ export const PermissionsReviewModal: React.FC<PermissionsReviewModalProps> = ({
                   {/* Readiness Status Pill */}
                   <div>
                     {p.isValid && p.allRequiredGranted ? (
-                      <span className="inline-flex items-center space-x-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                      <span className="inline-flex items-center space-x-1 text-[9px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                         <CheckCircle2 className="h-2.5 w-2.5" />
                         <span>Ready</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center space-x-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                      <span className="inline-flex items-center space-x-1 text-[9px] font-semibold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                         <XCircle className="h-2.5 w-2.5" />
                         <span>Incomplete</span>
                       </span>

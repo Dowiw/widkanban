@@ -520,7 +520,7 @@ export const Header: React.FC = () => {
                 <Trash2 className="h-3 w-3" />
                 <span>Trash</span>
                 {locallyDeletedTasks.length > 0 && (
-                  <span className="ml-0.5 px-1 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+                  <span className="ml-0.5 px-1 py-0.2 rounded-md bg-rose-500 text-white text-[9px] font-bold">
                     {locallyDeletedTasks.length}
                   </span>
                 )}

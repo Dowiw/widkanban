@@ -177,7 +177,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           {/* Provider Badge */}
           {isGitHub ? (
             <span
-              className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border truncate ${
+              className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border truncate ${
                 task.sourceMeta?.isPullRequest
                   ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/60'
                   : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60'
@@ -199,7 +199,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
             </span>
           ) : isMicrosoft ? (
             <span
-              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/60 truncate"
+              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/60 truncate"
               title={task.sourceMeta?.teamName || task.sourceMeta?.courseName || 'Microsoft 365'}
             >
               <Users className="h-2.5 w-2.5 shrink-0 text-violet-600 dark:text-violet-400" />
@@ -217,7 +217,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
             </span>
           ) : (
             <span
-              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/60 truncate"
+              className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/60 truncate"
               title={task.sourceMeta?.listTitle || 'Google Tasks'}
             >
               <CheckSquare className="h-2.5 w-2.5 shrink-0 text-blue-600 dark:text-blue-400" />
