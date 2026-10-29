@@ -382,6 +382,32 @@ describe('useTaskStore', () => {
     expect(mockInvoke).toHaveBeenCalledWith('fetch_microsoft_tasks', undefined);
   });
 
+  it('inspectCredentials invokes inspect_credentials IPC and returns report', async () => {
+    mockInvoke.mockClear();
+    const mockReport = {
+      providers: [
+        {
+          provider: 'microsoft',
+          isValid: true,
+          permissions: [],
+          allRequiredGranted: true,
+        },
+      ],
+      canProceed: true,
+    };
+    mockInvoke.mockResolvedValueOnce(mockReport);
+
+    const { inspectCredentials } = useTaskStore.getState();
+    const report = await inspectCredentials({ microsoftToken: 'candidate_token' });
+
+    expect(report).toEqual(mockReport);
+    expect(mockInvoke).toHaveBeenCalledWith('inspect_credentials', {
+      githubToken: null,
+      googleToken: null,
+      microsoftToken: 'candidate_token',
+    });
+  });
+
   it('fires update_github_issue_labels IPC when moving GitHub issue between todo and in_progress', () => {
     mockInvoke.mockClear();
     const { addTask, moveTask } = useTaskStore.getState();

@@ -19,6 +19,7 @@ import {
   DEFAULT_AUTOSYNC_SETTINGS,
   ApiHealthState,
   DEFAULT_API_HEALTH_STATE,
+  CredentialInspectionReport,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -130,6 +131,11 @@ interface TaskState {
   fetchGithubTasks: () => Promise<void>;
   fetchMicrosoftTasks: () => Promise<void>;
   checkAuthStatus: () => Promise<AuthStatus>;
+  inspectCredentials: (payload: {
+    githubToken?: string;
+    googleToken?: string;
+    microsoftToken?: string;
+  }) => Promise<CredentialInspectionReport | null>;
   saveCredentials: (creds: {
     githubToken?: string;
     googleToken?: string;
@@ -765,6 +771,14 @@ export const useTaskStore = create<TaskState>()(
           return res;
         }
         return get().authStatus;
+      },
+
+      inspectCredentials: async ({ githubToken, googleToken, microsoftToken }) => {
+        return await safeInvoke<CredentialInspectionReport>('inspect_credentials', {
+          githubToken: githubToken || null,
+          googleToken: googleToken || null,
+          microsoftToken: microsoftToken || null,
+        });
       },
 
       saveCredentials: async ({

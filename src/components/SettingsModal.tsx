@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
-import { 
-  X, 
-  Github, 
-  CheckSquare, 
-  KeyRound, 
-  Check, 
-  Eye, 
-  EyeOff, 
+import {
+  X,
+  Github,
+  CheckSquare,
+  KeyRound,
+  Check,
+  Eye,
+  EyeOff,
   Trash2,
   ExternalLink,
   ShieldCheck,
@@ -39,7 +39,8 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { FontFamilyOption, CardDensity, ThemeMode, PinMode } from '../types/task';
+import { FontFamilyOption, CardDensity, ThemeMode, PinMode, CredentialInspectionReport } from '../types/task';
+import { PermissionsReviewModal } from './PermissionsReviewModal';
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none">
@@ -65,12 +66,13 @@ const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' })
 type SettingsTab = 'integrations' | 'sync' | 'appearance' | 'window' | 'advanced';
 
 export const SettingsModal: React.FC = () => {
-  const { 
-    isSettingsOpen, 
-    setSettingsOpen, 
+  const {
+    isSettingsOpen,
+    setSettingsOpen,
     setGithubSetupOpen,
-    authStatus, 
-    saveCredentials, 
+    authStatus,
+    inspectCredentials,
+    saveCredentials,
     clearCredentials,
     startGoogleOAuthFlow,
     fetchGoogleTasks,
@@ -112,6 +114,10 @@ export const SettingsModal: React.FC = () => {
   const [googleOAuthSuccess, setGoogleOAuthSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [inspectionReport, setInspectionReport] = useState<CredentialInspectionReport | null>(null);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isValidatingTokens, setIsValidatingTokens] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [isFetchingMicrosoft, setIsFetchingMicrosoft] = useState(false);
@@ -138,6 +144,52 @@ export const SettingsModal: React.FC = () => {
 
   const handleSaveIntegrations = async (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
+    const hasCandidateTokens = Boolean(
+      githubToken.trim() || googleToken.trim() || microsoftToken.trim()
+    );
+
+    if (!hasCandidateTokens) {
+      setIsSaving(true);
+      await saveCredentials({
+        googleClientId: googleClientId.trim() || undefined,
+        googleClientSecret: googleClientSecret.trim() || undefined,
+      });
+      setIsSaving(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 1500);
+      return;
+    }
+
+    setIsValidatingTokens(true);
+
+    try {
+      const report = await inspectCredentials({
+        githubToken: githubToken.trim() || undefined,
+        googleToken: googleToken.trim() || undefined,
+        microsoftToken: microsoftToken.trim() || undefined,
+      });
+
+      setIsValidatingTokens(false);
+
+      if (report && report.providers && report.providers.length > 0) {
+        setInspectionReport(report);
+        setIsReviewModalOpen(true);
+      } else {
+        await handleConfirmSave();
+      }
+    } catch (err) {
+      setIsValidatingTokens(false);
+      setValidationError(
+        typeof err === 'string'
+          ? err
+          : 'Failed to inspect token permissions. Please check your network and tokens.'
+      );
+    }
+  };
+
+  const handleConfirmSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -150,6 +202,8 @@ export const SettingsModal: React.FC = () => {
     });
 
     setIsSaving(false);
+    setIsReviewModalOpen(false);
+    setInspectionReport(null);
     setSaveSuccess(true);
     setGithubToken('');
     setGoogleToken('');
@@ -231,7 +285,7 @@ export const SettingsModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-4 text-slate-800 dark:text-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
-        
+
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
@@ -411,7 +465,7 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                  <span>Required scope: <code>repo</code></span>
+                  <span>Required scope: <code>repo, read:user</code></span>
                   <div className="flex items-center space-x-2">
                     {authStatus.has_github && (
                       <button
@@ -638,7 +692,7 @@ export const SettingsModal: React.FC = () => {
                       {/* Setup Instructions */}
                       <div className="p-2 rounded bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-[10px] space-y-1.5 text-slate-600 dark:text-slate-300">
                         <span className="font-semibold text-slate-700 dark:text-slate-200 block">
-                          3-Step Setup Instructions:
+                          Step by Step Setup Instructions:
                         </span>
                         <ol className="list-decimal list-inside space-y-1 text-slate-500 dark:text-slate-400">
                           <li>
@@ -841,6 +895,14 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Validation Error Notice if any */}
+              {validationError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-start space-x-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+                  <span>{validationError}</span>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -855,6 +917,7 @@ export const SettingsModal: React.FC = () => {
                   type="submit"
                   disabled={
                     isSaving ||
+                    isValidatingTokens ||
                     (!githubToken.trim() &&
                       !googleToken.trim() &&
                       !googleClientId.trim() &&
@@ -865,6 +928,7 @@ export const SettingsModal: React.FC = () => {
                     saveSuccess
                       ? 'bg-emerald-600 text-white'
                       : isSaving ||
+                        isValidatingTokens ||
                         (!githubToken.trim() &&
                           !googleToken.trim() &&
                           !googleClientId.trim() &&
@@ -878,6 +942,16 @@ export const SettingsModal: React.FC = () => {
                     <>
                       <Check className="h-3.5 w-3.5" />
                       <span>Saved!</span>
+                    </>
+                  ) : isValidatingTokens ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Checking Permissions...</span>
+                    </>
+                  ) : isSaving ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Saving...</span>
                     </>
                   ) : (
                     <span>Save Credentials</span>
@@ -1262,7 +1336,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'appearance' && (
             <div className="space-y-4">
-              
+
               {/* Theme Mode Selector */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -1343,12 +1417,12 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 {/* Mini Card Preview */}
-                <div 
+                <div
                   style={{ borderRadius: `${customization.cornerRadius}px` }}
                   className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-between text-xs transition-all"
                 >
                   <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Live Corner Preview</span>
-                  <span 
+                  <span
                     style={{ borderRadius: `${Math.max(0, Math.round(customization.cornerRadius * 0.5))}px` }}
                     className="px-2 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 dark:border dark:border-indigo-800 font-bold"
                   >
@@ -1410,7 +1484,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'window' && (
             <div className="space-y-4">
-              
+
               {/* Desktop Widget Layer & Pin Mode */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -1652,7 +1726,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'advanced' && (
             <div className="space-y-4">
-              
+
               {/* Column Header Height Slider */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -1749,6 +1823,15 @@ export const SettingsModal: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Permission Review Modal Layer */}
+      <PermissionsReviewModal
+        isOpen={isReviewModalOpen}
+        report={inspectionReport}
+        onConfirm={handleConfirmSave}
+        onCancel={() => setIsReviewModalOpen(false)}
+        isSaving={isSaving}
+      />
     </div>
   );
 };

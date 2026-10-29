@@ -82,6 +82,39 @@ fn get_health_store() -> &'static Mutex<ApiHealthState> {
     STORE.get_or_init(|| Mutex::new(ApiHealthState::default()))
 }
 
+// ─── Permission & Credential Inspection Models ──────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionItem {
+    pub scope: String,
+    pub description: String,
+    pub is_required: bool,
+    pub is_granted: bool,
+    pub feature_impact: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInspection {
+    pub provider: String,
+    pub is_valid: bool,
+    pub error_message: Option<String>,
+    pub user_name: Option<String>,
+    pub user_email: Option<String>,
+    pub avatar_url: Option<String>,
+    pub account_type: Option<String>,
+    pub permissions: Vec<PermissionItem>,
+    pub all_required_granted: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialInspectionReport {
+    pub providers: Vec<ProviderInspection>,
+    pub can_proceed: bool,
+}
+
 // ─── Provider Specific Detailed Models ──────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -1338,6 +1371,519 @@ fn clear_credentials(
     }
 
     get_auth_status(app_handle)
+}
+
+// ─── Token Permission Inspection Logic ──────────────────────────────────────
+
+fn decode_base64_url(input: &str) -> Option<Vec<u8>> {
+    let b64_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [0xffu8; 256];
+    for (i, &c) in b64_chars.iter().enumerate() {
+        lookup[c as usize] = i as u8;
+    }
+    let mut s = input.replace('-', "+").replace('_', "/");
+    while s.len() % 4 != 0 {
+        s.push('=');
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        if chunk.len() < 4 {
+            break;
+        }
+        let c0 = chunk[0];
+        let c1 = chunk[1];
+        let c2 = chunk[2];
+        let c3 = chunk[3];
+        if c0 == b'=' || c1 == b'=' {
+            break;
+        }
+        let b0 = lookup[c0 as usize];
+        let b1 = lookup[c1 as usize];
+        if b0 == 0xff || b1 == 0xff {
+            return None;
+        }
+        let triple = ((b0 as u32) << 18) | ((b1 as u32) << 12);
+        out.push(((triple >> 16) & 0xff) as u8);
+        if c2 != b'=' {
+            let b2 = lookup[c2 as usize];
+            if b2 == 0xff {
+                return None;
+            }
+            let triple = triple | ((b2 as u32) << 6);
+            out.push(((triple >> 8) & 0xff) as u8);
+            if c3 != b'=' {
+                let b3 = lookup[c3 as usize];
+                if b3 == 0xff {
+                    return None;
+                }
+                let triple = triple | (b3 as u32);
+                out.push((triple & 0xff) as u8);
+            }
+        }
+    }
+    Some(out)
+}
+
+fn extract_microsoft_jwt_claims(token: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return (None, None, None);
+    }
+    let payload_bytes = match decode_base64_url(parts[1]) {
+        Some(b) => b,
+        None => return (None, None, None),
+    };
+    let json: serde_json::Value = match serde_json::from_slice(&payload_bytes) {
+        Ok(j) => j,
+        Err(_) => return (None, None, None),
+    };
+    let scp = json.get("scp").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let upn = json
+        .get("upn")
+        .or_else(|| json.get("unique_name"))
+        .or_else(|| json.get("email"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+    (scp, upn, name)
+}
+
+async fn inspect_github_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "github".to_string(),
+            is_valid: false,
+            error_message: Some("GitHub token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get("https://api.github.com/user")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(trimmed)
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let scopes_header = res
+                    .headers()
+                    .get("x-oauth-scopes")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+
+                let scopes_list: Vec<String> = scopes_header
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let login = json.get("login").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let avatar = json.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let plan_type = json.get("type").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                let is_fine_grained = scopes_header.is_empty();
+                let has_repo = is_fine_grained || scopes_list.iter().any(|s| s == "repo");
+                let has_public_repo = scopes_list.iter().any(|s| s == "public_repo");
+                let has_read_org = is_fine_grained || scopes_list.iter().any(|s| s == "read:org");
+                let has_user = is_fine_grained || scopes_list.iter().any(|s| s == "user" || s == "read:user");
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "repo".to_string(),
+                    description: "Full control of private and public repositories, issues, and pull requests".to_string(),
+                    is_required: true,
+                    is_granted: has_repo,
+                    feature_impact: if !has_repo {
+                        if has_public_repo {
+                            Some("Only public repositories accessible. Private issues and PRs cannot be synced.".to_string())
+                        } else {
+                            Some("Cannot access, create, or update issues and pull requests (requires 'repo' scope).".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "read:org".to_string(),
+                    description: "Read organization and team memberships".to_string(),
+                    is_required: false,
+                    is_granted: has_read_org,
+                    feature_impact: if !has_read_org {
+                        Some("Organization-owned repositories may not be auto-discovered.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "user".to_string(),
+                    description: "Read user profile data and email".to_string(),
+                    is_required: false,
+                    is_granted: has_user,
+                    feature_impact: None,
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: name.or_else(|| login.clone()),
+                    user_email: login.map(|l| format!("@{}", l)),
+                    avatar_url: avatar,
+                    account_type: plan_type,
+                    permissions,
+                    all_required_granted,
+                }
+            } else if status.as_u16() == 401 {
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: false,
+                    error_message: Some("Invalid, expired, or revoked GitHub Personal Access Token (401 Unauthorized)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: false,
+                    error_message: Some(format!("GitHub API returned HTTP {}", status)),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "github".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to GitHub: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+async fn inspect_google_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "google".to_string(),
+            is_valid: false,
+            error_message: Some("Google token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get(format!("https://oauth2.googleapis.com/tokeninfo?access_token={}", trimmed))
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let email = json.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let scope_str = json.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+                let scopes: Vec<String> = scope_str.split_whitespace().map(|s| s.to_string()).collect();
+
+                let has_tasks_rw = scopes.iter().any(|s| s == "https://www.googleapis.com/auth/tasks");
+                let has_tasks_ro = scopes.iter().any(|s| s == "https://www.googleapis.com/auth/tasks.readonly");
+                let has_email = scopes.iter().any(|s| s.contains("email"));
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "tasks".to_string(),
+                    description: "Create, edit, organize, and delete all your Google Tasks and lists".to_string(),
+                    is_required: true,
+                    is_granted: has_tasks_rw,
+                    feature_impact: if !has_tasks_rw {
+                        if has_tasks_ro {
+                            Some("Read-only access: dragging cards or completing tasks will not sync back to Google Tasks.".to_string())
+                        } else {
+                            Some("Cannot access or synchronize Google Tasks (requires 'tasks' scope).".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "email".to_string(),
+                    description: "View your email address to verify account identity".to_string(),
+                    is_required: false,
+                    is_granted: has_email || email.is_some(),
+                    feature_impact: None,
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "google".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: email.clone(),
+                    user_email: email,
+                    avatar_url: None,
+                    account_type: Some("Google Account".to_string()),
+                    permissions,
+                    all_required_granted,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "google".to_string(),
+                    is_valid: false,
+                    error_message: Some("Google OAuth access token is invalid, expired, or revoked (400/401)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "google".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to Google OAuth: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+async fn inspect_microsoft_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "microsoft".to_string(),
+            is_valid: false,
+            error_message: Some("Microsoft token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get("https://graph.microsoft.com/v1.0/me")
+        .header("User-Agent", "WidKanban-Desktop")
+        .bearer_auth(trimmed)
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let api_display_name = json.get("displayName").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let api_email = json
+                    .get("userPrincipalName")
+                    .or_else(|| json.get("mail"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let (jwt_scp, jwt_upn, jwt_name) = extract_microsoft_jwt_claims(trimmed);
+                let final_name = api_display_name.or(jwt_name);
+                let final_email = api_email.or(jwt_upn);
+
+                let scopes_str = jwt_scp.unwrap_or_default();
+                let scopes: Vec<String> = scopes_str.split_whitespace().map(|s| s.to_string()).collect();
+
+                let is_unscoped = scopes.is_empty();
+                let has_tasks_rw = is_unscoped || scopes.iter().any(|s| s.eq_ignore_ascii_case("Tasks.ReadWrite"));
+                let has_tasks_ro = scopes.iter().any(|s| s.eq_ignore_ascii_case("Tasks.Read"));
+                let has_user_read = is_unscoped || scopes.iter().any(|s| s.eq_ignore_ascii_case("User.Read"));
+                let has_edu = scopes.iter().any(|s| {
+                    s.eq_ignore_ascii_case("EduAssignments.ReadBasic") || s.eq_ignore_ascii_case("EduAssignments.Read")
+                });
+                let has_group = scopes.iter().any(|s| {
+                    s.eq_ignore_ascii_case("Group.Read.All") || s.eq_ignore_ascii_case("Group.ReadWrite.All")
+                });
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "Tasks.ReadWrite".to_string(),
+                    description: "Read, create, update, and complete tasks in Microsoft To Do and Planner".to_string(),
+                    is_required: true,
+                    is_granted: has_tasks_rw,
+                    feature_impact: if !has_tasks_rw {
+                        if has_tasks_ro {
+                            Some("Read-only access: dragging cards to Done or In Progress will fail to sync back.".to_string())
+                        } else {
+                            Some("Cannot read or update Microsoft tasks (requires 'Tasks.ReadWrite').".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "User.Read".to_string(),
+                    description: "Sign in and read user profile and account details".to_string(),
+                    is_required: true,
+                    is_granted: has_user_read,
+                    feature_impact: if !has_user_read {
+                        Some("Cannot identify authenticated Microsoft account.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "EduAssignments.ReadBasic".to_string(),
+                    description: "Read class homework, assignments, and due dates in Teams for Education".to_string(),
+                    is_required: false,
+                    is_granted: has_edu,
+                    feature_impact: if !has_edu {
+                        Some("Teams for Education assignments disabled (normal for personal or business accounts).".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "Group.Read.All".to_string(),
+                    description: "Discover group-associated Microsoft Planner boards and Teams channels".to_string(),
+                    is_required: false,
+                    is_granted: has_group,
+                    feature_impact: if !has_group {
+                        Some("Planner boards belonging to Microsoft 365 groups may not be discovered.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: final_name,
+                    user_email: final_email,
+                    avatar_url: None,
+                    account_type: Some("Microsoft 365 Account".to_string()),
+                    permissions,
+                    all_required_granted,
+                }
+            } else if status.as_u16() == 401 {
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: false,
+                    error_message: Some("Invalid, expired, or revoked Microsoft access token (401 Unauthorized)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: false,
+                    error_message: Some(format!("Microsoft Graph returned HTTP {}", status)),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "microsoft".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to Microsoft Graph: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+#[tauri::command]
+async fn inspect_credentials(
+    _app_handle: tauri::AppHandle,
+    github_token: Option<String>,
+    google_token: Option<String>,
+    microsoft_token: Option<String>,
+) -> Result<CredentialInspectionReport, String> {
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut providers = Vec::new();
+
+    if let Some(token) = github_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_github_token(&client, &token).await);
+    }
+
+    if let Some(token) = google_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_google_token(&client, &token).await);
+    }
+
+    if let Some(token) = microsoft_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_microsoft_token(&client, &token).await);
+    }
+
+    let can_proceed = !providers.is_empty() && providers.iter().all(|p| p.is_valid && p.all_required_granted);
+
+    Ok(CredentialInspectionReport {
+        providers,
+        can_proceed,
+    })
 }
 
 /// Ensures that a valid Google access token is available.
@@ -3111,6 +3657,7 @@ pub fn run() {
             get_auth_status,
             save_credentials,
             clear_credentials,
+            inspect_credentials,
             start_google_oauth_flow,
             fetch_google_tasks,
             fetch_github_tasks,
@@ -3622,5 +4169,61 @@ mod tests {
         let fail_generic = render_oauth_callback_html(false, Some("redirect_uri_mismatch"));
         assert!(fail_generic.contains("Google Authentication Failed"));
         assert!(fail_generic.contains("redirect_uri_mismatch"));
+    }
+
+    #[test]
+    fn test_decode_base64_url_and_jwt_claims() {
+        // Test base64url decode
+        let decoded = decode_base64_url("SGVsbG8gV29ybGQ").expect("decode failed");
+        assert_eq!(String::from_utf8_lossy(&decoded), "Hello World");
+
+        // Test sample mock JWT: header.payload.sig
+        // Payload: {"scp":"Tasks.ReadWrite User.Read","upn":"dev@tenant.onmicrosoft.com","name":"Dev Admin"}
+        // base64url of {"scp":"Tasks.ReadWrite User.Read","upn":"dev@tenant.onmicrosoft.com","name":"Dev Admin"}
+        // is eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0
+        let mock_jwt = "eyJhbGciOiJub25lIn0.eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0.sig";
+        let (scp, upn, name) = extract_microsoft_jwt_claims(mock_jwt);
+        assert_eq!(scp.as_deref(), Some("Tasks.ReadWrite User.Read"));
+        assert_eq!(upn.as_deref(), Some("dev@tenant.onmicrosoft.com"));
+        assert_eq!(name.as_deref(), Some("Dev Admin"));
+    }
+
+    #[test]
+    fn test_credential_inspection_report_serialization() {
+        let report = CredentialInspectionReport {
+            providers: vec![ProviderInspection {
+                provider: "microsoft".to_string(),
+                is_valid: true,
+                error_message: None,
+                user_name: Some("Test User".to_string()),
+                user_email: Some("test@example.com".to_string()),
+                avatar_url: None,
+                account_type: Some("Microsoft 365 Account".to_string()),
+                permissions: vec![
+                    PermissionItem {
+                        scope: "Tasks.ReadWrite".to_string(),
+                        description: "Full task management".to_string(),
+                        is_required: true,
+                        is_granted: true,
+                        feature_impact: None,
+                    },
+                    PermissionItem {
+                        scope: "EduAssignments.ReadBasic".to_string(),
+                        description: "Education assignments".to_string(),
+                        is_required: false,
+                        is_granted: false,
+                        feature_impact: Some("Education disabled".to_string()),
+                    },
+                ],
+                all_required_granted: true,
+            }],
+            can_proceed: true,
+        };
+
+        let json = serde_json::to_string(&report).expect("serialization failed");
+        assert!(json.contains("canProceed"));
+        assert!(json.contains("allRequiredGranted"));
+        assert!(json.contains("Tasks.ReadWrite"));
+        assert!(json.contains("featureImpact"));
     }
 }

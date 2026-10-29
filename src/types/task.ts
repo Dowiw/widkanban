@@ -236,3 +236,29 @@ export const DEFAULT_API_HEALTH_STATE: ApiHealthState = {
   },
 };
 
+export interface PermissionItem {
+  scope: string;
+  description: string;
+  isRequired: boolean;
+  isGranted: boolean;
+  featureImpact?: string;
+}
+
+export interface ProviderInspection {
+  provider: 'github' | 'google' | 'microsoft';
+  isValid: boolean;
+  errorMessage?: string;
+  userName?: string;
+  userEmail?: string;
+  avatarUrl?: string;
+  accountType?: string;
+  permissions: PermissionItem[];
+  allRequiredGranted: boolean;
+}
+
+export interface CredentialInspectionReport {
+  providers: ProviderInspection[];
+  canProceed: boolean;
+}
+
+

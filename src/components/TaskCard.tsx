@@ -93,7 +93,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition: isDragging || isOverlay ? 'none' : transition || undefined,
-    borderRadius: 'var(--card-radius, 8px)',
+    borderRadius: `${customization.cornerRadius}px`,
   };
 
   const isGitHub = task.source === 'github';
@@ -540,7 +540,10 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
           {/* PR Branch Comparison Details */}
           {isGitHub && task.sourceMeta?.branchInfo && (
-            <div className="rounded-lg bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200/60 dark:border-purple-800/60 p-2 text-[10.5px] text-purple-900 dark:text-purple-200 space-y-1">
+            <div 
+              style={{ borderRadius: `${Math.max(0, customization.cornerRadius - 2)}px` }}
+              className="bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200/60 dark:border-purple-800/60 p-2 text-[10.5px] text-purple-900 dark:text-purple-200 space-y-1"
+            >
               <div className="flex items-center justify-between text-[10px]">
                 <span className="flex items-center space-x-1 truncate mr-1">
                   <GitBranch className="h-3 w-3 text-purple-600 dark:text-purple-400 shrink-0" />
@@ -582,7 +585,10 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
           {/* Formatted Notes / Markdown Body Snippet */}
           {(task.description || task.sourceMeta?.notes) && (
-            <div className="rounded-lg bg-slate-50/90 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800 p-2 text-[11px] text-slate-700 dark:text-slate-200 leading-relaxed select-text">
+            <div 
+              style={{ borderRadius: `${Math.max(0, customization.cornerRadius - 2)}px` }}
+              className="bg-slate-50/90 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800 p-2 text-[11px] text-slate-700 dark:text-slate-200 leading-relaxed select-text"
+            >
               <MarkdownViewer content={task.description || task.sourceMeta?.notes || ''} maxHeightClass="max-h-48" />
             </div>
           )}
