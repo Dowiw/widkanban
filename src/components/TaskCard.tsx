@@ -93,7 +93,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition: isDragging || isOverlay ? 'none' : transition || undefined,
-    borderRadius: `${customization.cornerRadius}px`,
+    borderRadius: `var(--card-radius, ${customization.cornerRadius}px)`,
   };
 
   const isGitHub = task.source === 'github';

@@ -45,7 +45,7 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
     <div
       ref={setNodeRef}
       style={{
-        borderRadius: `${customization.cornerRadius}px`,
+        borderRadius: `var(--col-radius, ${customization.cornerRadius}px)`,
         minWidth: `${customization.columnMinWidth || 260}px`,
       }}
       className={`flex flex-col flex-1 bg-slate-50 dark:bg-slate-900/60 border transition-all duration-200 overflow-hidden ${
