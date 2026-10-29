@@ -118,11 +118,18 @@ export const PermissionsReviewModal: React.FC<PermissionsReviewModalProps> = ({
                           {brand.title}
                         </span>
                       </div>
-                      {p.userEmail && (
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {p.userEmail}
-                        </div>
-                      )}
+                      <div className="flex items-center space-x-1.5 flex-wrap gap-y-0.5 mt-0.5">
+                        {p.userEmail && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {p.userEmail}
+                          </span>
+                        )}
+                        {p.accountType && (
+                          <span className="text-[8.5px] font-semibold px-1 py-0.2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            {p.accountType}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

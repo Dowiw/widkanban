@@ -93,6 +93,14 @@ export interface AuthStatus {
   google_from_env?: boolean;
   google_has_refresh_token?: boolean;
   microsoft_from_env?: boolean;
+  microsoft_has_refresh_token?: boolean;
+  microsoft_client_id?: string;
+  microsoft_include_education?: boolean;
+}
+
+export interface MicrosoftOAuthResult {
+  authStatus: AuthStatus;
+  report: CredentialInspectionReport;
 }
 
 export interface GitHubSyncSettings {

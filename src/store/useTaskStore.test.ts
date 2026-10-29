@@ -378,6 +378,9 @@ describe('useTaskStore', () => {
       googleClientId: null,
       googleClientSecret: null,
       microsoftToken: 'ms_mock_token',
+      microsoftRefreshToken: null,
+      microsoftClientId: null,
+      microsoftIncludeEducation: null,
     });
     expect(mockInvoke).toHaveBeenCalledWith('fetch_microsoft_tasks', undefined);
   });
@@ -1180,7 +1183,74 @@ describe('useTaskStore', () => {
         googleClientId: 'test-client-id.apps.googleusercontent.com',
         googleClientSecret: null,
         microsoftToken: null,
+        microsoftRefreshToken: null,
+        microsoftClientId: null,
+        microsoftIncludeEducation: null,
       });
+    });
+
+    it('startMicrosoftOAuthFlow succeeds and returns inspection report', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_microsoft_oauth_flow') {
+          return {
+            authStatus: {
+              has_github: false,
+              has_google: false,
+              has_microsoft: true,
+              microsoft_has_refresh_token: true,
+              microsoft_client_id: 'ms-client-123',
+              microsoft_include_education: true,
+            },
+            report: {
+              canProceed: true,
+              providers: [
+                {
+                  provider: 'microsoft',
+                  isValid: true,
+                  userName: 'Jane Doe',
+                  userEmail: 'jane@contoso.com',
+                  accountType: 'School / Work Organization Account',
+                  permissions: [],
+                  allRequiredGranted: true,
+                },
+              ],
+            },
+          };
+        }
+        if (cmd === 'get_api_health') return { github: { connected: false }, google: { connected: false }, microsoft: { connected: true } };
+        return null;
+      });
+
+      const { startMicrosoftOAuthFlow } = useTaskStore.getState();
+      const res = await startMicrosoftOAuthFlow({
+        clientId: 'ms-client-123',
+        includeEducation: true,
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.report?.canProceed).toBe(true);
+      expect(res.report?.providers[0]?.accountType).toBe('School / Work Organization Account');
+      expect(mockInvoke).toHaveBeenCalledWith('start_microsoft_oauth_flow', {
+        clientId: 'ms-client-123',
+        includeEducation: true,
+      });
+      expect(useTaskStore.getState().authStatus.has_microsoft).toBe(true);
+      expect(useTaskStore.getState().authStatus.microsoft_has_refresh_token).toBe(true);
+    });
+
+    it('startMicrosoftOAuthFlow handles error gracefully', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'start_microsoft_oauth_flow') {
+          throw new Error('User cancelled Microsoft login');
+        }
+        return null;
+      });
+
+      const { startMicrosoftOAuthFlow } = useTaskStore.getState();
+      const res = await startMicrosoftOAuthFlow();
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('User cancelled Microsoft login');
     });
   });
 });

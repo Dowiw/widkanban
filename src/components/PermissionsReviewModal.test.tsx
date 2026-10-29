@@ -158,5 +158,19 @@ describe('PermissionsReviewModal', () => {
     fireEvent.click(backBtn);
     expect(onCancelMock).toHaveBeenCalledTimes(1);
   });
+
+  it('renders account type badge when present in inspection report', () => {
+    render(
+      <PermissionsReviewModal
+        isOpen={true}
+        report={validReport}
+        onConfirm={async () => {}}
+        onCancel={() => {}}
+        isSaving={false}
+      />
+    );
+
+    expect(screen.getByText('Microsoft 365 Account')).toBeInTheDocument();
+  });
 });
 

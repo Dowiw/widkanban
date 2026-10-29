@@ -17,6 +17,14 @@ pub struct StoredCredentials {
     #[serde(default)]
     pub microsoft_token: Option<String>,
     #[serde(default)]
+    pub microsoft_refresh_token: Option<String>,
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    #[serde(default)]
+    pub microsoft_token_expiry: Option<u64>,
+    #[serde(default)]
+    pub microsoft_include_education: Option<bool>,
+    #[serde(default)]
     pub google_refresh_token: Option<String>,
     #[serde(default)]
     pub google_client_id: Option<String>,
@@ -45,6 +53,19 @@ pub struct AuthStatus {
     pub google_has_refresh_token: bool,
     #[serde(default)]
     pub microsoft_from_env: bool,
+    #[serde(default)]
+    pub microsoft_has_refresh_token: bool,
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    #[serde(default)]
+    pub microsoft_include_education: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrosoftOAuthResult {
+    pub auth_status: AuthStatus,
+    pub report: CredentialInspectionReport,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -594,17 +615,34 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
         }
     }
 
-    // 4. Microsoft: App-stored token takes highest precedence.
+    // 4. Microsoft: App-stored token or refresh token takes highest precedence.
     // Only fall back to environment variable (.env) if no valid stored token exists
     // and the user has not explicitly disconnected Microsoft.
     let has_stored_microsoft = creds
         .microsoft_token
         .as_ref()
-        .map_or(false, |t| !t.trim().is_empty());
+        .map_or(false, |t| !t.trim().is_empty())
+        || creds
+            .microsoft_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
 
     if !has_stored_microsoft && creds.microsoft_disconnected != Some(true) {
         if let Some(ms) = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]) {
             creds.microsoft_token = Some(ms);
+        }
+        if let Some(mr) = get_env_credential(&["WIDKANBAN_MICROSOFT_REFRESH_TOKEN", "MICROSOFT_REFRESH_TOKEN"]) {
+            creds.microsoft_refresh_token = Some(mr);
+        }
+    }
+
+    let has_stored_ms_cid = creds
+        .microsoft_client_id
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_ms_cid {
+        if let Some(cid) = get_env_credential(&["WIDKANBAN_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"]) {
+            creds.microsoft_client_id = Some(cid);
         }
     }
 
@@ -1203,15 +1241,25 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
     let has_stored_microsoft = stored
         .microsoft_token
         .as_ref()
-        .map_or(false, |t| !t.trim().is_empty());
+        .map_or(false, |t| !t.trim().is_empty())
+        || stored
+            .microsoft_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
 
     let env_microsoft = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]);
-    let has_microsoft = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let env_microsoft_refresh = get_env_credential(&["WIDKANBAN_MICROSOFT_REFRESH_TOKEN", "MICROSOFT_REFRESH_TOKEN"]);
+    let has_microsoft_token = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_ms_refresh_token = creds.microsoft_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_microsoft = has_microsoft_token || has_ms_refresh_token;
 
     let microsoft_from_env = !has_stored_microsoft
         && stored.microsoft_disconnected != Some(true)
-        && env_microsoft.is_some()
+        && (env_microsoft.is_some() || env_microsoft_refresh.is_some())
         && has_microsoft;
+
+    let microsoft_client_id = creds.microsoft_client_id.clone();
+    let microsoft_include_education = creds.microsoft_include_education.unwrap_or(false);
 
     Ok(AuthStatus {
         has_github,
@@ -1221,6 +1269,9 @@ fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
         google_from_env,
         google_has_refresh_token: has_refresh_token,
         microsoft_from_env,
+        microsoft_has_refresh_token: has_ms_refresh_token,
+        microsoft_client_id,
+        microsoft_include_education,
     })
 }
 
@@ -1233,6 +1284,9 @@ fn save_credentials(
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
     microsoft_token: Option<String>,
+    microsoft_refresh_token: Option<String>,
+    microsoft_client_id: Option<String>,
+    microsoft_include_education: Option<bool>,
 ) -> Result<AuthStatus, String> {
     let mut creds = read_stored_credentials_file(&app_handle);
     if let Some(gh) = github_token.as_ref() {
@@ -1291,6 +1345,27 @@ fn save_credentials(
             creds.microsoft_disconnected = Some(false);
         }
     }
+    if let Some(mr) = microsoft_refresh_token.as_ref() {
+        let trimmed = mr.trim().to_string();
+        if trimmed.is_empty() {
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_disconnected = Some(true);
+        } else {
+            creds.microsoft_refresh_token = Some(trimmed);
+            creds.microsoft_disconnected = Some(false);
+        }
+    }
+    if let Some(mcid) = microsoft_client_id.as_ref() {
+        let trimmed = mcid.trim().to_string();
+        if trimmed.is_empty() {
+            creds.microsoft_client_id = None;
+        } else {
+            creds.microsoft_client_id = Some(trimmed);
+        }
+    }
+    if let Some(inc_edu) = microsoft_include_education {
+        creds.microsoft_include_education = Some(inc_edu);
+    }
     write_credentials(&app_handle, &creds)?;
 
     let full_creds = read_credentials(&app_handle);
@@ -1303,9 +1378,9 @@ fn save_credentials(
             health.google.connected = full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some();
             health.google.error_message = None;
         }
-        if microsoft_token.is_some() {
+        if microsoft_token.is_some() || microsoft_refresh_token.is_some() {
             health.microsoft = Some(ProviderHealth {
-                connected: full_creds.microsoft_token.is_some(),
+                connected: full_creds.microsoft_token.is_some() || full_creds.microsoft_refresh_token.is_some(),
                 ..Default::default()
             });
         }
@@ -1333,6 +1408,8 @@ fn clear_credentials(
         }
         Some("microsoft") => {
             creds.microsoft_token = None;
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_token_expiry = None;
             creds.microsoft_disconnected = Some(true);
         }
         _ => {
@@ -1341,6 +1418,8 @@ fn clear_credentials(
             creds.google_refresh_token = None;
             creds.google_token_expiry = None;
             creds.microsoft_token = None;
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_token_expiry = None;
             creds.github_disconnected = Some(true);
             creds.google_disconnected = Some(true);
             creds.microsoft_disconnected = Some(true);
@@ -1364,7 +1443,7 @@ fn clear_credentials(
         }
         if provider.as_deref() == Some("microsoft") || provider.is_none() {
             health.microsoft = Some(ProviderHealth {
-                connected: full_creds.microsoft_token.is_some(),
+                connected: full_creds.microsoft_token.is_some() || full_creds.microsoft_refresh_token.is_some(),
                 ..Default::default()
             });
         }
@@ -1425,18 +1504,18 @@ fn decode_base64_url(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn extract_microsoft_jwt_claims(token: &str) -> (Option<String>, Option<String>, Option<String>) {
+fn extract_microsoft_jwt_claims(token: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>, Option<u64>) {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() < 2 {
-        return (None, None, None);
+        return (None, None, None, None, None);
     }
     let payload_bytes = match decode_base64_url(parts[1]) {
         Some(b) => b,
-        None => return (None, None, None),
+        None => return (None, None, None, None, None),
     };
     let json: serde_json::Value = match serde_json::from_slice(&payload_bytes) {
         Ok(j) => j,
-        Err(_) => return (None, None, None),
+        Err(_) => return (None, None, None, None, None),
     };
     let scp = json.get("scp").and_then(|v| v.as_str()).map(|s| s.to_string());
     let upn = json
@@ -1446,7 +1525,12 @@ fn extract_microsoft_jwt_claims(token: &str) -> (Option<String>, Option<String>,
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-    (scp, upn, name)
+    let tid = json.get("tid").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let exp = json
+        .get("exp")
+        .and_then(|v| v.as_u64())
+        .or_else(|| json.get("exp").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()));
+    (scp, upn, name, tid, exp)
 }
 
 async fn inspect_github_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
@@ -1728,9 +1812,32 @@ async fn inspect_microsoft_token(client: &reqwest::Client, token: &str) -> Provi
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let (jwt_scp, jwt_upn, jwt_name) = extract_microsoft_jwt_claims(trimmed);
+                let (jwt_scp, jwt_upn, jwt_name, jwt_tid, _jwt_exp) = extract_microsoft_jwt_claims(trimmed);
                 let final_name = api_display_name.or(jwt_name);
                 let final_email = api_email.or(jwt_upn);
+
+                // Microsoft Personal Account Tenant ID is "9188040d-6c67-4c5b-b112-36a304b66dad"
+                let is_personal = match jwt_tid.as_deref() {
+                    Some("9188040d-6c67-4c5b-b112-36a304b66dad") => true,
+                    Some(_) => false,
+                    None => {
+                        if let Some(ref email) = final_email {
+                            let lower = email.to_lowercase();
+                            lower.ends_with("@outlook.com")
+                                || lower.ends_with("@hotmail.com")
+                                || lower.ends_with("@live.com")
+                                || lower.ends_with("@gmail.com")
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                let account_type = if is_personal {
+                    Some("Personal Microsoft Account".to_string())
+                } else {
+                    Some("School / Work Organization Account".to_string())
+                };
 
                 let scopes_str = jwt_scp.unwrap_or_default();
                 let scopes: Vec<String> = scopes_str.split_whitespace().map(|s| s.to_string()).collect();
@@ -1808,7 +1915,7 @@ async fn inspect_microsoft_token(client: &reqwest::Client, token: &str) -> Provi
                     user_name: final_name,
                     user_email: final_email,
                     avatar_url: None,
-                    account_type: Some("Microsoft 365 Account".to_string()),
+                    account_type,
                     permissions,
                     all_required_granted,
                 }
@@ -2006,6 +2113,136 @@ async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<Stri
     }
 
     Err("Google Tasks token not configured or expired. Please sign in with Google or enter a valid token in Settings.".to_string())
+}
+
+/// Ensures that the active Microsoft access token is valid. If it has expired or will expire within 5 minutes,
+/// and a refresh token is available, automatically requests a new access token
+/// from Microsoft's OAuth 2.0 token endpoint and updates stored credentials.
+async fn ensure_valid_microsoft_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let creds = read_credentials(app_handle);
+    let now = current_epoch_seconds();
+
+    // Check if current token is still valid (has > 300s remaining)
+    let is_still_valid = match (creds.microsoft_token.as_ref(), creds.microsoft_token_expiry) {
+        (Some(tok), Some(expiry)) => !tok.trim().is_empty() && expiry > now + 300,
+        (Some(tok), None) => {
+            if let Some((_, _, _, _, Some(exp))) = Some(extract_microsoft_jwt_claims(tok)) {
+                exp > now + 300
+            } else {
+                !tok.trim().is_empty()
+            }
+        }
+        _ => false,
+    };
+
+    if is_still_valid {
+        if let Some(tok) = creds.microsoft_token {
+            return Ok(tok);
+        }
+    }
+
+    // If we have a refresh token, attempt silent background refresh
+    if let Some(refresh_tok) = creds.microsoft_refresh_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let client_id = creds.microsoft_client_id.as_deref().unwrap_or("");
+
+        if !client_id.is_empty() {
+            let client = reqwest::Client::builder()
+                .use_native_tls()
+                .build()
+                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+            let params = [
+                ("client_id", client_id),
+                ("refresh_token", refresh_tok.as_str()),
+                ("grant_type", "refresh_token"),
+                ("scope", "offline_access https://graph.microsoft.com/.default"),
+            ];
+
+            let resp = client
+                .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
+                .form(&params)
+                .header("User-Agent", "WidKanban-Desktop")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send Microsoft token refresh request: {}", e))?;
+
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(new_access_token) = data.get("access_token").and_then(|v| v.as_str()) {
+                        let expires_in = data
+                            .get("expires_in")
+                            .and_then(|v| v.as_u64())
+                            .or_else(|| data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+                            .unwrap_or(3600);
+
+                        let mut stored = read_stored_credentials_file(app_handle);
+                        stored.microsoft_token = Some(new_access_token.to_string());
+                        if let Some(new_refresh) = data.get("refresh_token").and_then(|v| v.as_str()) {
+                            stored.microsoft_refresh_token = Some(new_refresh.to_string());
+                        }
+                        stored.microsoft_token_expiry = Some(now + expires_in);
+                        let _ = write_credentials(app_handle, &stored);
+
+                        // Update in-memory health
+                        if let Ok(mut health) = get_health_store().lock() {
+                            health.microsoft = Some(ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+                                is_expiring_soon: Some(false),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            });
+                        }
+
+                        return Ok(new_access_token.to_string());
+                    }
+                }
+            } else {
+                let err_body = resp.text().await.unwrap_or_default();
+                let is_revoked = err_body.contains("invalid_grant")
+                    || err_body.contains("invalid_client")
+                    || err_body.contains("unauthorized_client");
+
+                // Invalidate stored access token so we never re-use a stale dead token
+                let mut stored = read_stored_credentials_file(app_handle);
+                stored.microsoft_token = None;
+                stored.microsoft_token_expiry = None;
+                let _ = write_credentials(app_handle, &stored);
+
+                let error_msg = if is_revoked {
+                    "Microsoft session expired or access was revoked. Please reconnect in Settings.".to_string()
+                } else {
+                    format!("Microsoft token refresh failed: {}", err_body)
+                };
+
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.microsoft = Some(ProviderHealth {
+                        connected: false,
+                        token_expires_at: Some("Expired".to_string()),
+                        is_expiring_soon: Some(true),
+                        last_checked: Some(now),
+                        error_message: Some(error_msg.clone()),
+                        ..Default::default()
+                    });
+                }
+
+                return Err(error_msg);
+            }
+        }
+    }
+
+    // Fall back to direct token if present
+    if let Some(tok) = creds.microsoft_token {
+        if !tok.trim().is_empty() {
+            return Ok(tok);
+        }
+    }
+
+    Err("Microsoft 365 token not configured or expired. Please sign in with Microsoft or enter a valid token in Settings.".to_string())
 }
 
 /// Generates a modern, responsive HTML page served by the local loopback OAuth server
@@ -2297,6 +2534,285 @@ async fn start_google_oauth_flow(
     }
 
     get_auth_status(app_handle)
+}
+
+fn encode_base64_url(input: &[u8]) -> String {
+    const B64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((input.len() * 4 + 2) / 3);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+
+        out.push(B64_CHARS[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(B64_CHARS[((triple >> 12) & 0x3f) as usize] as char);
+
+        if chunk.len() > 1 {
+            out.push(B64_CHARS[((triple >> 6) & 0x3f) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(B64_CHARS[(triple & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+fn generate_pkce_pair() -> (String, String) {
+    use sha2::{Digest, Sha256};
+    use std::time::SystemTime;
+
+    let mut random_bytes = [0u8; 48];
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seed1 = now.as_nanos();
+    let seed2 = (std::process::id() as u128) ^ 0x9e3779b97f4a7c15;
+
+    for i in 0..48 {
+        let shift = ((i % 16) * 8) as u32;
+        let mixed = seed1.wrapping_mul((i + 1) as u128) ^ seed2.rotate_left(shift);
+        random_bytes[i] = (mixed & 0xff) as u8;
+    }
+
+    let code_verifier = encode_base64_url(&random_bytes);
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let code_challenge = encode_base64_url(&hasher.finalize());
+
+    (code_verifier, code_challenge)
+}
+
+/// Start an in-app "Sign in with Microsoft" OAuth loopback flow using PKCE and ephemeral port.
+#[tauri::command]
+async fn start_microsoft_oauth_flow(
+    app_handle: tauri::AppHandle,
+    client_id: Option<String>,
+    include_education: Option<bool>,
+) -> Result<MicrosoftOAuthResult, String> {
+    let creds = read_credentials(&app_handle);
+    let resolved_client_id = client_id
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.microsoft_client_id)
+        .or_else(|| get_env_credential(&["WIDKANBAN_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"]))
+        .ok_or_else(|| "Microsoft Client ID is required to start the OAuth flow. Please enter your OAuth Client ID in Settings.".to_string())?;
+
+    let inc_edu = include_education
+        .or(creds.microsoft_include_education)
+        .unwrap_or(false);
+
+    // 1. Generate PKCE pair (code_verifier, code_challenge)
+    let (code_verifier, code_challenge) = generate_pkce_pair();
+
+    // 2. Bind TCP listener on ephemeral port (127.0.0.1:0)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to start local OAuth loopback server: {}", e))?;
+
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local port: {}", e))?
+        .port();
+
+    let redirect_uri = format!("http://127.0.0.1:{}", port);
+    let state = format!("widkanban_ms_{}", current_epoch_seconds());
+
+    // 3. Build scopes
+    let scopes_str = if inc_edu {
+        "offline_access User.Read Tasks.ReadWrite EduAssignments.ReadBasic Group.Read.All"
+    } else {
+        "offline_access User.Read Tasks.ReadWrite"
+    };
+
+    // 4. Build Microsoft authorization URL
+    let auth_url = format!(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?\
+        client_id={}&\
+        response_type=code&\
+        redirect_uri={}&\
+        response_mode=query&\
+        scope={}&\
+        code_challenge={}&\
+        code_challenge_method=S256&\
+        state={}",
+        url_encode(&resolved_client_id),
+        url_encode(&redirect_uri),
+        url_encode(scopes_str),
+        url_encode(&code_challenge),
+        url_encode(&state),
+    );
+
+    // 5. Open browser
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_url = auth_url.replace('\'', "''");
+        let script = format!("Start-Process '{}'", escaped_url);
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    }
+
+    // 6. Wait for incoming redirect with 120-second timeout
+    let timeout_duration = std::time::Duration::from_secs(120);
+    let code = match tokio::time::timeout(timeout_duration, async {
+        loop {
+            let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            let mut buf = [0u8; 4096];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if let Some(first_line) = req_str.lines().next() {
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "GET" {
+                    let path = parts[1];
+                    let query = path.split('?').nth(1).unwrap_or("");
+                    let mut code_val: Option<String> = None;
+                    let mut error_val: Option<String> = None;
+
+                    for param in query.split('&') {
+                        let mut kv = param.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" {
+                                code_val = Some(v.to_string());
+                            } else if k == "error" || k == "error_description" {
+                                error_val = Some(v.to_string());
+                            }
+                        }
+                    }
+
+                    let (html_body, status_line) = if code_val.is_some() {
+                        (
+                            render_oauth_callback_html(true, None),
+                            "HTTP/1.1 200 OK",
+                        )
+                    } else {
+                        (
+                            render_oauth_callback_html(false, error_val.as_deref()),
+                            "HTTP/1.1 400 Bad Request",
+                        )
+                    };
+
+                    let html_bytes = html_body.as_bytes();
+                    let response = format!(
+                        "{}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        html_bytes.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+
+                    if let Some(err) = error_val {
+                        return Err(format!("Microsoft OAuth authorization error: {}", err));
+                    }
+                    if let Some(c) = code_val {
+                        return Ok(c);
+                    }
+                }
+            }
+        }
+    }).await {
+        Ok(res) => res?,
+        Err(_) => return Err("Microsoft OAuth flow timed out (2 minutes elapsed). Please try again.".to_string()),
+    };
+
+    // 7. Exchange code for access & refresh tokens at token endpoint using code_verifier (PKCE)
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let token_params = [
+        ("client_id", resolved_client_id.as_str()),
+        ("grant_type", "authorization_code"),
+        ("code", code.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("code_verifier", code_verifier.as_str()),
+    ];
+
+    let token_resp = client
+        .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
+        .form(&token_params)
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to exchange authorization code: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        let err_body = token_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to retrieve Microsoft tokens: {}", err_body));
+    }
+
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = token_data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Microsoft token response did not contain an access_token".to_string())?
+        .to_string();
+
+    let refresh_token = token_data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let expires_in = token_data
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .or_else(|| token_data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(3600);
+
+    let now = current_epoch_seconds();
+    let mut stored = read_stored_credentials_file(&app_handle);
+    stored.microsoft_token = Some(access_token.clone());
+    stored.microsoft_refresh_token = refresh_token;
+    stored.microsoft_client_id = Some(resolved_client_id.clone());
+    stored.microsoft_token_expiry = Some(now + expires_in);
+    stored.microsoft_include_education = Some(inc_edu);
+    stored.microsoft_disconnected = Some(false);
+    write_credentials(&app_handle, &stored)?;
+
+    // 8. Update in-memory health
+    if let Ok(mut health) = get_health_store().lock() {
+        health.microsoft = Some(ProviderHealth {
+            connected: true,
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: None,
+        });
+    }
+
+    // 9. Inspect identity and build CredentialInspectionReport
+    let ms_inspection = inspect_microsoft_token(&client, &access_token).await;
+    let auth_status = get_auth_status(app_handle.clone())?;
+
+    let report = CredentialInspectionReport {
+        can_proceed: ms_inspection.is_valid && ms_inspection.all_required_granted,
+        providers: vec![ms_inspection],
+    };
+
+    Ok(MicrosoftOAuthResult {
+        auth_status,
+        report,
+    })
 }
 
 /// Fetch all Google Tasks across all task lists for the authenticated user,
@@ -2807,11 +3323,20 @@ async fn update_google_task(
 /// 3. Teams for Education Assignments (/education/me/assignments)
 #[tauri::command]
 async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .microsoft_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Microsoft 365 token not configured".to_string())?;
+    let token = match ensure_valid_microsoft_token(&app_handle).await {
+        Ok(t) => t,
+        Err(e) => {
+            if let Ok(mut health) = get_health_store().lock() {
+                health.microsoft = Some(ProviderHealth {
+                    connected: false,
+                    error_message: Some(e.clone()),
+                    last_checked: Some(current_epoch_seconds()),
+                    ..Default::default()
+                });
+            }
+            return Err(e);
+        }
+    };
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -3021,11 +3546,7 @@ async fn update_microsoft_task(
     list_id: Option<String>,
     new_status: String,
 ) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .microsoft_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Microsoft 365 token not configured".to_string())?;
+    let token = ensure_valid_microsoft_token(&app_handle).await?;
 
     let client = reqwest::Client::builder()
         .use_native_tls()
@@ -3659,6 +4180,7 @@ pub fn run() {
             clear_credentials,
             inspect_credentials,
             start_google_oauth_flow,
+            start_microsoft_oauth_flow,
             fetch_google_tasks,
             fetch_github_tasks,
             fetch_microsoft_tasks,
@@ -3793,6 +4315,10 @@ mod tests {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
             microsoft_token: Some("eyJ0eXAi...".to_string()),
+            microsoft_refresh_token: Some("0.test_ms_refresh".to_string()),
+            microsoft_client_id: Some("ms-client-123".to_string()),
+            microsoft_token_expiry: Some(1792620000),
+            microsoft_include_education: Some(true),
             google_refresh_token: Some("1//refresh_token_test".to_string()),
             google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
             google_client_secret: Some("GOCSPX-secret".to_string()),
@@ -3815,12 +4341,7 @@ mod tests {
             google_token: Some("   ".to_string()),
             microsoft_token: Some("ms_token_valid".to_string()),
             google_refresh_token: Some("1//valid_refresh".to_string()),
-            google_client_id: None,
-            google_client_secret: None,
-            google_token_expiry: None,
-            github_disconnected: None,
-            google_disconnected: None,
-            microsoft_disconnected: None,
+            ..Default::default()
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
@@ -3830,6 +4351,9 @@ mod tests {
             google_from_env: false,
             google_has_refresh_token: true,
             microsoft_from_env: false,
+            microsoft_has_refresh_token: false,
+            microsoft_client_id: None,
+            microsoft_include_education: false,
         };
         assert!(status.has_github);
         assert!(status.has_google);
@@ -3894,6 +4418,9 @@ mod tests {
             google_from_env: false,
             google_has_refresh_token: false,
             microsoft_from_env: false,
+            microsoft_has_refresh_token: false,
+            microsoft_client_id: None,
+            microsoft_include_education: false,
         };
         let json = serde_json::to_string(&status).expect("Serialization failed");
         assert!(json.contains("github_from_env"));
@@ -4182,10 +4709,12 @@ mod tests {
         // base64url of {"scp":"Tasks.ReadWrite User.Read","upn":"dev@tenant.onmicrosoft.com","name":"Dev Admin"}
         // is eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0
         let mock_jwt = "eyJhbGciOiJub25lIn0.eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0.sig";
-        let (scp, upn, name) = extract_microsoft_jwt_claims(mock_jwt);
+        let (scp, upn, name, tid, exp) = extract_microsoft_jwt_claims(mock_jwt);
         assert_eq!(scp.as_deref(), Some("Tasks.ReadWrite User.Read"));
         assert_eq!(upn.as_deref(), Some("dev@tenant.onmicrosoft.com"));
         assert_eq!(name.as_deref(), Some("Dev Admin"));
+        assert_eq!(tid, None);
+        assert_eq!(exp, None);
     }
 
     #[test]
@@ -4225,5 +4754,40 @@ mod tests {
         assert!(json.contains("allRequiredGranted"));
         assert!(json.contains("Tasks.ReadWrite"));
         assert!(json.contains("featureImpact"));
+    }
+
+    #[test]
+    fn test_pkce_generation() {
+        let (verifier, challenge) = generate_pkce_pair();
+        assert!(verifier.len() >= 43 && verifier.len() <= 128);
+        assert!(!challenge.is_empty());
+        assert!(!verifier.contains('='));
+        assert!(!challenge.contains('='));
+    }
+
+    #[test]
+    fn test_microsoft_oauth_result_serialization() {
+        let res = MicrosoftOAuthResult {
+            auth_status: AuthStatus {
+                has_github: false,
+                has_google: false,
+                has_microsoft: true,
+                github_from_env: false,
+                google_from_env: false,
+                google_has_refresh_token: false,
+                microsoft_from_env: false,
+                microsoft_has_refresh_token: true,
+                microsoft_client_id: Some("12345678-test".to_string()),
+                microsoft_include_education: true,
+            },
+            report: CredentialInspectionReport {
+                can_proceed: true,
+                providers: vec![],
+            },
+        };
+        let json = serde_json::to_string(&res).expect("serialization failed");
+        assert!(json.contains("authStatus"));
+        assert!(json.contains("microsoft_has_refresh_token"));
+        assert!(json.contains("microsoft_include_education"));
     }
 }

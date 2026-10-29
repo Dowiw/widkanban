@@ -20,6 +20,7 @@ import {
   ApiHealthState,
   DEFAULT_API_HEALTH_STATE,
   CredentialInspectionReport,
+  MicrosoftOAuthResult,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -143,12 +144,19 @@ interface TaskState {
     googleClientId?: string;
     googleClientSecret?: string;
     microsoftToken?: string;
+    microsoftRefreshToken?: string;
+    microsoftClientId?: string;
+    microsoftIncludeEducation?: boolean;
   }) => Promise<boolean>;
   clearCredentials: (provider?: string) => Promise<boolean>;
   startGoogleOAuthFlow: (creds?: {
     clientId?: string;
     clientSecret?: string;
   }) => Promise<{ success: boolean; error?: string }>;
+  startMicrosoftOAuthFlow: (creds?: {
+    clientId?: string;
+    includeEducation?: boolean;
+  }) => Promise<{ success: boolean; report?: CredentialInspectionReport; error?: string }>;
   autoSyncSettings: AutoSyncSettings;
   isAutoSyncPromptOpen: boolean;
   apiHealth: ApiHealthState;
@@ -788,6 +796,9 @@ export const useTaskStore = create<TaskState>()(
         googleClientId,
         googleClientSecret,
         microsoftToken,
+        microsoftRefreshToken,
+        microsoftClientId,
+        microsoftIncludeEducation,
       }) => {
         const res = await safeInvoke<AuthStatus>('save_credentials', {
           githubToken: githubToken || null,
@@ -796,6 +807,9 @@ export const useTaskStore = create<TaskState>()(
           googleClientId: googleClientId || null,
           googleClientSecret: googleClientSecret || null,
           microsoftToken: microsoftToken || null,
+          microsoftRefreshToken: microsoftRefreshToken || null,
+          microsoftClientId: microsoftClientId || null,
+          microsoftIncludeEducation: microsoftIncludeEducation ?? null,
         });
         if (res) {
           const isFirstGithubConnect =
@@ -830,7 +844,8 @@ export const useTaskStore = create<TaskState>()(
         if (result.success && result.data) {
           const authStatus = result.data;
           const isFirstConnect =
-            (authStatus.has_github || authStatus.has_google) && !get().autoSyncSettings.hasPrompted;
+            (authStatus.has_github || authStatus.has_google || authStatus.has_microsoft) &&
+            !get().autoSyncSettings.hasPrompted;
 
           set({
             authStatus,
@@ -846,6 +861,34 @@ export const useTaskStore = create<TaskState>()(
         return {
           success: false,
           error: result.error || 'Failed to complete Google authentication',
+        };
+      },
+
+      startMicrosoftOAuthFlow: async (creds) => {
+        const result = await safeInvokeWithResult<MicrosoftOAuthResult>('start_microsoft_oauth_flow', {
+          clientId: creds?.clientId || null,
+          includeEducation: creds?.includeEducation ?? null,
+        });
+
+        if (result.success && result.data) {
+          const { authStatus, report } = result.data;
+          const isFirstConnect =
+            (authStatus.has_github || authStatus.has_google || authStatus.has_microsoft) &&
+            !get().autoSyncSettings.hasPrompted;
+
+          set({
+            authStatus,
+            hasCompletedOnboarding: true,
+            isAutoSyncPromptOpen: isFirstConnect ? true : get().isAutoSyncPromptOpen,
+          });
+
+          await get().fetchApiHealth();
+          return { success: true, report };
+        }
+
+        return {
+          success: false,
+          error: result.error || 'Failed to complete Microsoft authentication',
         };
       },
 
