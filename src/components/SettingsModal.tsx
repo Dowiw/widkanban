@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
-import { 
-  X, 
-  Github, 
-  CheckSquare, 
-  KeyRound, 
-  Check, 
-  Eye, 
-  EyeOff, 
+import {
+  X,
+  Github,
+  CheckSquare,
+  KeyRound,
+  Check,
+  Eye,
+  EyeOff,
   Trash2,
   ExternalLink,
   ShieldCheck,
@@ -23,6 +23,7 @@ import {
   Square,
   Sparkles,
   Type,
+  Users,
   Pin,
   Power,
   Layers,
@@ -38,7 +39,8 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { FontFamilyOption, CardDensity, ThemeMode, PinMode } from '../types/task';
+import { FontFamilyOption, CardDensity, ThemeMode, PinMode, CredentialInspectionReport } from '../types/task';
+import { PermissionsReviewModal } from './PermissionsReviewModal';
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none">
@@ -64,16 +66,19 @@ const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' })
 type SettingsTab = 'integrations' | 'sync' | 'appearance' | 'window' | 'advanced';
 
 export const SettingsModal: React.FC = () => {
-  const { 
-    isSettingsOpen, 
-    setSettingsOpen, 
+  const {
+    isSettingsOpen,
+    setSettingsOpen,
     setGithubSetupOpen,
-    authStatus, 
-    saveCredentials, 
+    authStatus,
+    inspectCredentials,
+    saveCredentials,
     clearCredentials,
     startGoogleOAuthFlow,
+    startMicrosoftOAuthFlow,
     fetchGoogleTasks,
     fetchGithubTasks,
+    fetchMicrosoftTasks,
     setCompletedOnboarding,
     customization,
     setCustomization,
@@ -96,10 +101,18 @@ export const SettingsModal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('integrations');
   const [githubToken, setGithubToken] = useState('');
   const [googleToken, setGoogleToken] = useState('');
+  const [microsoftToken, setMicrosoftToken] = useState('');
+  const [microsoftClientId, setMicrosoftClientId] = useState(authStatus.microsoft_client_id || '');
+  const [microsoftIncludeEducation, setMicrosoftIncludeEducation] = useState(Boolean(authStatus.microsoft_include_education));
+  const [showMicrosoftAdvanced, setShowMicrosoftAdvanced] = useState(false);
+  const [isSigningInMicrosoft, setIsSigningInMicrosoft] = useState(false);
+  const [microsoftOAuthError, setMicrosoftOAuthError] = useState<string | null>(null);
+  const [microsoftOAuthSuccess, setMicrosoftOAuthSuccess] = useState(false);
   const [googleClientId, setGoogleClientId] = useState('');
   const [googleClientSecret, setGoogleClientSecret] = useState('');
   const [showGithub, setShowGithub] = useState(false);
   const [showGoogle, setShowGoogle] = useState(false);
+  const [showMicrosoft, setShowMicrosoft] = useState(false);
   const [showGoogleClientSecret, setShowGoogleClientSecret] = useState(false);
   const [showManualGoogle, setShowManualGoogle] = useState(false);
   const [showGoogleSetupGuide, setShowGoogleSetupGuide] = useState(false);
@@ -108,8 +121,13 @@ export const SettingsModal: React.FC = () => {
   const [googleOAuthSuccess, setGoogleOAuthSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [inspectionReport, setInspectionReport] = useState<CredentialInspectionReport | null>(null);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isValidatingTokens, setIsValidatingTokens] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [isFetchingGoogle, setIsFetchingGoogle] = useState(false);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [isFetchingMicrosoft, setIsFetchingMicrosoft] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [resetWindowDone, setResetWindowDone] = useState(false);
   const [isTogglingAutostart, setIsTogglingAutostart] = useState(false);
@@ -133,6 +151,54 @@ export const SettingsModal: React.FC = () => {
 
   const handleSaveIntegrations = async (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
+    const hasCandidateTokens = Boolean(
+      githubToken.trim() || googleToken.trim() || microsoftToken.trim()
+    );
+
+    if (!hasCandidateTokens) {
+      setIsSaving(true);
+      await saveCredentials({
+        googleClientId: googleClientId.trim() || undefined,
+        googleClientSecret: googleClientSecret.trim() || undefined,
+        microsoftClientId: microsoftClientId.trim() || undefined,
+        microsoftIncludeEducation: microsoftIncludeEducation,
+      });
+      setIsSaving(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 1500);
+      return;
+    }
+
+    setIsValidatingTokens(true);
+
+    try {
+      const report = await inspectCredentials({
+        githubToken: githubToken.trim() || undefined,
+        googleToken: googleToken.trim() || undefined,
+        microsoftToken: microsoftToken.trim() || undefined,
+      });
+
+      setIsValidatingTokens(false);
+
+      if (report && report.providers && report.providers.length > 0) {
+        setInspectionReport(report);
+        setIsReviewModalOpen(true);
+      } else {
+        await handleConfirmSave();
+      }
+    } catch (err) {
+      setIsValidatingTokens(false);
+      setValidationError(
+        typeof err === 'string'
+          ? err
+          : 'Failed to inspect token permissions. Please check your network and tokens.'
+      );
+    }
+  };
+
+  const handleConfirmSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -141,12 +207,18 @@ export const SettingsModal: React.FC = () => {
       googleToken: googleToken.trim() || undefined,
       googleClientId: googleClientId.trim() || undefined,
       googleClientSecret: googleClientSecret.trim() || undefined,
+      microsoftToken: microsoftToken.trim() || undefined,
+      microsoftClientId: microsoftClientId.trim() || undefined,
+      microsoftIncludeEducation: microsoftIncludeEducation,
     });
 
     setIsSaving(false);
+    setIsReviewModalOpen(false);
+    setInspectionReport(null);
     setSaveSuccess(true);
     setGithubToken('');
     setGoogleToken('');
+    setMicrosoftToken('');
     setCompletedOnboarding(true);
 
     setTimeout(() => {
@@ -174,7 +246,29 @@ export const SettingsModal: React.FC = () => {
     }
   };
 
-  const handleDisconnect = async (provider: 'github' | 'google') => {
+  const handleMicrosoftOAuthSignIn = async () => {
+    setIsSigningInMicrosoft(true);
+    setMicrosoftOAuthError(null);
+    setMicrosoftOAuthSuccess(false);
+
+    const res = await startMicrosoftOAuthFlow({
+      clientId: microsoftClientId.trim() || undefined,
+      includeEducation: microsoftIncludeEducation,
+    });
+
+    setIsSigningInMicrosoft(false);
+    if (res.success && res.report) {
+      setMicrosoftOAuthSuccess(true);
+      setCompletedOnboarding(true);
+      setInspectionReport(res.report);
+      setIsReviewModalOpen(true);
+      setTimeout(() => setMicrosoftOAuthSuccess(false), 2500);
+    } else {
+      setMicrosoftOAuthError(res.error || 'Microsoft sign-in was cancelled or failed.');
+    }
+  };
+
+  const handleDisconnect = async (provider: 'github' | 'google' | 'microsoft') => {
     await clearCredentials(provider);
   };
 
@@ -188,6 +282,12 @@ export const SettingsModal: React.FC = () => {
     setIsFetchingGithub(true);
     await fetchGithubTasks();
     setIsFetchingGithub(false);
+  };
+
+  const handleFetchMicrosoftTasks = async () => {
+    setIsFetchingMicrosoft(true);
+    await fetchMicrosoftTasks();
+    setIsFetchingMicrosoft(false);
   };
 
   const handleClose = () => {
@@ -218,7 +318,7 @@ export const SettingsModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 shadow-2xl p-4 text-slate-800 dark:text-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
-        
+
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
@@ -398,7 +498,7 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                  <span>Required scope: <code>repo</code></span>
+                  <span>Required scope: <code>repo, read:user</code></span>
                   <div className="flex items-center space-x-2">
                     {authStatus.has_github && (
                       <button
@@ -625,7 +725,7 @@ export const SettingsModal: React.FC = () => {
                       {/* Setup Instructions */}
                       <div className="p-2 rounded bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-[10px] space-y-1.5 text-slate-600 dark:text-slate-300">
                         <span className="font-semibold text-slate-700 dark:text-slate-200 block">
-                          3-Step Setup Instructions:
+                          Step by Step Setup Instructions:
                         </span>
                         <ol className="list-decimal list-inside space-y-1 text-slate-500 dark:text-slate-400">
                           <li>
@@ -743,6 +843,231 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Microsoft 365 & Teams OAuth Section */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Users className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Microsoft 365 & Teams</span>
+                  </div>
+                  {authStatus.has_microsoft ? (
+                    <div className="flex items-center space-x-1.5">
+                      {authStatus.microsoft_from_env && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80" title="Token loaded from .env environment variable">
+                          .env
+                        </span>
+                      )}
+                      {authStatus.microsoft_has_refresh_token && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/80" title="Long-term OAuth token refresh active">
+                          Auto-Refresh
+                        </span>
+                      )}
+                      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80">
+                        <Check className="h-2.5 w-2.5" />
+                        <span>Connected</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleFetchMicrosoftTasks}
+                        disabled={isFetchingMicrosoft}
+                        title="Sync Microsoft Tasks"
+                        className="p-1 text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-slate-800 rounded transition-colors"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isFetchingMicrosoft ? 'animate-spin text-violet-600 dark:text-violet-400' : ''}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDisconnect('microsoft')}
+                        title="Disconnect Microsoft 365"
+                        className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 rounded transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-300">
+                      Not Configured
+                    </span>
+                  )}
+                </div>
+
+                {/* 1-Click "Sign in with Microsoft" Button */}
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleMicrosoftOAuthSignIn}
+                    disabled={isSigningInMicrosoft}
+                    className="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-lg bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-semibold shadow-sm shadow-violet-600/30 transition-all disabled:opacity-50"
+                  >
+                    {isSigningInMicrosoft ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>Waiting for browser authorization...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Users className="h-3.5 w-3.5" />
+                        <span>
+                          {authStatus.has_microsoft
+                            ? 'Re-authenticate with Microsoft'
+                            : 'Sign in with Microsoft (Recommended)'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Browser Wait Notice */}
+                  {isSigningInMicrosoft && (
+                    <div className="text-[10px] text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 p-2 rounded-lg border border-violet-200 dark:border-violet-800/80 flex items-start space-x-1.5 animate-pulse">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        A browser tab opened to the Microsoft login consent page. Sign in and grant permission. WidKanban will automatically capture the response via PKCE loopback.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* OAuth Success Alert */}
+                  {microsoftOAuthSuccess && (
+                    <div className="text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800/80 flex items-center space-x-1.5">
+                      <Check className="h-3.5 w-3.5 shrink-0" />
+                      <span>Microsoft 365 connected successfully! Long-term auto-refresh is active.</span>
+                    </div>
+                  )}
+
+                  {/* OAuth Error Alert */}
+                  {microsoftOAuthError && (
+                    <div className="text-[10px] text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/80 p-2 rounded-lg border border-rose-200 dark:border-rose-800/80 space-y-1">
+                      <div className="flex items-center space-x-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="font-semibold">Authentication Error</span>
+                      </div>
+                      <p className="pl-5 text-rose-600 dark:text-rose-400">{microsoftOAuthError}</p>
+                    </div>
+                  )}
+
+                  {/* Disconnected / Session Expired Notice */}
+                  {authStatus.has_microsoft && apiHealth.microsoft?.lastChecked && (!apiHealth.microsoft.connected || Boolean(apiHealth.microsoft.errorMessage)) && (
+                    <div className="flex items-center justify-between text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-md px-2.5 py-1.5">
+                      <div className="flex items-center space-x-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                        <span>
+                          {apiHealth.microsoft.errorMessage || 'Microsoft 365 session expired. Please re-authenticate.'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleMicrosoftOAuthSignIn}
+                        className="text-[10px] font-semibold underline text-violet-700 dark:text-violet-300 hover:text-violet-900 ml-2"
+                      >
+                        Reconnect
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Optional Education Scope Toggle */}
+                  <div className="pt-1 flex items-start space-x-2">
+                    <input
+                      type="checkbox"
+                      id="ms-include-education"
+                      checked={microsoftIncludeEducation}
+                      onChange={(e) => setMicrosoftIncludeEducation(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 dark:border-slate-750 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <label htmlFor="ms-include-education" className="text-[10.5px] text-slate-600 dark:text-slate-300 cursor-pointer">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 block">
+                        Include School & Teams Education permissions
+                      </span>
+                      <span className="text-[9.5px] text-slate-500 dark:text-slate-400 block leading-tight">
+                        Requests assignments and classes. Leave unchecked for Personal Microsoft accounts.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Collapsible: Custom Client ID & Manual Token */}
+                <div className="pt-1 border-t border-slate-200/80 dark:border-slate-750">
+                  <button
+                    type="button"
+                    onClick={() => setShowMicrosoftAdvanced(!showMicrosoftAdvanced)}
+                    className="w-full flex items-center justify-between text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 py-1 transition-colors"
+                  >
+                    <span className="flex items-center space-x-1">
+                      <HelpCircle className="h-3 w-3" />
+                      <span>Advanced Settings & Manual Token</span>
+                    </span>
+                    {showMicrosoftAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+
+                  {showMicrosoftAdvanced && (
+                    <div className="mt-2 space-y-2 text-[11px] p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Microsoft Application (Client) ID
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 12345678-abcd-1234-ef01-123456789abc (or from .env)"
+                          value={microsoftClientId}
+                          onChange={(e) => setMicrosoftClientId(e.target.value)}
+                          className="w-full rounded-md bg-slate-50 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 py-1 px-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono text-[10px]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Manual Token Input (Ephemeral Testing)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showMicrosoft ? 'text' : 'password'}
+                            placeholder={authStatus.has_microsoft ? '•••••••••••••••• (Leave blank to keep current)' : 'eyJ0eXAiOiJKV1Qi...'}
+                            value={microsoftToken}
+                            onChange={(e) => setMicrosoftToken(e.target.value)}
+                            className="w-full rounded-md bg-slate-50 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 py-1 pl-2 pr-7 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono text-[10px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowMicrosoft(!showMicrosoft)}
+                            className="absolute right-1.5 top-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          >
+                            {showMicrosoft ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <a
+                          href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5"
+                        >
+                          <span>Entra App Registrations</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                        <a
+                          href="https://developer.microsoft.com/en-us/graph/graph-explorer"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5"
+                        >
+                          <span>Graph Explorer</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Validation Error Notice if any */}
+              {validationError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-start space-x-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+                  <span>{validationError}</span>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -757,19 +1082,23 @@ export const SettingsModal: React.FC = () => {
                   type="submit"
                   disabled={
                     isSaving ||
+                    isValidatingTokens ||
                     (!githubToken.trim() &&
                       !googleToken.trim() &&
                       !googleClientId.trim() &&
-                      !googleClientSecret.trim())
+                      !googleClientSecret.trim() &&
+                      !microsoftToken.trim())
                   }
                   className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     saveSuccess
                       ? 'bg-emerald-600 text-white'
                       : isSaving ||
+                        isValidatingTokens ||
                         (!githubToken.trim() &&
                           !googleToken.trim() &&
                           !googleClientId.trim() &&
-                          !googleClientSecret.trim())
+                          !googleClientSecret.trim() &&
+                          !microsoftToken.trim())
                       ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-[0.98]'
                   }`}
@@ -778,6 +1107,16 @@ export const SettingsModal: React.FC = () => {
                     <>
                       <Check className="h-3.5 w-3.5" />
                       <span>Saved!</span>
+                    </>
+                  ) : isValidatingTokens ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Checking Permissions...</span>
+                    </>
+                  ) : isSaving ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Saving...</span>
                     </>
                   ) : (
                     <span>Save Credentials</span>
@@ -935,7 +1274,7 @@ export const SettingsModal: React.FC = () => {
                             {apiHealth.github.rateLimitLimit ?? 5000}
                           </span>
                         </div>
-                        <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-750 overflow-hidden">
+                        <div className="w-full h-2 rounded-md bg-slate-200 dark:bg-slate-750 overflow-hidden">
                           <div
                             className={`h-full transition-all ${
                               apiHealth.github.isRateLimited
@@ -1162,7 +1501,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'appearance' && (
             <div className="space-y-4">
-              
+
               {/* Theme Mode Selector */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -1243,12 +1582,12 @@ export const SettingsModal: React.FC = () => {
                 </div>
 
                 {/* Mini Card Preview */}
-                <div 
+                <div
                   style={{ borderRadius: `${customization.cornerRadius}px` }}
                   className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-between text-xs transition-all"
                 >
                   <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Live Corner Preview</span>
-                  <span 
+                  <span
                     style={{ borderRadius: `${Math.max(0, Math.round(customization.cornerRadius * 0.5))}px` }}
                     className="px-2 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 dark:border dark:border-indigo-800 font-bold"
                   >
@@ -1310,7 +1649,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'window' && (
             <div className="space-y-4">
-              
+
               {/* Desktop Widget Layer & Pin Mode */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -1552,7 +1891,7 @@ export const SettingsModal: React.FC = () => {
           {/* ═══════════════════════════════════════════════════════════ */}
           {activeTab === 'advanced' && (
             <div className="space-y-4">
-              
+
               {/* Column Header Height Slider */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-850 p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -1649,6 +1988,15 @@ export const SettingsModal: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Permission Review Modal Layer */}
+      <PermissionsReviewModal
+        isOpen={isReviewModalOpen}
+        report={inspectionReport}
+        onConfirm={handleConfirmSave}
+        onCancel={() => setIsReviewModalOpen(false)}
+        isSaving={isSaving}
+      />
     </div>
   );
 };

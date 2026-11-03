@@ -131,6 +131,12 @@ WidKanban connects directly to GitHub and Google Tasks APIs from the native Rust
 - Contributors can test in under 60 seconds with **ephemeral 1-hour tokens** from Google OAuth Playground (no Google Cloud Console project needed!).
 - Step-by-step instructions: [Google Tasks OAuth Guide](docs/credentials-setup.md#2-google-tasks--oauth-20-access-token) and [Contributor Ephemeral Quick-Start](docs/credentials-setup.md#contributor-quick-start-fast-testing-with-short-lived-keys).
 
+### Microsoft 365 & Teams Token
+- Supports Microsoft Graph tokens with delegated scopes (`Tasks.ReadWrite`, `EduAssignments.ReadBasic`, `Group.Read.All`, `User.Read`).
+- Contributors and users can test in under 60 seconds using [Microsoft Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer).
+- Ingests Teams for Education assignments, Microsoft Planner cards, Microsoft To Do personal lists, and Outlook flagged emails.
+- Step-by-step instructions: [Microsoft Teams Setup Guide](docs/teams-setup.md).
+
 ### Security & Local Storage
 - **Zero Frontend Secrets**: Tokens are never saved in `localStorage`, `sessionStorage`, or frontend state.
 - **Native OS Storage**: Saved strictly in `%APPDATA%\com.widkanban.desktop\credentials.json` on Windows (or `~/.local/share/com.widkanban.desktop/credentials.json` with `0600` permissions on Unix).
@@ -149,6 +155,7 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
 | 🤝 **[Contributor Guide & Manual](CONTRIBUTORS.md)** | Full guide for development workflows, fast testing with ephemeral keys, and PR checklists. | [Architectural invariants](CONTRIBUTORS.md#2-non-negotiable-architectural-invariants), [Dev setup](CONTRIBUTORS.md#3-prerequisites--development-environment-setup), [Ephemeral keys](CONTRIBUTORS.md#4-fast-testing-with-ephemeral--short-lived-keys), [PR checklist](CONTRIBUTORS.md#8-pull-request--verification-checklist). |
 | 🐙 **[GitHub Setup Guide](docs/github-setup.md)** | Visual walkthrough with screenshots for generating classic and fine-grained PATs. | [Classic PAT](docs/github-setup.md#option-1-classic-personal-access-token-recommended), [Fine-grained PAT](docs/github-setup.md#option-2-fine-grained-personal-access-token-beta), [Rate limit quota](docs/github-setup.md#auto-sync--rate-limit-monitoring). |
 | 🔵 **[Google Tasks Setup Guide](docs/google-setup.md)** | Step-by-step visual guide for Google Cloud OAuth 2.0 loopback setup and Test Users. | [Desktop client](docs/google-setup.md#part-3-create-desktop-oauth-client-credentials), [Test Users in Audience](docs/google-setup.md#part-2-configure-oauth-consent-screen--test-users-crucial), [Silent auto-refresh](docs/google-setup.md#part-5-silent-auto-refresh--quota-monitoring). |
+| 🟣 **[Microsoft Teams Setup Guide](docs/teams-setup.md)** | Step-by-step visual guide for Microsoft 365, Teams for Education, Planner, and To Do API configuration. | [Graph Explorer 60s setup](docs/teams-setup.md#option-1-60-second-setup-via-microsoft-graph-explorer-recommended-for-quick-start), [Entra ID App Registration](docs/teams-setup.md#option-2-microsoft-entra-id--azure-app-registration-permanent-desktop-setup), [Two-way write-back](docs/teams-setup.md#how-widkanban-synchronizes-microsoft-tasks). |
 | 🔑 **[Credentials Reference](docs/credentials-setup.md)** | Overview of token storage locations, security invariants, and ephemeral testing. | Token scopes, [Contributor quick-start](docs/credentials-setup.md#contributor-quick-start-fast-testing-with-short-lived-keys), [Local storage paths](docs/credentials-setup.md#where-credentials-are-stored), [Revocation](docs/credentials-setup.md#revoking-credentials). |
 | 🏛️ **[Architecture & System Design](docs/architecture.md)** | Core system architecture, IPC bridge, security invariants, and schemas. | [Mermaid architecture diagram](docs/architecture.md#1-high-level-system-architecture), [`UnifiedTask` schema](docs/architecture.md#2-data-normalization-schema), [Write-back engine](docs/architecture.md#4-sync-model--write-back-engine), [Local trash system](docs/architecture.md#5-task-deletion--local-trash-management). |
 | 🛠️ **[Developer Notes & Troubleshooting](docs/notes.md)** | Implementation quirks, frameless window behavior, and compiler troubleshooting. | [Linux packages](docs/notes.md#1-linux-environment-prerequisites), [Frameless drag region](docs/notes.md#2-frameless-window--drag-region-behavior), [Console warnings](docs/notes.md#3-understanding-common-console-warnings), [MSVC linker fix](docs/notes.md#5-windows-msvc-linker-required-for-reqwest--tokio). |
@@ -164,6 +171,7 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
 - **Desktop Widget**: Frameless glassmorphic window, tray controls, `@dnd-kit` drag-and-drop, quick add task modal.
 - **GitHub Integration**: Assigned issues & PR fetching, rich PR branch comparisons, diff stats, label synchronization, and remote/local issue deletion.
 - **Google Tasks Integration**: OAuth token support, multi-list tasks sync, subtasks & links normalization, completion status write-back.
+- **Microsoft 365 & Teams Integration**: Teams for Education assignments, Planner Kanban cards, Microsoft To Do personal lists, and Outlook flagged emails with two-way status write-back.
 
 ### Planned & Upcoming 🎯
 - **Background Sync Engine**: Tokio background polling loop (~3 min cadence) and native desktop notifications on assignment.

@@ -138,6 +138,14 @@ As a contributor, **you do not need to register a Google Cloud project or use pe
    - **Administration** *(optional)*: `Read and write` (only if testing permanent hard-delete GraphQL mutations).
 5. Copy the `github_pat_...` string and paste it into Settings.
 
+### Microsoft 365 & Teams: 60-Second Ephemeral Token via Graph Explorer
+1. Navigate to [Microsoft Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer).
+2. Sign in with any personal, work, or school Microsoft account.
+3. Click **Modify permissions** and consent to `Tasks.ReadWrite`, `EduAssignments.ReadBasic`, `Group.Read.All`, and `User.Read`.
+4. Switch to the **Access token** tab and copy the token string (`eyJ0eXAi...`).
+5. Paste it into WidKanban Settings (`⚙`) under **Microsoft 365 & Teams**.
+6. The token automatically expires after ~60-90 minutes, making it ideal for fast, zero-commitment local verification.
+
 ### Developer Environment Credentials via `.env` (Fastest Setup)
 For rapid local testing during development, you can avoid manual entry in the Settings UI by creating a `.env` or `.env.local` file in the project root:
 ```bash
@@ -147,13 +155,14 @@ Populate your test keys:
 ```env
 GITHUB_TOKEN=ghp_yourTestGithubTokenHere
 GOOGLE_TASKS_TOKEN=ya29.yourTestGoogleTasksAccessTokenHere
+MICROSOFT_TOKEN=eyJ0eXAiOiJKV1Qi...
 ```
 When running `npm run tauri dev`, WidKanban automatically detects and loads these credentials into memory via `dotenvy`, with zero manual input needed. Note that tokens in `.env` are strictly loaded in memory by the native Rust backend and are never written to `credentials.json` or bundled into frontend assets.
 
 ### Cleaning Up Credentials After Testing
 In the widget header, click **Settings (⚙)** and click **"Disconnect"** on the provider. This immediately purges the tokens from your local `credentials.json` file.
 
-See the complete [Credentials Setup Guide](docs/credentials-setup.md) for further details.
+See the complete [Credentials Setup Guide](docs/credentials-setup.md) and [Microsoft Teams Setup Guide](docs/teams-setup.md) for further details.
 
 [↑ Back to Top](#table-of-contents)
 
@@ -227,6 +236,9 @@ widkanban/
 ├── docs/                        # Deep-dive documentation
 │   ├── architecture.md          # Architecture, schemas, security model
 │   ├── credentials-setup.md     # Detailed PAT & OAuth instructions
+│   ├── github-setup.md          # Visual guide for GitHub PAT setup
+│   ├── google-setup.md          # Visual guide for Google OAuth setup
+│   ├── teams-setup.md           # Visual guide for Microsoft 365 & Teams setup
 │   ├── notes.md                 # Linux GTK/WebKit troubleshooting & MSVC notes
 │   └── todos.md                 # Project milestones & roadmap checklist
 ├── bin/                         # Packaged native binaries (.msi, .deb, .AppImage)
@@ -329,6 +341,7 @@ error: linker `link.exe` not found
 
 - [Project README](README.md): High-level overview, key features, and quick start.
 - [Credentials Setup Guide](docs/credentials-setup.md): Complete guide for generating and managing API tokens.
+- [Microsoft Teams Setup Guide](docs/teams-setup.md): Visual guide for Microsoft Graph Explorer and Teams API setup.
 - [Architecture & System Design](docs/architecture.md): Deep-dive into IPC bridge, data schemas, and security model.
 - [Developer Notes](docs/notes.md): Environment dependencies, GTK notes, and compiler fixes.
 - [Roadmap & Feature Checklist](docs/todos.md): Feature checklist and development roadmap.

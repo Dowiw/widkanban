@@ -55,6 +55,19 @@ export const App: React.FC = () => {
     }
   }, [isDark]);
 
+  // Synchronize dynamic corner radius CSS variables to document.documentElement
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const r = customization.cornerRadius;
+    root.style.setProperty('--widget-radius', `${r}px`);
+    root.style.setProperty('--modal-radius', `${r}px`);
+    root.style.setProperty('--col-radius', `${r}px`);
+    root.style.setProperty('--card-radius', `${r}px`);
+    root.style.setProperty('--subcard-radius', `${Math.max(0, Math.round(r * 0.6))}px`);
+    root.style.setProperty('--input-radius', `${Math.max(0, Math.round(r * 0.4))}px`);
+  }, [customization.cornerRadius]);
+
   // Initial resizability & pin mode sync based on pin state
   useEffect(() => {
     syncWindowResizable(!isPinned);
@@ -62,16 +75,17 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     checkAuthStatus().then((status) => {
-      if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
+      const hasAnyProvider = status.has_github || status.has_google || status.has_microsoft;
+      if (!hasCompletedOnboarding && !hasAnyProvider) {
         setSettingsOpen(true);
-      } else if (status.has_github || status.has_google) {
+      } else if (hasAnyProvider) {
         if (!autoSyncSettings.hasPrompted) {
           setAutoSyncPromptOpen(true);
         } else if (!startupSettings.hasPrompted) {
           setStartupPromptOpen(true);
         }
       }
-      if (status.has_github || status.has_google) {
+      if (hasAnyProvider) {
         refreshTasksWithDiff();
       }
     });
@@ -122,8 +136,11 @@ export const App: React.FC = () => {
 
   const rootStyle: React.CSSProperties = {
     ['--widget-radius' as string]: `${customization.cornerRadius}px`,
-    ['--col-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.75))}px`,
-    ['--card-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.5))}px`,
+    ['--modal-radius' as string]: `${customization.cornerRadius}px`,
+    ['--col-radius' as string]: `${customization.cornerRadius}px`,
+    ['--card-radius' as string]: `${customization.cornerRadius}px`,
+    ['--subcard-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.6))}px`,
+    ['--input-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.4))}px`,
     ['--col-header-height' as string]: `${customization.columnHeaderHeight}px`,
     ['--col-min-width' as string]: `${customization.columnMinWidth}px`,
   };

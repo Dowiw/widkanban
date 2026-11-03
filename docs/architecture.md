@@ -38,20 +38,22 @@ graph TD
     subgraph ExternalProviders["External API Providers"]
         GitHubAPI["GitHub REST API<br/>(Issues, Labels, PRs)"]
         GoogleTasksAPI["Google Tasks REST API<br/>(Lists & Task items)"]
+        MicrosoftGraphAPI["Microsoft Graph REST API<br/>(Assignments, Planner, To Do, Emails)"]
     end
 
     SyncEngine <-->|"HTTPS / REST (PAT Auth)"| GitHubAPI
     SyncEngine <-->|"HTTPS / REST (OAuth 2.0)"| GoogleTasksAPI
+    SyncEngine <-->|"HTTPS / REST (Graph Token)"| MicrosoftGraphAPI
 ```
 
 ---
 
 ## 2. Data Normalization Schema
 
-All tasks fetched from disparate external providers (GitHub Issues/PRs, Google Tasks) are normalized into a unified TypeScript interface:
+All tasks fetched from disparate external providers (GitHub Issues/PRs, Google Tasks, Microsoft 365 & Teams) are normalized into a unified TypeScript interface:
 
 ```typescript
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft_teams';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export interface GitHubLabel {
@@ -72,9 +74,9 @@ export interface PRBranchInfo {
 }
 
 export interface UnifiedTask {
-  id: string;             // Unique identifier, e.g., 'gh_102' or 'gt_abc123'
+  id: string;             // Unique identifier, e.g., 'gh_102' or 'gt_abc123' or 'ms_xyz789'
   title: string;          // Human-readable task title
-  source: TaskSource;     // 'github' | 'google_tasks'
+  source: TaskSource;     // 'github' | 'google_tasks' | 'microsoft_teams'
   status: TaskStatus;     // 'todo' | 'in_progress' | 'done'
   url: string;            // Direct web URL to the issue or task item
   updatedAt: string;      // ISO 8601 timestamp
@@ -101,6 +103,16 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;   // Branch, fork, draft status, and diff statistics
+
+    // --- Microsoft 365 & Teams ---
+    teamName?: string;           // Teams channel or team name
+    courseName?: string;         // Teams for Education class name
+    assignmentId?: string;       // Unique assignment ID
+    isAssignment?: boolean;      // Teams for Education Assignment
+    isPlanner?: boolean;         // Microsoft Planner card
+    isFlaggedEmail?: boolean;    // Outlook flagged email
+    percentComplete?: number;    // Planner task percentage (0 - 100)
+    submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
 ```
@@ -114,7 +126,7 @@ export interface UnifiedTask {
 
 1. **Rust Keychain Layer**: Auth tokens are encrypted and managed natively in Rust via OS Keychain services or `tauri-plugin-store`.
 2. **IPC Scoping**: The frontend webview only sends IPC requests like `invoke('sync_tasks')` or `invoke('update_task_status', { taskId, status })`.
-3. **No Direct Web Fetch for Auth**: All API network calls to GitHub and Google Tasks are executed inside Rust `reqwest` / async threads.
+3. **No Direct Web Fetch for Auth**: All API network calls to GitHub, Google Tasks, and Microsoft Graph are executed inside Rust `reqwest` / async threads.
 
 ---
 
@@ -122,9 +134,12 @@ export interface UnifiedTask {
 
 - **Optimistic UI**: Moving a card in `@dnd-kit` immediately mutates local Zustand store state for instant visual feedback.
 - **Async Write-back**: React invokes a Rust IPC command in the background:
-  - **GitHub Write-back**: Moving to *Done* closes the issue (`PATCH /repos/{owner}/{repo}/issues/{number}`). Moving to *In Progress* applies an `in-progress` label.
+  - **GitHub Write-back**: Moving between *To Do* and *In Progress* applies or removes labels (`to-do`, `in-progress`).
   - **Google Tasks Write-back**: Moving to *Done* sets task status to `completed` (`PATCH /tasks/v1/lists/{listId}/tasks/{taskId}`).
-- **Tokio Background Polling Loop**: A background thread polls APIs every ~3 minutes and emits a `tasks-updated` event to the webview.
+  - **Microsoft Tasks Write-back**:
+    - **To Do**: Updates status to `notStarted`, `inProgress`, or `completed`.
+    - **Planner**: Concurrently fetches the latest `@odata.etag` and patches `percentComplete` (`0%`, `50%`, `100%`).
+- **Tokio Background Polling Loop**: A background thread polls APIs and emits updates to the webview.
 
 ---
 
@@ -149,6 +164,7 @@ WidKanban provides a flexible two-tier deletion system for external tasks (GitHu
 
 - [Project README](../README.md): Overview, key features, and quick start.
 - [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
-- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
+- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT, Google Tasks OAuth, and Microsoft 365 configuration.
+- [Microsoft Teams Setup Guide](teams-setup.md): Guide for Microsoft Graph Explorer and Teams API setup.
 - [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
 - [Roadmap & Feature Checklist](todos.md): Feature checklist and development roadmap.

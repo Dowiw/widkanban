@@ -56,6 +56,16 @@ This document tracks completed capabilities, active milestones, and planned feat
   - [x] Dragging back to *To Do* reverts status to `needsAction`.
 - [x] **Ephemeral Testing Support**: Fast 60-second setup path via Google OAuth Playground for contributors without Google Cloud setup.
 
+### Microsoft 365 & Teams Integration ([#3](https://github.com/Dowiw/widkanban/issues/3))
+- [x] **Unified Task Provider**: Added `microsoft_teams` as third primary provider in `UnifiedTask` and `TaskSource`.
+- [x] **Teams for Education Assignments**: Ingests homework, assignments, and class projects (`GET /education/me/assignments`) with course titles, due dates, instructions, and deep submission links.
+- [x] **Microsoft Planner**: Aggregates Kanban cards (`GET /me/planner/tasks`) with percentage completion and checklist subtasks.
+- [x] **Microsoft To Do & Flagged Emails**: Ingests personal lists (`/me/todo/lists/{id}/tasks`) and flagged emails with linked resources.
+- [x] **Two-Way Status Write-Back**:
+  - [x] Moving To Do tasks updates remote status (`notStarted`, `inProgress`, `completed`).
+  - [x] Moving Planner tasks patches percentage progress (0%, 50%, 100%) with ETag concurrency handling.
+- [x] **UI & Filter Integration**: Dedicated Teams filter tab with task count, violet provider badge, sub-type tags (`Assignment`, `Planner`, `Flagged`), Settings connection card with manual sync, and Add Task modal support.
+
 ---
 
 ## Upcoming & Planned Features
