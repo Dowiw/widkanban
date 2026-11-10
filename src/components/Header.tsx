@@ -16,7 +16,9 @@ import {
   Sun,
   Moon,
   Monitor,
-  Ellipsis
+  Ellipsis,
+  Users,
+  ChevronDown
 } from 'lucide-react';
 import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
 
@@ -40,6 +42,9 @@ export const Header: React.FC = () => {
     dismissLocallyDeletedTip,
     customization,
     toggleTheme,
+    apiHealth,
+    syncBanner,
+    setSyncBanner,
   } = useTaskStore();
 
   const [showSearch, setShowSearch] = useState(false);
@@ -61,6 +66,44 @@ export const Header: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const extraToolsButtonRef = useRef<HTMLDivElement>(null);
   const extraToolsRowRef = useRef<HTMLDivElement>(null);
+
+  // Collapsible task source filter state (Hover on desktop, tap on mobile)
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isFilterHovered, setIsFilterHovered] = useState(false);
+  const filterContainerRef = useRef<HTMLDivElement>(null);
+  const filterHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleFilterMouseEnter = () => {
+    if (filterHoverTimeoutRef.current) {
+      clearTimeout(filterHoverTimeoutRef.current);
+      filterHoverTimeoutRef.current = null;
+    }
+    setIsFilterHovered(true);
+  };
+
+  const handleFilterMouseLeave = () => {
+    filterHoverTimeoutRef.current = setTimeout(() => {
+      setIsFilterHovered(false);
+    }, 150);
+  };
+
+  const showFilterDropdown = isFilterOpen || isFilterHovered;
+
+  // Close filter dropdown on outside click or touch
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (filterContainerRef.current && !filterContainerRef.current.contains(e.target as Node)) {
+        setIsFilterOpen(false);
+        setIsFilterHovered(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
 
   // Close search popover on outside click
   useEffect(() => {
@@ -99,8 +142,60 @@ export const Header: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showExtraTools, isToolsPinned]);
 
+  // Auto-dismiss syncBanner after 6 seconds
+  useEffect(() => {
+    if (!syncBanner) return;
+    const timer = setTimeout(() => setSyncBanner(null), 6000);
+    return () => clearTimeout(timer);
+  }, [syncBanner, setSyncBanner]);
+
+  // Compute overall API health state
+  let healthColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30';
+  let healthDot = 'bg-emerald-500';
+  let healthStatusText = 'API Quota Healthy';
+
+  const gh = apiHealth?.github;
+  const gg = apiHealth?.google;
+
+  const isRateLimited = gh?.isRateLimited;
+  const isExpiredOrError = gh?.errorMessage || gg?.errorMessage;
+  const isExpiringSoon = gh?.isExpiringSoon || gg?.isExpiringSoon;
+
+  const ghRemaining = gh?.rateLimitRemaining;
+  const ghLimit = gh?.rateLimitLimit;
+  const isLowQuota =
+    ghRemaining !== undefined && ghLimit !== undefined && ghLimit > 0 && ghRemaining / ghLimit < 0.2;
+
+  const isDisconnectedOrError =
+    (authStatus.has_github && gh?.lastChecked && !gh?.connected) ||
+    (authStatus.has_google && gg?.lastChecked && !gg?.connected) ||
+    Boolean(isExpiredOrError);
+
+  if (isRateLimited || isDisconnectedOrError) {
+    healthColor = 'text-rose-500 bg-rose-500/10 border-rose-500/30';
+    healthDot = 'bg-rose-500 animate-pulse';
+    healthStatusText = isRateLimited
+      ? 'GitHub Rate Limit Reached (Backing off)'
+      : gh?.errorMessage
+      ? `GitHub: ${gh.errorMessage}`
+      : gg?.errorMessage
+      ? `Google: ${gg.errorMessage}`
+      : 'Account Disconnected / Invalid Token';
+  } else if (isLowQuota || isExpiringSoon) {
+    healthColor = 'text-amber-500 bg-amber-500/10 border-amber-500/30';
+    healthDot = 'bg-amber-500';
+    healthStatusText = isExpiringSoon
+      ? 'Token Expiring Soon (Within 7 days)'
+      : `Low Quota: ${ghRemaining} / ${ghLimit} requests remaining`;
+  } else if (!authStatus.has_github && !authStatus.has_google && !authStatus.has_microsoft) {
+    healthColor = 'text-slate-400 bg-slate-500/10 border-slate-500/20';
+    healthDot = 'bg-slate-400';
+    healthStatusText = 'No Accounts Connected';
+  }
+
   const ghCount = tasks.filter((t) => t.source === 'github').length;
   const gtCount = tasks.filter((t) => t.source === 'google_tasks').length;
+  const msCount = tasks.filter((t) => t.source === 'microsoft_teams').length;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -146,7 +241,7 @@ export const Header: React.FC = () => {
             alt="WidKanban" 
             className="h-3.5 w-3.5 rounded object-contain pointer-events-none" 
           />
-          <span className="font-unifont text-[11px] font-semibold tracking-wider text-slate-700 dark:text-slate-300 truncate">
+          <span className="text-[11px] font-semibold tracking-wider text-slate-700 dark:text-slate-300 truncate">
             WidKanban
           </span>
         </div>
@@ -174,47 +269,149 @@ export const Header: React.FC = () => {
 
       {/* 2. Main Toolbar Row */}
       <div className="px-2.5 py-1.5 flex items-center justify-between gap-1.5 relative">
-        {/* Left: Filter Tabs with Task Counts */}
-        <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800/90 p-0.5 rounded-lg border border-slate-200/90 dark:border-slate-750 shrink-0">
+        {/* Left: Collapsible Task Source Filter (Hover on desktop, tap on mobile) */}
+        <div
+          ref={filterContainerRef}
+          onMouseEnter={handleFilterMouseEnter}
+          onMouseLeave={handleFilterMouseLeave}
+          className="relative no-drag shrink-0"
+        >
           <button
             type="button"
-            onClick={() => setFilterSource('all')}
-            className={`px-2 py-0.5 rounded-md text-[11px] transition-all ${
-              filterSource === 'all'
-                ? 'bg-white text-slate-800 dark:bg-slate-700 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
+            onClick={() => setIsFilterOpen((prev) => !prev)}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border bg-slate-100 dark:bg-slate-800/90 border-slate-200/90 dark:border-slate-750 hover:bg-slate-200/70 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 transition-all select-none shadow-2xs cursor-pointer"
+            title="Filter tasks by provider (Hover or tap to expand)"
+            aria-haspopup="true"
+            aria-expanded={showFilterDropdown}
           >
-            All
+            {filterSource === 'all' && (
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                All ({tasks.length})
+              </span>
+            )}
+            {filterSource === 'github' && (
+              <>
+                <Github className="h-3 w-3 text-emerald-500 dark:text-emerald-400 shrink-0" />
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  GitHub ({ghCount})
+                </span>
+              </>
+            )}
+            {filterSource === 'google_tasks' && (
+              <>
+                <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
+                <span className="font-semibold text-blue-600 dark:text-blue-400">
+                  Google ({gtCount})
+                </span>
+              </>
+            )}
+            {filterSource === 'microsoft_teams' && (
+              <>
+                <Users className="h-3 w-3 text-violet-500 dark:text-violet-400 shrink-0" />
+                <span className="font-semibold text-violet-600 dark:text-violet-400">
+                  Teams ({msCount})
+                </span>
+              </>
+            )}
+            <ChevronDown
+              className={`h-3 w-3 text-slate-400 transition-transform duration-150 ${
+                showFilterDropdown ? 'rotate-180' : ''
+              }`}
+            />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterSource('github')}
-            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
-              filterSource === 'github'
-                ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 shadow-2xs'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Github className="h-3 w-3 text-emerald-500 dark:text-emerald-400 shrink-0" />
-            <span>GitHub</span>
-            <span className="text-[10px] font-mono opacity-75">({ghCount})</span>
-          </button>
+          {/* Floating Filter Options Menu */}
+          {showFilterDropdown && (
+            <div className="absolute left-0 top-full mt-1.5 z-40 w-44 rounded-xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 shadow-xl p-1 animate-in fade-in zoom-in-95 duration-150">
+              <div className="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-400 dark:text-slate-500 uppercase border-b border-slate-100 dark:border-slate-800 mb-1">
+                Filter by Provider
+              </div>
 
-          <button
-            type="button"
-            onClick={() => setFilterSource('google_tasks')}
-            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
-              filterSource === 'google_tasks'
-                ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 shadow-2xs'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
-            <span>Google</span>
-            <span className="text-[10px] font-mono opacity-75">({gtCount})</span>
-          </button>
+              {/* Option: All */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('all');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'all'
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <span className="h-2 w-2 rounded-full bg-slate-400" />
+                  <span>All Tasks</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({tasks.length})</span>
+              </button>
+
+              {/* Option: GitHub */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('github');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'github'
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <Github className="h-3 w-3 text-emerald-500 shrink-0" />
+                  <span>GitHub Issues</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({ghCount})</span>
+              </button>
+
+              {/* Option: Google Tasks */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('google_tasks');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'google_tasks'
+                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <CheckSquare className="h-3 w-3 text-blue-500 shrink-0" />
+                  <span>Google Tasks</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({gtCount})</span>
+              </button>
+
+              {/* Option: Microsoft Teams */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('microsoft_teams');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'microsoft_teams'
+                    ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/70 dark:text-violet-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <Users className="h-3 w-3 text-violet-500 shrink-0" />
+                  <span>Microsoft Teams</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({msCount})</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Right: Primary Controls (Search, Add +, Settings, More ...) */}
@@ -278,11 +475,11 @@ export const Header: React.FC = () => {
             )}
           </div>
 
-          {/* Add Mock Task Button */}
+          {/* Add Task Button */}
           <button
             type="button"
             onClick={() => setAddTaskOpen(true)}
-            title="Add Mock Task"
+            title="Add Task"
             className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 transition-all active:scale-95"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -296,8 +493,16 @@ export const Header: React.FC = () => {
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors relative"
           >
             <Settings className="h-3.5 w-3.5" />
-            {(authStatus.has_github || authStatus.has_google) && (
-              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
+            {(authStatus.has_github || authStatus.has_google || authStatus.has_microsoft) && (
+              <span
+                className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ring-1 ring-white dark:ring-slate-900 ${
+                  isDisconnectedOrError
+                    ? 'bg-rose-500 animate-pulse'
+                    : isExpiringSoon
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+              />
             )}
           </button>
 
@@ -342,6 +547,44 @@ export const Header: React.FC = () => {
               <span>Sync</span>
             </button>
 
+            {/* API Health & Quota Pill */}
+            {(authStatus.has_github || authStatus.has_google || authStatus.has_microsoft) && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                title={`${healthStatusText}\n• GitHub: ${
+                  ghRemaining !== undefined
+                    ? `${ghRemaining} / ${ghLimit} requests remaining`
+                    : authStatus.has_github
+                    ? 'Connected'
+                    : 'Not configured'
+                }${
+                  gh?.rateLimitReset
+                    ? ` (Resets in ${Math.max(
+                        0,
+                        Math.round((gh.rateLimitReset - Date.now() / 1000) / 60)
+                      )}m)`
+                    : ''
+                }\n• Google Tasks: ${
+                  authStatus.has_google
+                    ? gg?.connected
+                      ? 'Active'
+                      : 'Error'
+                    : 'Not configured'
+                }\nClick to view API Health in Settings.`}
+                className={`px-1.5 py-0.5 rounded-md border flex items-center space-x-1 text-[10px] font-medium transition-colors ${healthColor}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${healthDot}`} />
+                <span>
+                  {isRateLimited
+                    ? 'Throttled'
+                    : ghRemaining !== undefined
+                    ? `${ghRemaining}`
+                    : 'API OK'}
+                </span>
+              </button>
+            )}
+
             {/* Quick Theme Toggle */}
             <button
               type="button"
@@ -363,7 +606,15 @@ export const Header: React.FC = () => {
             <button
               type="button"
               onClick={handleTogglePin}
-              title={isPinned ? 'Always on top (Active - Resizing Locked)' : 'Always on top (Inactive - Resizing Enabled)'}
+              title={
+                isPinned
+                  ? `Pinned to ${
+                      customization.pinMode === 'desktop-layer'
+                        ? 'Desktop Layer'
+                        : 'Always on Top'
+                    } (Movement & Resizing Locked)`
+                  : 'Unpinned (Movement & Resizing Enabled)'
+              }
               className={`px-2 py-1 rounded-md transition-colors flex items-center space-x-1 text-[11px] font-medium ${
                 isPinned 
                   ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/70 dark:text-indigo-400 border border-indigo-200/70 dark:border-indigo-800/60' 
@@ -371,7 +622,13 @@ export const Header: React.FC = () => {
               }`}
             >
               <Pin className={`h-3 w-3 ${isPinned ? 'fill-indigo-600 dark:fill-indigo-400' : ''}`} />
-              <span>{isPinned ? 'Pinned' : 'Pin'}</span>
+              <span>
+                {isPinned
+                  ? customization.pinMode === 'desktop-layer'
+                    ? 'Desktop'
+                    : 'Pinned'
+                  : 'Pin'}
+              </span>
             </button>
 
             {/* Hidden / Deleted Tasks */}
@@ -390,7 +647,7 @@ export const Header: React.FC = () => {
                 <Trash2 className="h-3 w-3" />
                 <span>Trash</span>
                 {locallyDeletedTasks.length > 0 && (
-                  <span className="ml-0.5 px-1 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+                  <span className="ml-0.5 px-1 py-0.2 rounded-md bg-rose-500 text-white text-[9px] font-bold">
                     {locallyDeletedTasks.length}
                   </span>
                 )}
@@ -445,6 +702,24 @@ export const Header: React.FC = () => {
             className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-200/60 hover:bg-amber-200 dark:bg-amber-800/60 dark:hover:bg-amber-700 text-amber-900 dark:text-amber-100 transition-colors"
           >
             Got it
+          </button>
+        </div>
+      )}
+
+      {/* 5. In-App Sync Banner */}
+      {syncBanner && (
+        <div className="mx-2.5 my-1 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[11px] flex items-center justify-between animate-in fade-in slide-in-from-top-1">
+          <span className="flex items-center gap-1.5 truncate">
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping shrink-0" />
+            <span className="truncate">{syncBanner}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSyncBanner(null)}
+            className="text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 p-0.5 rounded transition-colors ml-2 shrink-0"
+            title="Dismiss"
+          >
+            <X className="h-3 w-3" />
           </button>
         </div>
       )}

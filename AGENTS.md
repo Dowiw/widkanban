@@ -144,6 +144,9 @@ Always run these commands from the repository root (`/home/dowiw/project_repos/w
   2. `npm run build` completes cleanly without TypeScript errors.
   3. `cargo check --manifest-path src-tauri/Cargo.toml` compiles cleanly if Rust files were modified.
 
+### Documentation Guidelines
+- **API Acquisition & Setup Guides**: Any guide detailing credential creation, API setup, or token generation (e.g. `docs/google-setup.md`, `docs/github-setup.md`) **must prominently include a Last Updated date (month and year)** at the top of the document to document verification against external provider console UIs.
+
 ---
 
 ## 7. Known Environment Quirks

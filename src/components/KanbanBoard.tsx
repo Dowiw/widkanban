@@ -3,6 +3,8 @@ import {
   DndContext,
   DragOverlay,
   MouseSensor,
+  TouchSensor,
+  PointerSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
@@ -19,11 +21,22 @@ export const KanbanBoard: React.FC = () => {
   const { tasks, moveTask, searchQuery, filterSource } = useTaskStore();
   const [activeTask, setActiveTask] = useState<UnifiedTask | null>(null);
 
-  // MouseSensor provides significantly higher FPS and zero input latency in Tauri/WebKit
+  // PointerSensor for instant touch dragging on handles; MouseSensor & TouchSensor as fallbacks
   const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 4,
+      },
+    }),
     useSensor(MouseSensor, {
       activationConstraint: {
         distance: 3,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 150,
+        tolerance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -83,7 +96,7 @@ export const KanbanBoard: React.FC = () => {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex-1 p-3 flex flex-col md:flex-row gap-3 overflow-x-auto overflow-y-hidden">
+      <div className="flex-1 p-3 flex flex-row gap-3 overflow-x-auto overflow-y-hidden snap-x snap-mandatory scroll-smooth">
         <Column status="todo" title="To Do" tasks={todoTasks} />
         <Column status="in_progress" title="In Progress" tasks={inProgressTasks} />
         <Column status="done" title="Done" tasks={doneTasks} />

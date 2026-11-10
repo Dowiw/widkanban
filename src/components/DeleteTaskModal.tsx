@@ -258,7 +258,7 @@ export const DeleteTaskModal: React.FC = () => {
 
                       {isDuplicate && (
                         <div className="flex items-center space-x-1.5 pl-5">
-                          <span className="text-slate-500 text-xs font-mono">#</span>
+                          <span className="text-slate-500 text-xs">#</span>
                           <input
                             type="number"
                             value={duplicateNumber}
