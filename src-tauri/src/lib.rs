@@ -3289,6 +3289,7 @@ async fn update_google_task(
 ) -> Result<(), String> {
     let token = ensure_valid_google_token(&app_handle).await?;
 
+    let raw_id = task_id.strip_prefix("gt_").unwrap_or(&task_id);
     let google_status = task_status_to_google_status(&new_status);
     let payload = GTaskPatchPayload { status: google_status };
 
@@ -3300,7 +3301,7 @@ async fn update_google_task(
     let resp = client
         .patch(format!(
             "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-            list_id, task_id
+            list_id, raw_id
         ))
         .bearer_auth(&token)
         .json(&payload)
@@ -3312,6 +3313,112 @@ async fn update_google_task(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("Google Tasks API error (update) {}: {}", status, body));
+    }
+
+    Ok(())
+}
+
+/// Update a Google Tasks subtask's completion status.
+#[tauri::command]
+async fn update_google_subtask(
+    app_handle: tauri::AppHandle,
+    task_id: String,
+    list_id: String,
+    new_status: String,
+) -> Result<(), String> {
+    update_google_task(app_handle, task_id, list_id, new_status).await
+}
+
+#[derive(Serialize)]
+struct CreateSubtaskPayload<'a> {
+    title: &'a str,
+}
+
+/// Create a new nested subtask under a Google Tasks parent item.
+#[tauri::command]
+async fn create_google_subtask(
+    app_handle: tauri::AppHandle,
+    list_id: String,
+    parent_id: String,
+    title: String,
+) -> Result<SubtaskItem, String> {
+    let token = ensure_valid_google_token(&app_handle).await?;
+
+    let raw_parent = parent_id.strip_prefix("gt_").unwrap_or(&parent_id);
+    let trimmed_title = title.trim();
+    if trimmed_title.is_empty() {
+        return Err("Subtask title cannot be empty".to_string());
+    }
+
+    let payload = CreateSubtaskPayload {
+        title: trimmed_title,
+    };
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .post(format!(
+            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks?parent={}",
+            list_id, raw_parent
+        ))
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create subtask: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error (create subtask) {}: {}", status, body));
+    }
+
+    let created: GTask = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse created subtask: {}", e))?;
+
+    let st_status = google_status_to_task_status(created.status.as_deref());
+    Ok(SubtaskItem {
+        id: format!("gt_{}", created.id),
+        title: created.title.unwrap_or_else(|| trimmed_title.to_string()),
+        status: st_status,
+    })
+}
+
+/// Delete a Google Tasks subtask.
+#[tauri::command]
+async fn delete_google_subtask(
+    app_handle: tauri::AppHandle,
+    list_id: String,
+    subtask_id: String,
+) -> Result<(), String> {
+    let token = ensure_valid_google_token(&app_handle).await?;
+
+    let raw_subtask = subtask_id.strip_prefix("gt_").unwrap_or(&subtask_id);
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .delete(format!(
+            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
+            list_id, raw_subtask
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to delete subtask: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error (delete subtask) {}: {}", status, body));
     }
 
     Ok(())
@@ -4185,6 +4292,9 @@ pub fn run() {
             fetch_github_tasks,
             fetch_microsoft_tasks,
             update_google_task,
+            update_google_subtask,
+            create_google_subtask,
+            delete_google_subtask,
             update_microsoft_task,
             setup_github_repo_labels,
             update_github_issue_labels,
@@ -4789,5 +4899,28 @@ mod tests {
         assert!(json.contains("authStatus"));
         assert!(json.contains("microsoft_has_refresh_token"));
         assert!(json.contains("microsoft_include_education"));
+    }
+
+    #[test]
+    fn test_create_subtask_payload_serialization() {
+        let payload = CreateSubtaskPayload {
+            title: "Write documentation",
+        };
+        let serialized = serde_json::to_string(&payload).expect("serialization failed");
+        assert!(serialized.contains(r#""title":"Write documentation""#));
+    }
+
+    #[test]
+    fn test_subtask_item_serialization() {
+        let item = SubtaskItem {
+            id: "gt_sub123".to_string(),
+            title: "Subtask 1".to_string(),
+            status: "todo".to_string(),
+        };
+        let serialized = serde_json::to_string(&item).expect("serialization failed");
+        assert!(serialized.contains("gt_sub123"));
+        assert!(serialized.contains("Subtask 1"));
+        let deserialized: SubtaskItem = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(item, deserialized);
     }
 }
