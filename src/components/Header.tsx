@@ -17,7 +17,8 @@ import {
   Moon,
   Monitor,
   Ellipsis,
-  Users
+  Users,
+  ChevronDown
 } from 'lucide-react';
 import { LocallyDeletedDropdown } from './LocallyDeletedDropdown';
 
@@ -65,6 +66,44 @@ export const Header: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const extraToolsButtonRef = useRef<HTMLDivElement>(null);
   const extraToolsRowRef = useRef<HTMLDivElement>(null);
+
+  // Collapsible task source filter state (Hover on desktop, tap on mobile)
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isFilterHovered, setIsFilterHovered] = useState(false);
+  const filterContainerRef = useRef<HTMLDivElement>(null);
+  const filterHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleFilterMouseEnter = () => {
+    if (filterHoverTimeoutRef.current) {
+      clearTimeout(filterHoverTimeoutRef.current);
+      filterHoverTimeoutRef.current = null;
+    }
+    setIsFilterHovered(true);
+  };
+
+  const handleFilterMouseLeave = () => {
+    filterHoverTimeoutRef.current = setTimeout(() => {
+      setIsFilterHovered(false);
+    }, 150);
+  };
+
+  const showFilterDropdown = isFilterOpen || isFilterHovered;
+
+  // Close filter dropdown on outside click or touch
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (filterContainerRef.current && !filterContainerRef.current.contains(e.target as Node)) {
+        setIsFilterOpen(false);
+        setIsFilterHovered(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
 
   // Close search popover on outside click
   useEffect(() => {
@@ -230,61 +269,149 @@ export const Header: React.FC = () => {
 
       {/* 2. Main Toolbar Row */}
       <div className="px-2.5 py-1.5 flex items-center justify-between gap-1.5 relative">
-        {/* Left: Filter Tabs with Task Counts */}
-        <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800/90 p-0.5 rounded-lg border border-slate-200/90 dark:border-slate-750 shrink-0">
+        {/* Left: Collapsible Task Source Filter (Hover on desktop, tap on mobile) */}
+        <div
+          ref={filterContainerRef}
+          onMouseEnter={handleFilterMouseEnter}
+          onMouseLeave={handleFilterMouseLeave}
+          className="relative no-drag shrink-0"
+        >
           <button
             type="button"
-            onClick={() => setFilterSource('all')}
-            className={`px-2 py-0.5 rounded-md text-[11px] transition-all ${
-              filterSource === 'all'
-                ? 'bg-white text-slate-800 dark:bg-slate-700 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
+            onClick={() => setIsFilterOpen((prev) => !prev)}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border bg-slate-100 dark:bg-slate-800/90 border-slate-200/90 dark:border-slate-750 hover:bg-slate-200/70 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 transition-all select-none shadow-2xs cursor-pointer"
+            title="Filter tasks by provider (Hover or tap to expand)"
+            aria-haspopup="true"
+            aria-expanded={showFilterDropdown}
           >
-            All
+            {filterSource === 'all' && (
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                All ({tasks.length})
+              </span>
+            )}
+            {filterSource === 'github' && (
+              <>
+                <Github className="h-3 w-3 text-emerald-500 dark:text-emerald-400 shrink-0" />
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  GitHub ({ghCount})
+                </span>
+              </>
+            )}
+            {filterSource === 'google_tasks' && (
+              <>
+                <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
+                <span className="font-semibold text-blue-600 dark:text-blue-400">
+                  Google ({gtCount})
+                </span>
+              </>
+            )}
+            {filterSource === 'microsoft_teams' && (
+              <>
+                <Users className="h-3 w-3 text-violet-500 dark:text-violet-400 shrink-0" />
+                <span className="font-semibold text-violet-600 dark:text-violet-400">
+                  Teams ({msCount})
+                </span>
+              </>
+            )}
+            <ChevronDown
+              className={`h-3 w-3 text-slate-400 transition-transform duration-150 ${
+                showFilterDropdown ? 'rotate-180' : ''
+              }`}
+            />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterSource('github')}
-            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
-              filterSource === 'github'
-                ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 shadow-2xs'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Github className="h-3 w-3 text-emerald-500 dark:text-emerald-400 shrink-0" />
-            <span>GitHub</span>
-            <span className="text-[10px] opacity-75">({ghCount})</span>
-          </button>
+          {/* Floating Filter Options Menu */}
+          {showFilterDropdown && (
+            <div className="absolute left-0 top-full mt-1.5 z-40 w-44 rounded-xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 shadow-xl p-1 animate-in fade-in zoom-in-95 duration-150">
+              <div className="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-400 dark:text-slate-500 uppercase border-b border-slate-100 dark:border-slate-800 mb-1">
+                Filter by Provider
+              </div>
 
-          <button
-            type="button"
-            onClick={() => setFilterSource('google_tasks')}
-            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
-              filterSource === 'google_tasks'
-                ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 shadow-2xs'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <CheckSquare className="h-3 w-3 text-blue-500 dark:text-blue-400 shrink-0" />
-            <span>Google</span>
-            <span className="text-[10px] opacity-75">({gtCount})</span>
-          </button>
+              {/* Option: All */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('all');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'all'
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <span className="h-2 w-2 rounded-full bg-slate-400" />
+                  <span>All Tasks</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({tasks.length})</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterSource('microsoft_teams')}
-            className={`px-1.5 py-0.5 rounded-md font-medium text-[11px] flex items-center space-x-1 transition-all ${
-              filterSource === 'microsoft_teams'
-                ? 'bg-violet-50 text-violet-600 dark:bg-violet-950/70 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 shadow-2xs'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Users className="h-3 w-3 text-violet-500 dark:text-violet-400 shrink-0" />
-            <span>Teams</span>
-            <span className="text-[10px] font-mono opacity-75">({msCount})</span>
-          </button>
+              {/* Option: GitHub */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('github');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'github'
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <Github className="h-3 w-3 text-emerald-500 shrink-0" />
+                  <span>GitHub Issues</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({ghCount})</span>
+              </button>
+
+              {/* Option: Google Tasks */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('google_tasks');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'google_tasks'
+                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <CheckSquare className="h-3 w-3 text-blue-500 shrink-0" />
+                  <span>Google Tasks</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({gtCount})</span>
+              </button>
+
+              {/* Option: Microsoft Teams */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSource('microsoft_teams');
+                  setIsFilterOpen(false);
+                  setIsFilterHovered(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filterSource === 'microsoft_teams'
+                    ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/70 dark:text-violet-300 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center space-x-1.5">
+                  <Users className="h-3 w-3 text-violet-500 shrink-0" />
+                  <span>Microsoft Teams</span>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono">({msCount})</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Right: Primary Controls (Search, Add +, Settings, More ...) */}
