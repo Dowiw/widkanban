@@ -241,7 +241,7 @@ export const GitHubSetupModal: React.FC = () => {
                     key={repo}
                     className="flex items-center justify-between p-1.5 rounded-lg border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-xs"
                   >
-                    <span className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate mr-2 font-medium">
+                    <span className="text-[11px] text-slate-800 dark:text-slate-200 truncate mr-2 font-medium">
                       {repo}
                     </span>
                     {res ? (

@@ -45,10 +45,10 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
     <div
       ref={setNodeRef}
       style={{
-        borderRadius: 'var(--col-radius, 12px)',
+        borderRadius: `var(--col-radius, ${customization.cornerRadius}px)`,
         minWidth: `${customization.columnMinWidth || 260}px`,
       }}
-      className={`flex flex-col flex-1 bg-slate-50 dark:bg-slate-900/60 border transition-all duration-200 overflow-hidden ${
+      className={`flex flex-col flex-1 shrink-0 w-[85vw] sm:w-auto snap-center bg-slate-50 dark:bg-slate-900/60 border transition-all duration-200 overflow-hidden ${
         isOver
           ? 'border-indigo-400 dark:border-indigo-500 shadow-inner'
           : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
@@ -64,7 +64,7 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
             {title}
           </h2>
         </div>
-        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-black/15 text-white/95">
+        <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-black/15 text-white/95">
           {tasks.length}
         </span>
       </div>
@@ -75,7 +75,10 @@ export const Column: React.FC<ColumnProps> = ({ status, title, tasks }) => {
           {tasks.length > 0 ? (
             tasks.map((task) => <TaskCard key={task.id} task={task} />)
           ) : (
-            <div className="h-24 flex items-center justify-center rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 text-[11px]">
+            <div 
+              style={{ borderRadius: `${customization.cornerRadius}px` }}
+              className="h-24 flex items-center justify-center border border-dashed border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 text-[11px]"
+            >
               Drop task here
             </div>
           )}

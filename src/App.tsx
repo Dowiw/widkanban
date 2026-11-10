@@ -5,6 +5,8 @@ import { AddTaskModal } from './components/AddTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { DeleteTaskModal } from './components/DeleteTaskModal';
+import { StartupPromptModal } from './components/StartupPromptModal';
+import { AutoSyncPromptModal } from './components/AutoSyncPromptModal';
 import { useTaskStore } from './store/useTaskStore';
 
 export const App: React.FC = () => {
@@ -15,6 +17,13 @@ export const App: React.FC = () => {
     customization,
     isPinned,
     syncWindowResizable,
+    startupSettings,
+    setStartupPromptOpen,
+    checkAutostartStatus,
+    autoSyncSettings,
+    setAutoSyncPromptOpen,
+    refreshTasksWithDiff,
+    fetchApiHealth,
   } = useTaskStore();
 
   const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
@@ -46,18 +55,75 @@ export const App: React.FC = () => {
     }
   }, [isDark]);
 
-  // Initial resizability sync based on pin state
+  // Synchronize dynamic corner radius CSS variables to document.documentElement
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const r = customization.cornerRadius;
+    root.style.setProperty('--widget-radius', `${r}px`);
+    root.style.setProperty('--modal-radius', `${r}px`);
+    root.style.setProperty('--col-radius', `${r}px`);
+    root.style.setProperty('--card-radius', `${r}px`);
+    root.style.setProperty('--subcard-radius', `${Math.max(0, Math.round(r * 0.6))}px`);
+    root.style.setProperty('--input-radius', `${Math.max(0, Math.round(r * 0.4))}px`);
+  }, [customization.cornerRadius]);
+
+  // Initial resizability & pin mode sync based on pin state
   useEffect(() => {
     syncWindowResizable(!isPinned);
   }, [isPinned, syncWindowResizable]);
 
   useEffect(() => {
     checkAuthStatus().then((status) => {
-      if (!hasCompletedOnboarding && !status.has_github && !status.has_google) {
+      const hasAnyProvider = status.has_github || status.has_google || status.has_microsoft;
+      if (!hasCompletedOnboarding && !hasAnyProvider) {
         setSettingsOpen(true);
+      } else if (hasAnyProvider) {
+        if (!autoSyncSettings.hasPrompted) {
+          setAutoSyncPromptOpen(true);
+        } else if (!startupSettings.hasPrompted) {
+          setStartupPromptOpen(true);
+        }
+      }
+      if (hasAnyProvider) {
+        refreshTasksWithDiff();
       }
     });
-  }, [checkAuthStatus, hasCompletedOnboarding, setSettingsOpen]);
+    checkAutostartStatus();
+    fetchApiHealth();
+  }, [
+    checkAuthStatus,
+    hasCompletedOnboarding,
+    setSettingsOpen,
+    startupSettings.hasPrompted,
+    setStartupPromptOpen,
+    checkAutostartStatus,
+    autoSyncSettings.hasPrompted,
+    setAutoSyncPromptOpen,
+    fetchApiHealth,
+    refreshTasksWithDiff,
+  ]);
+
+  // Periodic Auto-Sync Polling Engine
+  useEffect(() => {
+    if (!autoSyncSettings.enabled) return;
+
+    const intervalMs = Math.max(1, autoSyncSettings.intervalMinutes) * 60 * 1000;
+    const timer = setInterval(() => {
+      refreshTasksWithDiff();
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [autoSyncSettings.enabled, autoSyncSettings.intervalMinutes, refreshTasksWithDiff]);
+
+  // Re-check autostart status when app window gains focus (e.g. user toggled in Task Manager or Settings)
+  useEffect(() => {
+    const handleFocus = () => {
+      checkAutostartStatus();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [checkAutostartStatus]);
 
   const fontClass =
     customization.fontFamily === 'unifont'
@@ -70,8 +136,11 @@ export const App: React.FC = () => {
 
   const rootStyle: React.CSSProperties = {
     ['--widget-radius' as string]: `${customization.cornerRadius}px`,
-    ['--col-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.75))}px`,
-    ['--card-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.5))}px`,
+    ['--modal-radius' as string]: `${customization.cornerRadius}px`,
+    ['--col-radius' as string]: `${customization.cornerRadius}px`,
+    ['--card-radius' as string]: `${customization.cornerRadius}px`,
+    ['--subcard-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.6))}px`,
+    ['--input-radius' as string]: `${Math.max(0, Math.round(customization.cornerRadius * 0.4))}px`,
     ['--col-header-height' as string]: `${customization.columnHeaderHeight}px`,
     ['--col-min-width' as string]: `${customization.columnMinWidth}px`,
   };
@@ -79,7 +148,7 @@ export const App: React.FC = () => {
   return (
     <div
       style={rootStyle}
-      className={`flex flex-col h-screen w-screen overflow-hidden rounded-widget border transition-colors duration-150 shadow-xl ${fontClass} ${
+      className={`flex flex-col h-screen h-[100dvh] w-screen overflow-hidden rounded-widget border transition-colors duration-150 shadow-xl ${fontClass} ${
         isDark
           ? 'bg-slate-950 border-slate-750 text-slate-100'
           : 'bg-white border-slate-200 text-slate-800'
@@ -93,6 +162,8 @@ export const App: React.FC = () => {
       <SettingsModal />
       <GitHubSetupModal />
       <DeleteTaskModal />
+      <StartupPromptModal />
+      <AutoSyncPromptModal />
     </div>
   );
 };
