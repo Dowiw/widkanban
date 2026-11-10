@@ -1,8 +1,47 @@
 import { describe, it, expect } from 'vitest';
-import { getSmartDueDate, filterAndSortTasks, getDeadlineCounts } from './deadline';
+import { getSmartDueDate, filterAndSortTasks, getDeadlineCounts, parseTaskDueDate } from './deadline';
 import { UnifiedTask } from '../types/task';
 
+function formatGoogleDateString(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}T00:00:00.000Z`;
+}
+
 describe('deadline utilities', () => {
+  it('parses Google Tasks UTC-midnight date strings as local calendar dates', () => {
+    const todayGoogle = formatGoogleDateString(0);
+    const tomorrowGoogle = formatGoogleDateString(1);
+    const in4DaysGoogle = formatGoogleDateString(4);
+    const yesterdayGoogle = formatGoogleDateString(-1);
+
+    const parsedToday = parseTaskDueDate(todayGoogle);
+    expect(parsedToday?.isDateOnly).toBe(true);
+
+    const todayDue = getSmartDueDate(todayGoogle, 'todo');
+    expect(todayDue?.label).toBe('Today');
+    expect(todayDue?.urgency).toBe('today');
+    expect(todayDue?.isDueToday).toBe(true);
+    expect(todayDue?.relativeText).toBe('Due today');
+
+    const tomorrowDue = getSmartDueDate(tomorrowGoogle, 'todo');
+    expect(tomorrowDue?.label).toBe('Tomorrow');
+    expect(tomorrowDue?.urgency).toBe('upcoming');
+    expect(tomorrowDue?.isDueToday).toBe(false);
+    expect(tomorrowDue?.relativeText).toBe('Due tomorrow');
+
+    const in4DaysDue = getSmartDueDate(in4DaysGoogle, 'todo');
+    expect(in4DaysDue?.urgency).toBe('upcoming');
+    expect(in4DaysDue?.label).toContain(','); // e.g. "Sat, Nov 14"
+
+    const overdueDue = getSmartDueDate(yesterdayGoogle, 'todo');
+    expect(overdueDue?.urgency).toBe('overdue');
+    expect(overdueDue?.label).toBe('Overdue · 1d');
+  });
+
   it('calculates smart due date urgency correctly', () => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const overdue = getSmartDueDate(yesterday, 'todo');
@@ -140,5 +179,50 @@ describe('deadline utilities', () => {
     expect(counts.hasDeadline).toBe(2);
     expect(counts.overdue).toBe(1);
     expect(counts.today).toBe(1);
+    expect(counts.thisWeek).toBe(1);
+  });
+
+  it('consistently counts and filters Google Tasks UTC-midnight deadlines', () => {
+    const now = new Date().toISOString();
+    const googleTasks: UnifiedTask[] = [
+      {
+        id: 'gt-today',
+        title: 'Due Today Task',
+        source: 'google_tasks',
+        status: 'todo',
+        url: '',
+        updatedAt: now,
+        sourceMeta: { dueDate: formatGoogleDateString(0) },
+      },
+      {
+        id: 'gt-tomorrow',
+        title: 'Chicken expires',
+        source: 'google_tasks',
+        status: 'todo',
+        url: '',
+        updatedAt: now,
+        sourceMeta: { dueDate: formatGoogleDateString(1) },
+      },
+      {
+        id: 'gt-sat',
+        title: 'GUI Class Week 1',
+        source: 'google_tasks',
+        status: 'todo',
+        url: '',
+        updatedAt: now,
+        sourceMeta: { dueDate: formatGoogleDateString(4) },
+      },
+    ];
+
+    const counts = getDeadlineCounts(googleTasks);
+    expect(counts.today).toBe(1);
+    expect(counts.thisWeek).toBe(3);
+    expect(counts.overdue).toBe(0);
+
+    const todayFiltered = filterAndSortTasks(googleTasks, '', 'all', 'today', 'none');
+    expect(todayFiltered.map((t) => t.id)).toEqual(['gt-today']);
+
+    const thisWeekFiltered = filterAndSortTasks(googleTasks, '', 'all', 'this_week', 'soonest');
+    expect(thisWeekFiltered.map((t) => t.id)).toEqual(['gt-today', 'gt-tomorrow', 'gt-sat']);
   });
 });

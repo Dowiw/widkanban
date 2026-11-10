@@ -389,8 +389,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                       <button
                         type="button"
                         onClick={() => {
-                          const d = new Date(customDate);
-                          d.setHours(23, 59, 59, 999);
+                          const [y, m, day] = customDate.split('-').map(Number);
+                          const d =
+                            y && m && day
+                              ? new Date(y, m - 1, day, 23, 59, 59, 999)
+                              : new Date(customDate);
                           handleSetDeadline(d.toISOString());
                         }}
                         className="w-full py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-[10px] transition-colors"

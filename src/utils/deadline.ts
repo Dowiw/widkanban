@@ -10,10 +10,59 @@ export interface SmartDueDate {
   isDueSoon: boolean; // < 24 hours
 }
 
+export interface ParsedTaskDueDate {
+  date: Date;
+  isDateOnly: boolean;
+}
+
+/**
+ * Parses a task due date string into a normalized Date object.
+ *
+ * Google Tasks API v1 (and date-only strings) only store calendar date information
+ * and return RFC 3339 timestamps at UTC midnight (`YYYY-MM-DDT00:00:00.000Z`),
+ * while Widkanban date-only tags use `YYYY-MM-DD` or `YYYY-MM-DDT23:59:59Z`.
+ *
+ * Treating `YYYY-MM-DDT00:00:00.000Z` as a raw UTC timestamp causes two bugs:
+ * 1. Tomorrow's midnight (`00:00Z`) is < 24 hours away during the afternoon/evening,
+ *    falsely classifying "Due tomorrow" tasks as "Due today / Due in Xh".
+ * 2. In timezones west of UTC, `00:00Z` shifts backward into the previous local calendar day.
+ *
+ * We normalize date-only strings to local end-of-day (`23:59:59.999`) on that exact
+ * calendar date (`YYYY-MM-DD`).
+ */
+export function parseTaskDueDate(dueDateStr?: string): ParsedTaskDueDate | null {
+  if (!dueDateStr) return null;
+  const trimmed = dueDateStr.trim();
+  if (!trimmed) return null;
+
+  // Match YYYY-MM-DD, Google Tasks UTC midnight (YYYY-MM-DDT00:00:00.000Z),
+  // or Widkanban date-only end-of-day UTC (YYYY-MM-DDT23:59:59Z)
+  const dateOnlyMatch = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00:00:00|23:59:59)(?:\.\d+)?(?:Z|[+-]00:00)?)?$/i
+  );
+
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const month = Number(dateOnlyMatch[2]);
+    const day = Number(dateOnlyMatch[3]);
+    const localEndOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+    if (!isNaN(localEndOfDay.getTime())) {
+      return { date: localEndOfDay, isDateOnly: true };
+    }
+  }
+
+  const parsed = new Date(trimmed);
+  if (isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return { date: parsed, isDateOnly: false };
+}
+
 export function getSmartDueDate(dueDateStr?: string, status?: TaskStatus): SmartDueDate | null {
   if (!dueDateStr) return null;
-  const due = new Date(dueDateStr);
-  if (isNaN(due.getTime())) {
+  const parsed = parseTaskDueDate(dueDateStr);
+  if (!parsed) {
     return {
       label: dueDateStr,
       urgency: 'upcoming',
@@ -25,16 +74,24 @@ export function getSmartDueDate(dueDateStr?: string, status?: TaskStatus): Smart
     };
   }
 
+  const { date: due, isDateOnly } = parsed;
   const now = new Date();
-  const formattedExact = due.toLocaleString(undefined, {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  });
+  const formattedExact = isDateOnly
+    ? due.toLocaleDateString(undefined, {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    : due.toLocaleString(undefined, {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
 
   if (status === 'done') {
     const shortDate = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -49,16 +106,17 @@ export function getSmartDueDate(dueDateStr?: string, status?: TaskStatus): Smart
     };
   }
 
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const todayEnd = todayStart + 24 * 60 * 60 * 1000 - 1;
+  const todayCal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueCal = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const diffDays = Math.round((dueCal.getTime() - todayCal.getTime()) / (1000 * 60 * 60 * 24));
+
   const dueTime = due.getTime();
   const diffMs = dueTime - now.getTime();
   const diffHours = Math.round(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor((dueTime - todayStart) / (1000 * 60 * 60 * 24));
 
   const shortDate = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-  if (dueTime < todayStart) {
+  if (diffDays < 0) {
     const overdueDays = Math.max(1, Math.abs(diffDays));
     return {
       label: overdueDays === 1 ? 'Overdue · 1d' : `Overdue · ${overdueDays}d`,
@@ -71,14 +129,16 @@ export function getSmartDueDate(dueDateStr?: string, status?: TaskStatus): Smart
     };
   }
 
-  if (dueTime <= todayEnd || (diffHours >= 0 && diffHours <= 24)) {
+  if (diffDays === 0) {
     let label = 'Today';
     let relativeText = 'Due today';
-    if (diffHours > 0 && diffHours <= 24) {
-      relativeText = `Due in ${diffHours}h`;
-      label = diffHours <= 6 ? `Due in ${diffHours}h` : 'Today';
-    } else if (diffHours <= 0) {
-      label = 'Due today';
+    if (!isDateOnly) {
+      if (diffHours > 0 && diffHours <= 24) {
+        relativeText = `Due in ${diffHours}h`;
+        label = diffHours <= 6 ? `Due in ${diffHours}h` : 'Today';
+      } else if (diffHours <= 0) {
+        label = 'Due today';
+      }
     }
     return {
       label,
@@ -99,16 +159,16 @@ export function getSmartDueDate(dueDateStr?: string, status?: TaskStatus): Smart
       formattedExact,
       isOverdue: false,
       isDueToday: false,
-      isDueSoon: diffHours <= 24,
+      isDueSoon: !isDateOnly && diffHours >= 0 && diffHours <= 24,
     };
   }
 
   if (diffDays > 1 && diffDays < 7) {
     const weekday = due.toLocaleDateString(undefined, { weekday: 'short' });
     return {
-      label: `Due ${weekday}`,
+      label: `${weekday}, ${shortDate}`,
       urgency: 'upcoming',
-      relativeText: `Due on ${weekday} (${shortDate})`,
+      relativeText: `Due ${weekday}, ${shortDate}`,
       formattedExact,
       isOverdue: false,
       isDueToday: false,
@@ -137,8 +197,8 @@ export function filterAndSortTasks(
   const query = searchQuery.toLowerCase().trim();
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const todayEnd = todayStart + 24 * 60 * 60 * 1000 - 1;
-  const thisWeekEnd = todayStart + 7 * 24 * 60 * 60 * 1000;
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  const thisWeekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 23, 59, 59, 999).getTime();
 
   const filtered = tasks.filter((task) => {
     if (query) {
@@ -159,8 +219,9 @@ export function filterAndSortTasks(
     if (deadlineFilter === 'no_deadline') return !task.sourceMeta?.dueDate;
 
     if (!task.sourceMeta?.dueDate) return false;
-    const dueTime = new Date(task.sourceMeta.dueDate).getTime();
-    if (isNaN(dueTime)) return false;
+    const parsedDue = parseTaskDueDate(task.sourceMeta.dueDate);
+    if (!parsedDue) return false;
+    const dueTime = parsedDue.date.getTime();
 
     if (deadlineFilter === 'overdue') {
       return dueTime < todayStart && task.status !== 'done';
@@ -181,14 +242,14 @@ export function filterAndSortTasks(
 
   return [...filtered].sort((a, b) => {
     if (deadlineSort === 'soonest') {
-      const aDue = a.sourceMeta?.dueDate ? new Date(a.sourceMeta.dueDate).getTime() : Infinity;
-      const bDue = b.sourceMeta?.dueDate ? new Date(b.sourceMeta.dueDate).getTime() : Infinity;
+      const aDue = parseTaskDueDate(a.sourceMeta?.dueDate)?.date.getTime() ?? Infinity;
+      const bDue = parseTaskDueDate(b.sourceMeta?.dueDate)?.date.getTime() ?? Infinity;
       if (aDue !== bDue) return aDue - bDue;
       return 0;
     }
     if (deadlineSort === 'latest') {
-      const aDue = a.sourceMeta?.dueDate ? new Date(a.sourceMeta.dueDate).getTime() : -Infinity;
-      const bDue = b.sourceMeta?.dueDate ? new Date(b.sourceMeta.dueDate).getTime() : -Infinity;
+      const aDue = parseTaskDueDate(a.sourceMeta?.dueDate)?.date.getTime() ?? -Infinity;
+      const bDue = parseTaskDueDate(b.sourceMeta?.dueDate)?.date.getTime() ?? -Infinity;
       if (aDue !== bDue) return bDue - aDue;
       return 0;
     }
@@ -207,8 +268,8 @@ export function filterAndSortTasks(
 export function getDeadlineCounts(tasks: UnifiedTask[]) {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const todayEnd = todayStart + 24 * 60 * 60 * 1000 - 1;
-  const thisWeekEnd = todayStart + 7 * 24 * 60 * 60 * 1000;
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  const thisWeekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 23, 59, 59, 999).getTime();
 
   let overdue = 0;
   let today = 0;
@@ -218,13 +279,16 @@ export function getDeadlineCounts(tasks: UnifiedTask[]) {
   for (const t of tasks) {
     if (t.sourceMeta?.dueDate) {
       hasDeadline++;
-      const time = new Date(t.sourceMeta.dueDate).getTime();
-      if (!isNaN(time)) {
+      const parsedDue = parseTaskDueDate(t.sourceMeta.dueDate);
+      if (parsedDue) {
+        const time = parsedDue.date.getTime();
         if (time < todayStart && t.status !== 'done') {
           overdue++;
-        } else if (time >= todayStart && time <= todayEnd) {
+        }
+        if (time >= todayStart && time <= todayEnd) {
           today++;
-        } else if (time >= todayStart && time <= thisWeekEnd) {
+        }
+        if (time >= todayStart && time <= thisWeekEnd) {
           thisWeek++;
         }
       }

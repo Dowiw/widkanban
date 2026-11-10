@@ -301,6 +301,8 @@ struct GTask {
 #[derive(Deserialize, Debug)]
 struct GTasksResponse {
     items: Option<Vec<GTask>>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2941,41 +2943,54 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
 
     let mut raw_entries: Vec<RawTaskEntry> = Vec::new();
 
-    // 2. Fetch tasks from each list
+    // 2. Fetch tasks from each list (following nextPageToken up to 5 pages)
     for list in &lists {
-        let tasks_resp = client
-            .get(format!(
-                "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
-                list.id
-            ))
-            .query(&[
-                ("showCompleted", "true"),
-                ("showHidden", "false"),
-                ("maxResults", "100"),
-            ])
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
+        let mut page_token: Option<String> = None;
+        for _page in 0..5 {
+            let mut query_params = vec![
+                ("showCompleted", "true".to_string()),
+                ("showHidden", "false".to_string()),
+                ("maxResults", "100".to_string()),
+            ];
+            if let Some(ref pt) = page_token {
+                query_params.push(("pageToken", pt.clone()));
+            }
 
-        if !tasks_resp.status().is_success() {
-            continue;
-        }
+            let tasks_resp = client
+                .get(format!(
+                    "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
+                    list.id
+                ))
+                .query(&query_params)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
 
-        let tasks_body: GTasksResponse = match tasks_resp.json().await {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
+            if !tasks_resp.status().is_success() {
+                break;
+            }
 
-        for task in tasks_body.items.unwrap_or_default() {
-            if let Some(ref t) = task.title {
-                if !t.trim().is_empty() {
-                    raw_entries.push(RawTaskEntry {
-                        task,
-                        list_id: list.id.clone(),
-                        list_title: list.title.clone(),
-                    });
+            let tasks_body: GTasksResponse = match tasks_resp.json().await {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+
+            for task in tasks_body.items.unwrap_or_default() {
+                if let Some(ref t) = task.title {
+                    if !t.trim().is_empty() {
+                        raw_entries.push(RawTaskEntry {
+                            task,
+                            list_id: list.id.clone(),
+                            list_title: list.title.clone(),
+                        });
+                    }
                 }
+            }
+
+            match tasks_body.next_page_token {
+                Some(next_pt) if !next_pt.is_empty() => page_token = Some(next_pt),
+                _ => break,
             }
         }
     }
