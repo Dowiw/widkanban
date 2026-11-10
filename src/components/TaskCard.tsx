@@ -55,6 +55,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     closeGitHubIssueOnRemote,
     deleteGitHubIssuePermanentlyOnRemote,
     updateGitHubDeadline,
+    updateGoogleTaskDeadline,
     customization,
     toggleGoogleSubtask,
     createGoogleSubtask,
@@ -90,8 +91,19 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   };
 
   const isGitHub = task.source === 'github';
+  const isGoogle = task.source === 'google_tasks';
   const isMicrosoft = task.source === 'microsoft_teams';
+  const canEditDeadline =
+    (isGitHub && Boolean(task.sourceMeta?.repo && task.sourceMeta?.issueNumber)) ||
+    (isGoogle && Boolean(task.sourceMeta?.listId));
   const smartDue = getSmartDueDate(task.sourceMeta?.dueDate, task.status);
+
+  const formatLocalYmdMidnightUtc = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}T00:00:00.000Z`;
+  };
 
   const getPresetDate = (preset: 'today' | 'tomorrow' | 'in3days' | 'nextMonday'): string => {
     const d = new Date();
@@ -109,12 +121,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
       d.setDate(d.getDate() + daysUntilNextMonday);
       d.setHours(23, 59, 59, 999);
     }
-    return d.toISOString();
+    return isGoogle ? formatLocalYmdMidnightUtc(d) : d.toISOString();
   };
 
   const handleSetDeadline = async (isoDate: string | null, type?: string) => {
-    if (!task.sourceMeta?.repo || !task.sourceMeta?.issueNumber) return;
     setShowDeadlinePicker(false);
+    if (isGoogle && task.sourceMeta?.listId) {
+      await updateGoogleTaskDeadline(task.id, task.sourceMeta.listId, isoDate);
+      return;
+    }
+    if (!task.sourceMeta?.repo || !task.sourceMeta?.issueNumber) return;
     await updateGitHubDeadline(
       task.id,
       task.sourceMeta.repo,
@@ -276,8 +292,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
         {/* Action Controls */}
         <div className="flex items-center space-x-0.5 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-          {/* GitHub Set Deadline Button */}
-          {isGitHub && task.sourceMeta?.repo && task.sourceMeta?.issueNumber && (
+          {/* Set Deadline Button (GitHub & Google Tasks) */}
+          {canEditDeadline && (
             <div className="relative">
               <button
                 type="button"
@@ -303,7 +319,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 >
                   <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
                     <span className="font-semibold text-xs">
-                      {task.sourceMeta?.isPullRequest ? 'PR Review Due' : 'Issue Deadline'}
+                      {isGoogle
+                        ? 'Google Task Due Date'
+                        : task.sourceMeta?.isPullRequest
+                        ? 'PR Review Due'
+                        : 'Issue Deadline'}
                     </span>
                     <button
                       type="button"
@@ -314,31 +334,33 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                     </button>
                   </div>
 
-                  {/* Deadline Type toggle */}
-                  <div className="grid grid-cols-2 gap-1 my-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setDeadlineType('deadline')}
-                      className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
-                        deadlineType === 'deadline'
-                          ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-2xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      Task Due
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeadlineType('review')}
-                      className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
-                        deadlineType === 'review'
-                          ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-2xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      Review Due
-                    </button>
-                  </div>
+                  {/* Deadline Type toggle (GitHub only) */}
+                  {isGitHub && (
+                    <div className="grid grid-cols-2 gap-1 my-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setDeadlineType('deadline')}
+                        className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
+                          deadlineType === 'deadline'
+                            ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Task Due
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeadlineType('review')}
+                        className={`py-0.5 rounded text-[10px] font-medium transition-colors ${
+                          deadlineType === 'review'
+                            ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Review Due
+                      </button>
+                    </div>
+                  )}
 
                   {/* Presets */}
                   <div className="space-y-0.5 pt-0.5">
@@ -394,7 +416,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                             y && m && day
                               ? new Date(y, m - 1, day, 23, 59, 59, 999)
                               : new Date(customDate);
-                          handleSetDeadline(d.toISOString());
+                          handleSetDeadline(isGoogle ? formatLocalYmdMidnightUtc(d) : d.toISOString());
                         }}
                         className="w-full py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-[10px] transition-colors"
                       >

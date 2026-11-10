@@ -139,6 +139,11 @@ interface TaskState {
     dueDate: string | null,
     deadlineType?: string
   ) => Promise<{ success: boolean; error?: string }>;
+  updateGoogleTaskDeadline: (
+    taskId: string,
+    listId: string,
+    dueDate: string | null
+  ) => Promise<{ success: boolean; error?: string }>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -650,6 +655,38 @@ export const useTaskStore = create<TaskState>()(
           isPr,
           dueDate: dueDate || null,
           deadlineType: deadlineType || null,
+        });
+
+        if (!res.success) {
+          set({ tasks: prevTasks });
+          return { success: false, error: res.error };
+        }
+        return { success: true };
+      },
+
+      updateGoogleTaskDeadline: async (taskId, listId, dueDate) => {
+        const prevTasks = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((t) => {
+            if (t.id === taskId) {
+              return {
+                ...t,
+                sourceMeta: {
+                  ...t.sourceMeta,
+                  dueDate: dueDate || undefined,
+                },
+              };
+            }
+            return t;
+          }),
+        }));
+
+        if (!isTauriContext()) return { success: true };
+
+        const res = await safeInvokeWithResult('update_google_task_deadline', {
+          listId,
+          taskId,
+          dueDate: dueDate || null,
         });
 
         if (!res.success) {

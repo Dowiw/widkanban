@@ -291,6 +291,8 @@ struct GTask {
     status: Option<String>,       // "needsAction" | "completed"
     notes: Option<String>,
     due: Option<String>,
+    #[serde(default)]
+    deadline: Option<String>,
     updated: Option<String>,
     parent: Option<String>,
     links: Option<Vec<GTaskLink>>,
@@ -3051,6 +3053,18 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 .collect()
         });
 
+        let notes_str = task.notes.as_deref().unwrap_or("");
+        let (parsed_due, parsed_type) = match task.due.or(task.deadline) {
+            Some(native_due) => {
+                let (_, t) = parse_widkanban_deadline(notes_str).unwrap_or((String::new(), None));
+                (Some(native_due), t)
+            }
+            None => match parse_widkanban_deadline(notes_str) {
+                Some((due, t)) => (Some(due), t),
+                None => (None, None),
+            },
+        };
+
         unified_tasks.push(UnifiedTask {
             id: format!("gt_{}", raw_id),
             title,
@@ -3064,7 +3078,8 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 list_id: Some(entry.list_id),
                 list_title: Some(entry.list_title),
                 notes: task.notes,
-                due_date: task.due,
+                due_date: parsed_due,
+                deadline_type: parsed_type,
                 parent_id,
                 has_subtasks,
                 subtask_count,
@@ -4393,6 +4408,57 @@ async fn update_github_deadline(
     Ok(())
 }
 
+/// Set, update, or clear the due date on a Google Task via the Google Tasks REST API v1.
+#[tauri::command]
+async fn update_google_task_deadline(
+    app_handle: tauri::AppHandle,
+    list_id: String,
+    task_id: String,
+    due_date: Option<String>,
+) -> Result<(), String> {
+    let token = ensure_valid_google_token(&app_handle).await?;
+    let raw_id = task_id.strip_prefix("gt_").unwrap_or(&task_id);
+
+    // Google Tasks API requires RFC 3339 date-only UTC midnight format ("YYYY-MM-DDT00:00:00.000Z") or null to clear
+    let normalized_due: Option<String> = match due_date {
+        Some(ref d) if !d.trim().is_empty() => {
+            let trimmed = d.trim();
+            if trimmed.len() >= 10 && trimmed.as_bytes()[4] == b'-' && trimmed.as_bytes()[7] == b'-' {
+                Some(format!("{}T00:00:00.000Z", &trimmed[..10]))
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        _ => None,
+    };
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .patch(format!(
+            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
+            list_id, raw_id
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "due": normalized_due
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error updating Google Task due date: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error updating due date ({}): {}", status, body));
+    }
+
+    Ok(())
+}
+
 fn chrono_epoch_to_iso(secs: u64) -> String {
     let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
@@ -4520,6 +4586,7 @@ pub fn run() {
             close_github_issue,
             delete_github_issue_permanently,
             update_github_deadline,
+            update_google_task_deadline,
             open_oauth_preview,
         ])
         .setup(|app| {
