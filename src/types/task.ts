@@ -53,6 +53,7 @@ export interface UnifiedTask {
     listTitle?: string;
     notes?: string;
     dueDate?: string;            // RFC 3339 timestamp (e.g. "2026-10-15T00:00:00.000Z")
+    deadlineType?: 'deadline' | 'review' | string;
     parentId?: string;
     hasSubtasks?: boolean;
     subtaskCount?: number;
@@ -84,6 +85,9 @@ export interface UnifiedTask {
     submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
+
+export type DeadlineFilterOption = 'all' | 'overdue' | 'today' | 'this_week' | 'has_deadline' | 'no_deadline';
+export type DeadlineSortOption = 'none' | 'soonest' | 'latest' | 'updated' | 'alphabetical';
 
 export interface AuthStatus {
   has_github: boolean;

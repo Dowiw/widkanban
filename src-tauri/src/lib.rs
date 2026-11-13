@@ -216,6 +216,8 @@ pub struct SourceMeta {
     pub notes: Option<String>,
     #[serde(rename = "dueDate")]
     pub due_date: Option<String>,
+    #[serde(rename = "deadlineType", default)]
+    pub deadline_type: Option<String>,
     #[serde(rename = "parentId")]
     pub parent_id: Option<String>,
     #[serde(rename = "hasSubtasks")]
@@ -289,6 +291,8 @@ struct GTask {
     status: Option<String>,       // "needsAction" | "completed"
     notes: Option<String>,
     due: Option<String>,
+    #[serde(default)]
+    deadline: Option<String>,
     updated: Option<String>,
     parent: Option<String>,
     links: Option<Vec<GTaskLink>>,
@@ -299,6 +303,8 @@ struct GTask {
 #[derive(Deserialize, Debug)]
 struct GTasksResponse {
     items: Option<Vec<GTask>>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2939,41 +2945,54 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
 
     let mut raw_entries: Vec<RawTaskEntry> = Vec::new();
 
-    // 2. Fetch tasks from each list
+    // 2. Fetch tasks from each list (following nextPageToken up to 5 pages)
     for list in &lists {
-        let tasks_resp = client
-            .get(format!(
-                "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
-                list.id
-            ))
-            .query(&[
-                ("showCompleted", "true"),
-                ("showHidden", "false"),
-                ("maxResults", "100"),
-            ])
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
+        let mut page_token: Option<String> = None;
+        for _page in 0..5 {
+            let mut query_params = vec![
+                ("showCompleted", "true".to_string()),
+                ("showHidden", "false".to_string()),
+                ("maxResults", "100".to_string()),
+            ];
+            if let Some(ref pt) = page_token {
+                query_params.push(("pageToken", pt.clone()));
+            }
 
-        if !tasks_resp.status().is_success() {
-            continue;
-        }
+            let tasks_resp = client
+                .get(format!(
+                    "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
+                    list.id
+                ))
+                .query(&query_params)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
 
-        let tasks_body: GTasksResponse = match tasks_resp.json().await {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
+            if !tasks_resp.status().is_success() {
+                break;
+            }
 
-        for task in tasks_body.items.unwrap_or_default() {
-            if let Some(ref t) = task.title {
-                if !t.trim().is_empty() {
-                    raw_entries.push(RawTaskEntry {
-                        task,
-                        list_id: list.id.clone(),
-                        list_title: list.title.clone(),
-                    });
+            let tasks_body: GTasksResponse = match tasks_resp.json().await {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+
+            for task in tasks_body.items.unwrap_or_default() {
+                if let Some(ref t) = task.title {
+                    if !t.trim().is_empty() {
+                        raw_entries.push(RawTaskEntry {
+                            task,
+                            list_id: list.id.clone(),
+                            list_title: list.title.clone(),
+                        });
+                    }
                 }
+            }
+
+            match tasks_body.next_page_token {
+                Some(next_pt) if !next_pt.is_empty() => page_token = Some(next_pt),
+                _ => break,
             }
         }
     }
@@ -3034,6 +3053,18 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 .collect()
         });
 
+        let notes_str = task.notes.as_deref().unwrap_or("");
+        let (parsed_due, parsed_type) = match task.due.or(task.deadline) {
+            Some(native_due) => {
+                let (_, t) = parse_widkanban_deadline(notes_str).unwrap_or((String::new(), None));
+                (Some(native_due), t)
+            }
+            None => match parse_widkanban_deadline(notes_str) {
+                Some((due, t)) => (Some(due), t),
+                None => (None, None),
+            },
+        };
+
         unified_tasks.push(UnifiedTask {
             id: format!("gt_{}", raw_id),
             title,
@@ -3047,7 +3078,8 @@ async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 list_id: Some(entry.list_id),
                 list_title: Some(entry.list_title),
                 notes: task.notes,
-                due_date: task.due,
+                due_date: parsed_due,
+                deadline_type: parsed_type,
                 parent_id,
                 has_subtasks,
                 subtask_count,
@@ -3252,6 +3284,12 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
             }
         }
 
+        let body_str = issue.body.as_deref().unwrap_or("");
+        let (parsed_due, parsed_type) = match parse_widkanban_deadline(body_str) {
+            Some((due, t)) => (Some(due), t),
+            None => (milestone.as_ref().and_then(|m| m.due_on.clone()), None),
+        };
+
         unified_tasks.push(UnifiedTask {
             id: format!("gh_{}", issue.id),
             title: issue.title,
@@ -3271,6 +3309,8 @@ async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedT
                 author,
                 assignees,
                 branch_info,
+                due_date: parsed_due,
+                deadline_type: parsed_type,
                 ..Default::default()
             },
         });
@@ -4174,6 +4214,251 @@ async fn delete_github_issue_permanently(
     Ok(())
 }
 
+// ─── Widkanban Deadline Helpers & Commands ──────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct WidkanbanDeadlineComment {
+    pub due: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+
+pub fn parse_widkanban_deadline(body: &str) -> Option<(String, Option<String>)> {
+    // 1. First look for HTML comment: <!-- Widkanban: { ... } -->
+    if let Some(start_idx) = body.find("<!-- Widkanban:") {
+        let remainder = &body[start_idx + "<!-- Widkanban:".len()..];
+        if let Some(end_idx) = remainder.find("-->") {
+            let json_str = remainder[..end_idx].trim();
+            if let Ok(comment_data) = serde_json::from_str::<WidkanbanDeadlineComment>(json_str) {
+                if !comment_data.due.trim().is_empty() {
+                    return Some((comment_data.due.trim().to_string(), comment_data.r#type));
+                }
+            }
+        }
+    }
+
+    // 2. Check for natural text pattern like:
+    // Widkanban: due 2026-10-25 or Widkanban: deadline 2026-10-25 or Widkanban: review-by 2026-10-25 18:00
+    for line in body.lines() {
+        let lower = line.to_lowercase();
+        if let Some(pos) = lower.find("widkanban:") {
+            let sub = line[pos + "widkanban:".len()..].trim();
+            let sub_lower = sub.to_lowercase();
+            let mut date_part = sub;
+            let mut deadline_type = None;
+
+            if sub_lower.starts_with("review-by") {
+                date_part = sub["review-by".len()..].trim();
+                deadline_type = Some("review".to_string());
+            } else if sub_lower.starts_with("due") {
+                date_part = sub["due".len()..].trim();
+                deadline_type = Some("deadline".to_string());
+            } else if sub_lower.starts_with("deadline") {
+                date_part = sub["deadline".len()..].trim();
+                deadline_type = Some("deadline".to_string());
+            }
+
+            // Extract YYYY-MM-DD or ISO timestamp
+            if date_part.len() >= 10 {
+                let ymd = &date_part[..10];
+                let chars: Vec<char> = ymd.chars().collect();
+                if chars.len() == 10
+                    && chars[4] == '-'
+                    && chars[7] == '-'
+                    && chars[0..4].iter().all(|c| c.is_ascii_digit())
+                    && chars[5..7].iter().all(|c| c.is_ascii_digit())
+                    && chars[8..10].iter().all(|c| c.is_ascii_digit())
+                {
+                    let token: String = date_part
+                        .split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let iso = if token.contains('T') || token.contains(':') {
+                        token.replace(' ', "T")
+                    } else {
+                        format!("{}T23:59:59Z", ymd)
+                    };
+                    return Some((iso, deadline_type));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn format_widkanban_deadline_tag(due_date_iso: &str, deadline_type: Option<&str>) -> String {
+    let comment_json = serde_json::json!({
+        "due": due_date_iso,
+        "type": deadline_type.unwrap_or("deadline")
+    });
+    format!(
+        "> ⏱️ **Widkanban Deadline**: {} <!-- Widkanban: {} -->",
+        due_date_iso, comment_json
+    )
+}
+
+pub fn remove_widkanban_deadline_from_body(body: &str) -> String {
+    let mut kept_lines = Vec::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("> ⏱️ **Widkanban Deadline**")
+            || (trimmed.starts_with("<!-- Widkanban:") && trimmed.ends_with("-->"))
+        {
+            continue;
+        }
+        kept_lines.push(line);
+    }
+    kept_lines.join("\n").trim_end().to_string()
+}
+
+pub fn update_body_with_widkanban_deadline(
+    original_body: Option<&str>,
+    due_date: Option<&str>,
+    deadline_type: Option<&str>,
+) -> String {
+    let base_body = original_body
+        .map(remove_widkanban_deadline_from_body)
+        .unwrap_or_default();
+    match due_date {
+        Some(due) if !due.trim().is_empty() => {
+            let tag = format_widkanban_deadline_tag(due.trim(), deadline_type);
+            if base_body.is_empty() {
+                tag
+            } else {
+                format!("{}\n\n{}", base_body, tag)
+            }
+        }
+        _ => base_body,
+    }
+}
+
+/// Set, update, or clear a Widkanban deadline tag in a GitHub Issue or Pull Request description body.
+#[tauri::command]
+async fn update_github_deadline(
+    app_handle: tauri::AppHandle,
+    repo: String,
+    issue_number: u64,
+    _is_pr: bool,
+    due_date: Option<String>,
+    deadline_type: Option<String>,
+) -> Result<String, String> {
+    let creds = read_credentials(&app_handle);
+    let token = creds
+        .github_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| "GitHub token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // 1. Fetch current remote issue body
+    let issue_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
+    let get_resp = client
+        .get(&issue_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Network error fetching issue {}: {}", issue_number, e))?;
+
+    if !get_resp.status().is_success() {
+        let status = get_resp.status();
+        let body = get_resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error fetching issue {}: {} - {}", issue_number, status, body));
+    }
+
+    let issue_data: serde_json::Value = get_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse issue response {}: {}", issue_number, e))?;
+
+    let existing_body = issue_data.get("body").and_then(|b| b.as_str());
+
+    // 2. Format new body with deadline tag
+    let new_body = update_body_with_widkanban_deadline(
+        existing_body,
+        due_date.as_deref(),
+        deadline_type.as_deref(),
+    );
+
+    // 3. Patch issue on remote
+    let patch_resp = client
+        .patch(&issue_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "body": new_body
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error updating issue deadline {}: {}", issue_number, e))?;
+
+    if !patch_resp.status().is_success() {
+        let status = patch_resp.status();
+        let body = patch_resp.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error updating issue deadline {}: {} - {}", issue_number, status, body));
+    }
+
+    Ok(new_body)
+}
+
+/// Set, update, or clear the due date on a Google Task via the Google Tasks REST API v1.
+#[tauri::command]
+async fn update_google_task_deadline(
+    app_handle: tauri::AppHandle,
+    list_id: String,
+    task_id: String,
+    due_date: Option<String>,
+) -> Result<(), String> {
+    let token = ensure_valid_google_token(&app_handle).await?;
+    let raw_id = task_id.strip_prefix("gt_").unwrap_or(&task_id);
+
+    // Google Tasks API requires RFC 3339 date-only UTC midnight format ("YYYY-MM-DDT00:00:00.000Z") or null to clear
+    let normalized_due: Option<String> = match due_date {
+        Some(ref d) if !d.trim().is_empty() => {
+            let trimmed = d.trim();
+            if trimmed.len() >= 10 && trimmed.as_bytes()[4] == b'-' && trimmed.as_bytes()[7] == b'-' {
+                Some(format!("{}T00:00:00.000Z", &trimmed[..10]))
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        _ => None,
+    };
+
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .patch(format!(
+            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
+            list_id, raw_id
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "due": normalized_due
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error updating Google Task due date: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error updating due date ({}): {}", status, body));
+    }
+
+    Ok(())
+}
+
 fn chrono_epoch_to_iso(secs: u64) -> String {
     let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
@@ -4300,6 +4585,8 @@ pub fn run() {
             update_github_issue_labels,
             close_github_issue,
             delete_github_issue_permanently,
+            update_github_deadline,
+            update_google_task_deadline,
             open_oauth_preview,
         ])
         .setup(|app| {
@@ -4922,5 +5209,47 @@ mod tests {
         assert!(serialized.contains("Subtask 1"));
         let deserialized: SubtaskItem = serde_json::from_str(&serialized).expect("deserialization failed");
         assert_eq!(item, deserialized);
+    }
+
+    #[test]
+    fn test_parse_widkanban_deadline_comment() {
+        let body = "Here is the issue description.\n\n> ⏱️ **Widkanban Deadline**: 2026-10-25T18:00:00Z <!-- Widkanban: {\"due\": \"2026-10-25T18:00:00Z\", \"type\": \"review\"} -->\n";
+        let parsed = parse_widkanban_deadline(body);
+        assert_eq!(
+            parsed,
+            Some(("2026-10-25T18:00:00Z".to_string(), Some("review".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_parse_widkanban_deadline_fallback_text() {
+        let body1 = "Feature checklist\nWidkanban: due 2026-11-05\nThanks!";
+        assert_eq!(
+            parse_widkanban_deadline(body1),
+            Some(("2026-11-05T23:59:59Z".to_string(), Some("deadline".to_string())))
+        );
+
+        let body2 = "PR notes\nwidkanban: review-by 2026-10-30 14:00";
+        assert_eq!(
+            parse_widkanban_deadline(body2),
+            Some(("2026-10-30T14:00".to_string(), Some("review".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_update_body_with_widkanban_deadline() {
+        let original = "Hello world\n> ⏱️ **Widkanban Deadline**: old <!-- Widkanban: {\"due\": \"2026-01-01\"} -->";
+        let updated = update_body_with_widkanban_deadline(
+            Some(original),
+            Some("2026-10-25T18:00:00Z"),
+            Some("deadline"),
+        );
+        assert!(updated.contains("Hello world"));
+        assert!(!updated.contains("2026-01-01"));
+        assert!(updated.contains("2026-10-25T18:00:00Z"));
+
+        // Removing deadline
+        let cleared = update_body_with_widkanban_deadline(Some(&updated), None, None);
+        assert_eq!(cleared, "Hello world");
     }
 }

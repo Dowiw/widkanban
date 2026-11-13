@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
+import { updateDescriptionWithDeadlineTag } from '../utils/deadline';
 import {
   UnifiedTask,
   SubtaskItem,
@@ -22,6 +23,8 @@ import {
   DEFAULT_API_HEALTH_STATE,
   CredentialInspectionReport,
   MicrosoftOAuthResult,
+  DeadlineFilterOption,
+  DeadlineSortOption,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -125,6 +128,23 @@ interface TaskState {
     repo: string,
     issueNumber: number
   ) => Promise<{ success: boolean; error?: string }>;
+  deadlineFilter: DeadlineFilterOption;
+  deadlineSort: DeadlineSortOption;
+  setDeadlineFilter: (filter: DeadlineFilterOption) => void;
+  setDeadlineSort: (sort: DeadlineSortOption) => void;
+  updateGitHubDeadline: (
+    taskId: string,
+    repo: string,
+    issueNumber: number,
+    isPr: boolean,
+    dueDate: string | null,
+    deadlineType?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  updateGoogleTaskDeadline: (
+    taskId: string,
+    listId: string,
+    dueDate: string | null
+  ) => Promise<{ success: boolean; error?: string }>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -210,6 +230,10 @@ export const useTaskStore = create<TaskState>()(
       deletePreference: null,
       hasSeenLocallyDeletedTip: false,
       isTrashDropdownOpen: false,
+
+      // Deadline filter & sort
+      deadlineFilter: 'all',
+      deadlineSort: 'none',
 
       // Customization initial state
       customization: DEFAULT_CUSTOMIZATION_SETTINGS,
@@ -603,6 +627,103 @@ export const useTaskStore = create<TaskState>()(
 
       setSearchQuery: (query) => set({ searchQuery: query }),
       setFilterSource: (source) => set({ filterSource: source }),
+      setDeadlineFilter: (filter) => set({ deadlineFilter: filter }),
+      setDeadlineSort: (sort) => set({ deadlineSort: sort }),
+
+      updateGitHubDeadline: async (taskId, repo, issueNumber, isPr, dueDate, deadlineType) => {
+        const prevTasks = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((t) => {
+            if (t.id === taskId) {
+              const resolvedType = deadlineType || t.sourceMeta.deadlineType;
+              const updatedDesc = updateDescriptionWithDeadlineTag(
+                t.description ?? t.sourceMeta?.notes,
+                dueDate,
+                resolvedType
+              );
+              return {
+                ...t,
+                description: updatedDesc,
+                sourceMeta: {
+                  ...t.sourceMeta,
+                  dueDate: dueDate || undefined,
+                  deadlineType: resolvedType,
+                  ...(t.sourceMeta.notes !== undefined ? { notes: updatedDesc } : {}),
+                },
+              };
+            }
+            return t;
+          }),
+        }));
+
+        if (!isTauriContext()) return { success: true };
+
+        const res = await safeInvokeWithResult<string>('update_github_deadline', {
+          repo,
+          issueNumber,
+          isPr,
+          dueDate: dueDate || null,
+          deadlineType: deadlineType || null,
+        });
+
+        if (!res.success) {
+          set({ tasks: prevTasks });
+          return { success: false, error: res.error };
+        }
+
+        if (typeof res.data === 'string') {
+          const confirmedBody = res.data || undefined;
+          set((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    description: confirmedBody,
+                    sourceMeta: {
+                      ...t.sourceMeta,
+                      ...(t.sourceMeta.notes !== undefined ? { notes: confirmedBody } : {}),
+                    },
+                  }
+                : t
+            ),
+          }));
+        }
+
+        return { success: true };
+      },
+
+      updateGoogleTaskDeadline: async (taskId, listId, dueDate) => {
+        const prevTasks = get().tasks;
+        set((state) => ({
+          tasks: state.tasks.map((t) => {
+            if (t.id === taskId) {
+              return {
+                ...t,
+                sourceMeta: {
+                  ...t.sourceMeta,
+                  dueDate: dueDate || undefined,
+                },
+              };
+            }
+            return t;
+          }),
+        }));
+
+        if (!isTauriContext()) return { success: true };
+
+        const res = await safeInvokeWithResult('update_google_task_deadline', {
+          listId,
+          taskId,
+          dueDate: dueDate || null,
+        });
+
+        if (!res.success) {
+          set({ tasks: prevTasks });
+          return { success: false, error: res.error };
+        }
+        return { success: true };
+      },
+
       setPinMode: async (mode: PinMode) => {
         set((state) => ({
           customization: { ...state.customization, pinMode: mode },
@@ -1106,6 +1227,8 @@ export const useTaskStore = create<TaskState>()(
         hasSeenLocallyDeletedTip: state.hasSeenLocallyDeletedTip,
         customization: state.customization,
         startupSettings: state.startupSettings,
+        deadlineFilter: state.deadlineFilter,
+        deadlineSort: state.deadlineSort,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };

@@ -16,9 +16,17 @@ import { useTaskStore } from '../store/useTaskStore';
 import { UnifiedTask, TaskStatus } from '../types/task';
 import { Column } from './Column';
 import { TaskCard } from './TaskCard';
+import { filterAndSortTasks } from '../utils/deadline';
 
 export const KanbanBoard: React.FC = () => {
-  const { tasks, moveTask, searchQuery, filterSource } = useTaskStore();
+  const {
+    tasks,
+    moveTask,
+    searchQuery,
+    filterSource,
+    deadlineFilter,
+    deadlineSort,
+  } = useTaskStore();
   const [activeTask, setActiveTask] = useState<UnifiedTask | null>(null);
 
   // PointerSensor for instant touch dragging on handles; MouseSensor & TouchSensor as fallbacks
@@ -44,11 +52,13 @@ export const KanbanBoard: React.FC = () => {
     })
   );
 
-  const filteredTasks = tasks.filter((task) => {
-    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesSource = filterSource === 'all' || task.source === filterSource;
-    return matchesSearch && matchesSource;
-  });
+  const filteredTasks = filterAndSortTasks(
+    tasks,
+    searchQuery,
+    filterSource,
+    deadlineFilter,
+    deadlineSort
+  );
 
   const todoTasks = filteredTasks.filter((t) => t.status === 'todo');
   const inProgressTasks = filteredTasks.filter((t) => t.status === 'in_progress');
