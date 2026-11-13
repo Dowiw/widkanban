@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { getSmartDueDate, filterAndSortTasks, getDeadlineCounts, parseTaskDueDate } from './deadline';
+import {
+  getSmartDueDate,
+  filterAndSortTasks,
+  getDeadlineCounts,
+  parseTaskDueDate,
+  updateDescriptionWithDeadlineTag,
+} from './deadline';
 import { UnifiedTask } from '../types/task';
 
 function formatGoogleDateString(offsetDays: number): string {
@@ -77,7 +83,7 @@ describe('deadline utilities', () => {
         status: 'todo',
         url: '',
         updatedAt: new Date(now).toISOString(),
-        sourceMeta: { dueDate: new Date(now + 2 * 60 * 60 * 1000).toISOString() },
+        sourceMeta: { dueDate: new Date(new Date().setHours(23, 59, 59, 0)).toISOString() },
       },
       {
         id: '3',
@@ -161,7 +167,7 @@ describe('deadline utilities', () => {
         status: 'todo',
         url: '',
         updatedAt: new Date(now).toISOString(),
-        sourceMeta: { dueDate: new Date(now + 1 * 60 * 60 * 1000).toISOString() },
+        sourceMeta: { dueDate: new Date(new Date().setHours(23, 59, 59, 0)).toISOString() },
       },
       {
         id: '3',
@@ -224,5 +230,24 @@ describe('deadline utilities', () => {
 
     const thisWeekFiltered = filterAndSortTasks(googleTasks, '', 'all', 'this_week', 'soonest');
     expect(thisWeekFiltered.map((t) => t.id)).toEqual(['gt-today', 'gt-tomorrow', 'gt-sat']);
+  });
+
+  it('syncs Widkanban Deadline tag in description text when setting, updating, or clearing', () => {
+    const initial = 'Fix bug in parser';
+    const withDeadline = updateDescriptionWithDeadlineTag(initial, '2026-11-11T22:59:59.999Z', 'deadline');
+    expect(withDeadline).toContain('Fix bug in parser');
+    expect(withDeadline).toContain('> ⏱️ **Widkanban Deadline**: 2026-11-11T22:59:59.999Z');
+
+    const updatedDeadline = updateDescriptionWithDeadlineTag(
+      withDeadline,
+      '2026-11-13T22:59:59.999Z',
+      'review'
+    );
+    expect(updatedDeadline).not.toContain('2026-11-11T22:59:59.999Z');
+    expect(updatedDeadline).toContain('> ⏱️ **Widkanban Deadline**: 2026-11-13T22:59:59.999Z');
+    expect(updatedDeadline).toContain('"type":"review"');
+
+    const cleared = updateDescriptionWithDeadlineTag(updatedDeadline, null);
+    expect(cleared).toBe('Fix bug in parser');
   });
 });

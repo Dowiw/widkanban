@@ -265,6 +265,35 @@ export function filterAndSortTasks(
   });
 }
 
+export function updateDescriptionWithDeadlineTag(
+  originalBody?: string,
+  dueDate?: string | null,
+  deadlineType?: string | null
+): string | undefined {
+  const keptLines = (originalBody ?? '')
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !(
+        trimmed.startsWith('> ⏱️ **Widkanban Deadline**') ||
+        (trimmed.startsWith('<!-- Widkanban:') && trimmed.endsWith('-->'))
+      );
+    });
+
+  const baseBody = keptLines.join('\n').trimEnd();
+  const trimmedDue = dueDate?.trim();
+  if (trimmedDue) {
+    const commentJson = JSON.stringify({
+      due: trimmedDue,
+      type: deadlineType || 'deadline',
+    });
+    const tag = `> ⏱️ **Widkanban Deadline**: ${trimmedDue} <!-- Widkanban: ${commentJson} -->`;
+    return baseBody ? `${baseBody}\n\n${tag}` : tag;
+  }
+
+  return baseBody || undefined;
+}
+
 export function getDeadlineCounts(tasks: UnifiedTask[]) {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();

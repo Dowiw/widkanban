@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
+import { updateDescriptionWithDeadlineTag } from '../utils/deadline';
 import {
   UnifiedTask,
   SubtaskItem,
@@ -634,12 +635,20 @@ export const useTaskStore = create<TaskState>()(
         set((state) => ({
           tasks: state.tasks.map((t) => {
             if (t.id === taskId) {
+              const resolvedType = deadlineType || t.sourceMeta.deadlineType;
+              const updatedDesc = updateDescriptionWithDeadlineTag(
+                t.description ?? t.sourceMeta?.notes,
+                dueDate,
+                resolvedType
+              );
               return {
                 ...t,
+                description: updatedDesc,
                 sourceMeta: {
                   ...t.sourceMeta,
                   dueDate: dueDate || undefined,
-                  deadlineType: deadlineType || t.sourceMeta.deadlineType,
+                  deadlineType: resolvedType,
+                  ...(t.sourceMeta.notes !== undefined ? { notes: updatedDesc } : {}),
                 },
               };
             }
@@ -649,7 +658,7 @@ export const useTaskStore = create<TaskState>()(
 
         if (!isTauriContext()) return { success: true };
 
-        const res = await safeInvokeWithResult('update_github_deadline', {
+        const res = await safeInvokeWithResult<string>('update_github_deadline', {
           repo,
           issueNumber,
           isPr,
@@ -661,6 +670,25 @@ export const useTaskStore = create<TaskState>()(
           set({ tasks: prevTasks });
           return { success: false, error: res.error };
         }
+
+        if (typeof res.data === 'string') {
+          const confirmedBody = res.data || undefined;
+          set((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    description: confirmedBody,
+                    sourceMeta: {
+                      ...t.sourceMeta,
+                      ...(t.sourceMeta.notes !== undefined ? { notes: confirmedBody } : {}),
+                    },
+                  }
+                : t
+            ),
+          }));
+        }
+
         return { success: true };
       },
 

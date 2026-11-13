@@ -4343,7 +4343,7 @@ async fn update_github_deadline(
     _is_pr: bool,
     due_date: Option<String>,
     deadline_type: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let creds = read_credentials(&app_handle);
     let token = creds
         .github_token
@@ -4405,7 +4405,7 @@ async fn update_github_deadline(
         return Err(format!("GitHub API error updating issue deadline {}: {} - {}", issue_number, status, body));
     }
 
-    Ok(())
+    Ok(new_body)
 }
 
 /// Set, update, or clear the due date on a Google Task via the Google Tasks REST API v1.

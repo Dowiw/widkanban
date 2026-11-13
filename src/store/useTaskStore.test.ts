@@ -1396,6 +1396,7 @@ describe('useTaskStore', () => {
       const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
       expect(updated.sourceMeta?.dueDate).toBe(dueIso);
       expect(updated.sourceMeta?.deadlineType).toBe('review');
+      expect(updated.description).toContain(`> ⏱️ **Widkanban Deadline**: ${dueIso}`);
 
       expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
         repo: 'org/widkanban',
@@ -1414,6 +1415,7 @@ describe('useTaskStore', () => {
         title: 'Test issue with due date',
         source: 'github',
         status: 'todo',
+        description: 'Original body\n\n> ⏱️ **Widkanban Deadline**: 2026-10-25T00:00:00Z <!-- Widkanban: {"due":"2026-10-25T00:00:00Z","type":"deadline"} -->',
         url: 'https://github.com/org/widkanban/issues/99',
         sourceMeta: { repo: 'org/widkanban', issueNumber: 99, dueDate: '2026-10-25T00:00:00Z' },
       });
@@ -1424,6 +1426,7 @@ describe('useTaskStore', () => {
 
       const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
       expect(updated.sourceMeta?.dueDate).toBeUndefined();
+      expect(updated.description).toBe('Original body');
 
       expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
         repo: 'org/widkanban',
