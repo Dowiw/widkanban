@@ -4510,6 +4510,18 @@ fn is_leap(y: u32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+const MIN_WINDOW_WIDTH: f64 = 360.0;
+const MIN_WINDOW_HEIGHT: f64 = 420.0;
+const MAX_WINDOW_WIDTH: f64 = 1600.0;
+const MAX_WINDOW_HEIGHT: f64 = 1200.0;
+
+pub fn clamp_window_size(width: f64, height: f64) -> (f64, f64) {
+    (
+        width.clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
+        height.clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT),
+    )
+}
+
 #[tauri::command]
 fn set_window_resizable(app: tauri::AppHandle, resizable: bool) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
@@ -4521,8 +4533,12 @@ fn set_window_resizable(app: tauri::AppHandle, resizable: bool) -> Result<(), St
 #[tauri::command]
 fn set_window_size(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
+        let (clamped_w, clamped_h) = clamp_window_size(width, height);
         window
-            .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: clamped_w,
+                height: clamped_h,
+            }))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -4590,6 +4606,17 @@ pub fn run() {
             open_oauth_preview,
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
+                    width: MIN_WINDOW_WIDTH,
+                    height: MIN_WINDOW_HEIGHT,
+                })));
+                let _ = window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize {
+                    width: MAX_WINDOW_WIDTH,
+                    height: MAX_WINDOW_HEIGHT,
+                })));
+            }
+
             let is_minimized_arg = std::env::args().any(|arg| arg == "--minimized" || arg == "--hidden");
             if is_minimized_arg {
                 if let Some(w) = app.get_webview_window("main") {
@@ -5251,5 +5278,12 @@ mod tests {
         // Removing deadline
         let cleared = update_body_with_widkanban_deadline(Some(&updated), None, None);
         assert_eq!(cleared, "Hello world");
+    }
+
+    #[test]
+    fn test_clamp_window_size() {
+        assert_eq!(clamp_window_size(200.0, 250.0), (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT));
+        assert_eq!(clamp_window_size(3000.0, 2000.0), (MAX_WINDOW_WIDTH, MAX_WINDOW_HEIGHT));
+        assert_eq!(clamp_window_size(850.0, 600.0), (850.0, 600.0));
     }
 }

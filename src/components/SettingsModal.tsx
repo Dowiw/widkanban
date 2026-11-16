@@ -1826,9 +1826,12 @@ export const SettingsModal: React.FC = () => {
                   WidKanban automatically saves your window position and custom size when moved or resized.
                   Whenever <strong>unpinned</strong> (pin icon off), freeform resizing is active by dragging any window edge.
                 </p>
-                <div className="pt-1 flex items-center space-x-2 text-[10px]">
+                <div className="pt-1 flex flex-wrap items-center gap-2 text-[10px]">
                   <span className={`px-2 py-0.5 rounded font-bold ${isPinned ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60' : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'}`}>
                     Current: {isPinned ? 'Pinned (Movement & Resizing Locked)' : 'Unpinned (Resizing Allowed)'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded font-mono font-medium bg-indigo-100/80 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800/60">
+                    Limits: 360×420 – 1600×1200
                   </span>
                 </div>
               </div>
