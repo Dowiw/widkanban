@@ -10,7 +10,8 @@ This document details the architectural design, security model, data schemas, an
 - [2. Data Normalization Schema](#2-data-normalization-schema)
 - [3. Security & Token Storage Model](#3-security--token-storage-model)
 - [4. Sync Model & Write-Back Engine](#4-sync-model--write-back-engine)
-- [5. Task Deletion & Local Trash Management](#5-task-deletion--local-trash-management)
+- [5. Deadline Tracking, Smart Parsing & Write-Back Engine](#5-deadline-tracking-smart-parsing--write-back-engine)
+- [6. Task Deletion & Local Trash Management](#6-task-deletion--local-trash-management)
 - [Related Documentation](#related-documentation)
 
 ---
@@ -143,7 +144,40 @@ export interface UnifiedTask {
 
 ---
 
-## 5. Task Deletion & Local Trash Management
+## 5. Deadline Tracking, Smart Parsing & Write-Back Engine
+
+WidKanban provides unified, cross-provider deadline tracking and urgency visualization across GitHub Issues/PRs and Google Tasks:
+
+### 1. In-Card Urgency Badges & Smart Due Date Calculation
+Tasks with due dates display an intelligent, dynamic badge based on local calendar dates:
+- **Overdue**: Red badge with alert icon (`Overdue · 1d` or `Overdue · Nd`).
+- **Due Today**: Amber badge with clock icon (`Today` or `Due in Xh` for timestamped items).
+- **Due Tomorrow**: Indigo badge with calendar icon (`Tomorrow`).
+- **Due in 2–6 Days**: Formatted with weekday and date (e.g. `Sat, Nov 14`).
+- **Completed Tasks**: Muted badge indicating completion status (`Completed (Due was Nov 14)`).
+
+### 2. Provider-Specific Deadline Storage & Synchronization
+
+#### GitHub Issues & Pull Requests
+Because native GitHub Issues only support milestones rather than explicit task-level due dates, WidKanban persists deadlines directly inside the issue or PR description body using a non-intrusive markdown tag and machine-readable HTML comment:
+```markdown
+> ⏱️ **Widkanban Deadline**: 2026-11-14T23:59:59.999Z <!-- Widkanban: {"due":"2026-11-14T23:59:59.999Z","type":"deadline"} -->
+```
+- **Setting Deadlines**: Clicking the **Calendar+** icon opens an in-card popover supporting presets (*Today*, *Tomorrow*, *In 3 Days*, *Next Monday*, *Custom Date*) or toggling between *Task Due* and *Review Due*.
+- **Write-Back**: Dispatches `update_github_deadline` via Tauri IPC to `PATCH /repos/{owner}/{repo}/issues/{number}`.
+
+#### Google Tasks
+- **Date Normalization (`parseTaskDueDate`)**: The Google Tasks REST API v1 returns `due` as a date-only RFC 3339 timestamp normalized to UTC midnight (`YYYY-MM-DDT00:00:00.000Z`). WidKanban normalizes these timestamps to the local calendar day's end-of-day (`23:59:59.999`), preventing timezone shifts and false "Today" classifications.
+- **Write-Back**: Setting or changing a deadline on a Google Task card dispatches `update_google_task_deadline` via Tauri IPC, which `PATCH`es the task's `"due"` field (`YYYY-MM-DDT00:00:00.000Z`) on Google Tasks.
+
+### 3. Board Filtering and Column Sorting
+The header dropdown (`DeadlineFilterDropdown.tsx`) provides 1-click filtering and multi-column sorting:
+- **Filters**: *All Tasks*, *Overdue*, *Due Today*, *Due This Week*, *Has Deadline*, *No Deadline*.
+- **Sorting**: *Manual (Board drag order)*, *Due Soonest*, *Latest First*, *Recently Updated*, *Alphabetical (A-Z)*.
+
+---
+
+## 6. Task Deletion & Local Trash Management
 
 WidKanban provides a flexible two-tier deletion system for external tasks (GitHub Issues):
 

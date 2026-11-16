@@ -39,7 +39,8 @@ WidKanban aggregates both **GitHub Issues/PRs** and **Google Tasks** into a sing
 - **Unified Provider Aggregator**: Unified view combining assigned GitHub Issues/PRs and Google Tasks. See [Data Normalization Schema](docs/architecture.md#2-data-normalization-schema).
 - **Rich Task Details**: Inspect PR branch comparison, fork status, draft badges, diff statistics (`+`/`-`), assignees, author avatars, and milestone deadlines. See [Schema Details](docs/architecture.md#2-data-normalization-schema).
 - **Drag-and-Drop Kanban**: Smooth, accessible drag-and-drop powered by `@dnd-kit` with instant 60fps optimistic UI updates and background API write-backs. See [Sync Model & Write-Back Engine](docs/architecture.md#4-sync-model--write-back-engine).
-- **Issue Deletion & Local Trash Management**: Choose between hiding issues locally or closing/permanently deleting them on GitHub, with a quick-restore dropdown. See [Task Deletion Architecture](docs/architecture.md#5-task-deletion--local-trash-management).
+- **Deadline Tracking & Smart Filtering**: Set and edit deadlines on GitHub issues/PRs and Google Tasks directly from cards. Intelligent urgency badges (Overdue, Today, Tomorrow, Upcoming), header deadline filter presets (*Overdue*, *Today*, *This Week*), and column sorting (*Due Soonest*, *Latest First*). See [Deadline Tracking Architecture](docs/architecture.md#5-deadline-tracking-smart-parsing--write-back-engine).
+- **Issue Deletion & Local Trash Management**: Choose between hiding issues locally or closing/permanently deleting them on GitHub, with a quick-restore dropdown. See [Task Deletion Architecture](docs/architecture.md#6-task-deletion--local-trash-management).
 - **Secure Architecture**: OAuth tokens & PATs stored natively in Rust OS storage—never exposed to frontend JavaScript or browser storage. See [Security Model](docs/architecture.md#3-security--token-storage-model) and [Credentials Storage](docs/credentials-setup.md#where-credentials-are-stored).
 - **Ultra Lightweight**: Low memory footprint (~30–50 MB RAM at idle) powered by Tauri v2. See [Performance Profile](docs/notes.md#4-performance--memory-profile).
 
@@ -169,6 +170,7 @@ Detailed technical documentation is maintained in the [`docs/`](./docs/) directo
 
 ### Completed & Supported ✅
 - **Desktop Widget**: Frameless glassmorphic window, tray controls, `@dnd-kit` drag-and-drop, quick add task modal.
+- **Deadline Tracking & Filtering**: Card-level deadline management, smart urgency badges, header filter presets, and multi-column deadline sorting.
 - **GitHub Integration**: Assigned issues & PR fetching, rich PR branch comparisons, diff stats, label synchronization, and remote/local issue deletion.
 - **Google Tasks Integration**: OAuth token support, multi-list tasks sync, subtasks & links normalization, completion status write-back.
 - **Microsoft 365 & Teams Integration**: Teams for Education assignments, Planner Kanban cards, Microsoft To Do personal lists, and Outlook flagged emails with two-way status write-back.
