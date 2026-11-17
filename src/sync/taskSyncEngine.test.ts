@@ -19,6 +19,8 @@ const defaultGithubSettings: GitHubSyncSettings = {
   manageLabels: true,
   todoLabel: 'to-do',
   inProgressLabel: 'in-progress',
+  doneLabel: 'done',
+  doneAction: 'local_only',
   postCommentsFallback: false,
   hasPromptedSetup: true,
 };

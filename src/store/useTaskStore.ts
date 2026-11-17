@@ -9,6 +9,7 @@ import {
   ActionResult,
   createSubtask as engineCreateSubtask,
   deleteSubtask as engineDeleteSubtask,
+  executeGitHubDoneAction as engineExecuteGitHubDoneAction,
   removeTask as engineRemoveTask,
   RemoveTaskOptions,
   setTaskDeadline as engineSetTaskDeadline,
@@ -23,6 +24,7 @@ import {
   TaskStatus,
   TaskSource,
   AuthStatus,
+  GitHubDoneAction,
   GitHubSyncSettings,
   RepoLabelsResult,
   DeletePreference,
@@ -148,6 +150,16 @@ interface TaskState {
   setGithubSetupOpen: (isOpen: boolean) => void;
   setCompletedOnboarding: (completed: boolean) => void;
   setGithubSyncSettings: (settings: Partial<GitHubSyncSettings>) => void;
+  groupLinkedPRs: boolean;
+  setGroupLinkedPRs: (group: boolean) => void;
+  githubDoneModalTask: UnifiedTask | null;
+  openGithubDoneModal: (task: UnifiedTask) => void;
+  closeGithubDoneModal: () => void;
+  executeGitHubDoneAction: (
+    task: UnifiedTask,
+    action: GitHubDoneAction,
+    remember?: boolean
+  ) => Promise<void>;
   setupRepoLabels: (repo: string) => Promise<RepoLabelsResult | null>;
   syncLabelsWithHomeBoard: () => Promise<void>;
   refreshTasks: () => Promise<void>;
@@ -215,9 +227,13 @@ export const useTaskStore = create<TaskState>()(
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
+      groupLinkedPRs: true,
+      githubDoneModalTask: null,
       startupSettings: DEFAULT_STARTUP_SETTINGS,
       isStartupPromptOpen: false,
       locallyDeletedTasks: [],
@@ -247,11 +263,41 @@ export const useTaskStore = create<TaskState>()(
       setAutoSyncPromptOpen: (isOpen) => set({ isAutoSyncPromptOpen: isOpen }),
       setSyncBanner: (banner) => set({ syncBanner: banner }),
 
+      setGroupLinkedPRs: (group) => set({ groupLinkedPRs: group }),
+      openGithubDoneModal: (task) => set({ githubDoneModalTask: task }),
+      closeGithubDoneModal: () => set({ githubDoneModalTask: null }),
+      executeGitHubDoneAction: async (task, action, remember) => {
+        set((state) => ({
+          githubDoneModalTask: null,
+          ...(remember
+            ? {
+                githubSyncSettings: {
+                  ...state.githubSyncSettings,
+                  doneAction: action,
+                },
+              }
+            : {}),
+        }));
+        await engineExecuteGitHubDoneAction(get, set, get().syncAdapter, task, action);
+      },
+
       moveTask: async (taskId, targetStatus, targetIndex) => {
+        const state = get();
+        const task = state.tasks.find((t) => t.id === taskId);
+        if (
+          task &&
+          task.source === 'github' &&
+          targetStatus === 'done' &&
+          task.status !== 'done' &&
+          state.githubSyncSettings.doneAction === 'ask'
+        ) {
+          set({ githubDoneModalTask: task });
+          return;
+        }
         await engineTransitionTask(
           get,
           set,
-          get().syncAdapter,
+          state.syncAdapter,
           taskId,
           targetStatus,
           targetIndex
@@ -737,6 +783,7 @@ export const useTaskStore = create<TaskState>()(
         isPinned: state.isPinned,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
         githubSyncSettings: state.githubSyncSettings,
+        groupLinkedPRs: state.groupLinkedPRs,
         autoSyncSettings: state.autoSyncSettings,
         locallyDeletedTasks: state.locallyDeletedTasks,
         deletePreference: state.deletePreference,

@@ -60,6 +60,7 @@ struct GHPullDetail {
     additions: Option<u64>,
     deletions: Option<u64>,
     changed_files: Option<u64>,
+    merged: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -90,9 +91,50 @@ struct CreateCommentPayload<'a> {
 }
 
 #[derive(Serialize)]
-struct CloseIssuePayload<'a> {
+struct IssueStatePayload<'a> {
     state: &'a str,
-    state_reason: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_reason: Option<&'a str>,
+}
+
+async fn patch_issue_state(
+    client: &reqwest::Client,
+    token: &str,
+    repo: &str,
+    issue_number: u64,
+    state: &str,
+    state_reason: Option<&str>,
+) -> Result<(), String> {
+    if state != "open" && state != "closed" {
+        return Err(format!("Invalid GitHub issue state '{}'", state));
+    }
+
+    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
+    let patch_payload = IssueStatePayload {
+        state,
+        state_reason,
+    };
+
+    let resp = client
+        .patch(&patch_url)
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(token)
+        .json(&patch_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Network error updating issue state: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Failed to set issue {}#{} state to '{}' ({}): {}",
+            repo, issue_number, state, status, body
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -226,32 +268,7 @@ async fn close_issue_remote(
             .await;
     }
 
-    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
-    let patch_payload = CloseIssuePayload {
-        state: "closed",
-        state_reason: "not_planned",
-    };
-
-    let resp = client
-        .patch(&patch_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(token)
-        .json(&patch_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error closing issue: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "Failed to close issue {}#{} ({}): {}",
-            repo, issue_number, status, body
-        ));
-    }
-
-    Ok(())
+    patch_issue_state(client, token, repo, issue_number, "closed", Some("not_planned")).await
 }
 
 async fn delete_issue_permanently(
@@ -502,6 +519,7 @@ impl TaskProvider for GitHubProvider {
                                             additions: pr_detail.additions,
                                             deletions: pr_detail.deletions,
                                             changed_files: pr_detail.changed_files,
+                                            is_merged: pr_detail.merged,
                                         });
                                     }
                                 }
@@ -577,6 +595,7 @@ impl TaskProvider for GitHubProvider {
                 };
 
                 if add_failed {
+                    let mut comment_saved = false;
                     if req.post_comment_fallback {
                         let comment_url = format!(
                             "https://api.github.com/repos/{}/issues/{}/comments",
@@ -600,15 +619,26 @@ impl TaskProvider for GitHubProvider {
 
                         if let Ok(c_resp) = comment_resp {
                             if c_resp.status().is_success() {
-                                return Ok(());
+                                comment_saved = true;
                             }
                         }
                     }
 
-                    return Err(format!(
-                        "Failed to apply label '{}' to {}#{}",
-                        target_trim, repo, issue_number
-                    ));
+                    if !comment_saved {
+                        return Err(format!(
+                            "Failed to apply label '{}' to {}#{}",
+                            target_trim, repo, issue_number
+                        ));
+                    }
+                }
+            }
+
+            if let Some(ref remote_state) = req.remote_state {
+                let state_trim = remote_state.trim();
+                if !state_trim.is_empty() {
+                    let reason = req.state_reason.as_deref().map(str::trim).filter(|s| !s.is_empty());
+                    patch_issue_state(&client, &token, &repo, issue_number, state_trim, reason)
+                        .await?;
                 }
             }
 
@@ -772,5 +802,24 @@ mod tests {
             Some("2026-11-20T23:59:59Z")
         );
         assert_eq!(unified.source_meta.deadline_type.as_deref(), Some("review"));
+    }
+
+    #[test]
+    fn test_issue_state_payload_serialization() {
+        let closed = serde_json::to_value(IssueStatePayload {
+            state: "closed",
+            state_reason: Some("completed"),
+        })
+        .expect("Failed to serialize closed IssueStatePayload");
+        assert_eq!(closed["state"], "closed");
+        assert_eq!(closed["state_reason"], "completed");
+
+        let reopened = serde_json::to_value(IssueStatePayload {
+            state: "open",
+            state_reason: None,
+        })
+        .expect("Failed to serialize open IssueStatePayload");
+        assert_eq!(reopened["state"], "open");
+        assert!(reopened.get("state_reason").is_none());
     }
 }

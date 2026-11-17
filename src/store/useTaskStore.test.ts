@@ -30,6 +30,17 @@ describe('useTaskStore', () => {
       isSettingsOpen: false,
       hasCompletedOnboarding: false,
       authStatus: { has_github: false, has_google: false, has_microsoft: false },
+      githubSyncSettings: {
+        manageLabels: true,
+        todoLabel: 'to-do',
+        inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
+        postCommentsFallback: false,
+        hasPromptedSetup: false,
+      },
+      groupLinkedPRs: true,
+      githubDoneModalTask: null,
       autoSyncSettings: DEFAULT_AUTOSYNC_SETTINGS,
       isAutoSyncPromptOpen: false,
       apiHealth: DEFAULT_API_HEALTH_STATE,
@@ -466,8 +477,10 @@ describe('useTaskStore', () => {
     });
   });
 
-  it('does NOT dispatch a remote transition when moving GitHub issue to done (Done is strictly local)', async () => {
-    const { addTask, moveTask } = useTaskStore.getState();
+  it('does NOT dispatch a remote transition when moving GitHub issue to done with doneAction=local_only', async () => {
+    const { addTask, moveTask, setGithubSyncSettings } = useTaskStore.getState();
+
+    setGithubSyncSettings({ doneAction: 'local_only' });
 
     addTask({
       title: 'GitHub done safety test',
@@ -572,6 +585,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: false,
       },
@@ -777,6 +792,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: true,
       },
@@ -826,6 +843,8 @@ describe('useTaskStore', () => {
         manageLabels: true,
         todoLabel: 'to-do',
         inProgressLabel: 'in-progress',
+        doneLabel: 'done',
+        doneAction: 'ask',
         postCommentsFallback: false,
         hasPromptedSetup: true,
       },
@@ -1385,6 +1404,135 @@ describe('useTaskStore', () => {
       const cleared = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
       expect(cleared.sourceMeta?.dueDate).toBeUndefined();
       expect(cleared.description).toBe('Initial summary');
+    });
+  });
+
+  describe('GitHub workflow, PR linking, and Done actions (Batch 2)', () => {
+    it('opens GitHub done action modal when moved to Done with doneAction=ask', async () => {
+      const { addTask, moveTask } = useTaskStore.getState();
+
+      addTask({
+        title: 'Fix edge case in parser',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/widkanban/issues/60',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 60, isPullRequest: false },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Fix edge case in parser')!;
+      await moveTask(task.id, 'done');
+
+      expect(useTaskStore.getState().tasks.find((t) => t.id === task.id)?.status).toBe('in_progress');
+      expect(useTaskStore.getState().githubDoneModalTask?.id).toBe(task.id);
+      expect(testSyncAdapter.transitions).toHaveLength(0);
+    });
+
+    it('executes close action remotely through syncAdapter when user confirms close', async () => {
+      const { addTask, executeGitHubDoneAction } = useTaskStore.getState();
+
+      addTask({
+        title: 'Complete documentation',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/widkanban/issues/61',
+        sourceMeta: {
+          repo: 'org/widkanban',
+          issueNumber: 61,
+          isPullRequest: false,
+          labels: [{ name: 'in-progress', color: 'd93f0b' }],
+        },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Complete documentation')!;
+      await executeGitHubDoneAction(task, 'close', true);
+
+      expect(testSyncAdapter.transitions).toEqual([
+        {
+          provider: 'github',
+          taskId: task.id,
+          newStatus: 'done',
+          containerId: 'org/widkanban',
+          issueNumber: 61,
+          targetLabel: null,
+          opposingLabel: 'in-progress',
+          postCommentFallback: false,
+          remoteState: 'closed',
+          stateReason: 'completed',
+        },
+      ]);
+      expect(useTaskStore.getState().tasks.find((t) => t.id === task.id)?.status).toBe('done');
+      expect(useTaskStore.getState().githubSyncSettings.doneAction).toBe('close');
+      expect(useTaskStore.getState().githubDoneModalTask).toBeNull();
+    });
+
+    it('executes label action remotely through syncAdapter when user confirms label', async () => {
+      const { addTask, executeGitHubDoneAction } = useTaskStore.getState();
+
+      addTask({
+        title: 'Tag issue as done only',
+        source: 'github',
+        status: 'in_progress',
+        url: 'https://github.com/org/widkanban/issues/63',
+        sourceMeta: {
+          repo: 'org/widkanban',
+          issueNumber: 63,
+          isPullRequest: false,
+          labels: [{ name: 'in-progress', color: 'd93f0b' }],
+        },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Tag issue as done only')!;
+      await executeGitHubDoneAction(task, 'label', false);
+
+      expect(testSyncAdapter.transitions).toEqual([
+        {
+          provider: 'github',
+          taskId: task.id,
+          newStatus: 'done',
+          containerId: 'org/widkanban',
+          issueNumber: 63,
+          targetLabel: 'done',
+          opposingLabel: 'in-progress',
+          postCommentFallback: false,
+        },
+      ]);
+      const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
+      expect(updated.status).toBe('done');
+      expect(updated.sourceMeta?.labels?.map((l) => l.name)).toEqual(['done']);
+      expect(useTaskStore.getState().githubSyncSettings.doneAction).toBe('ask');
+    });
+
+    it('reopens closed issue through syncAdapter when moving from Done back to In Progress', async () => {
+      const { addTask, moveTask, setGithubSyncSettings } = useTaskStore.getState();
+
+      setGithubSyncSettings({ doneAction: 'close', manageLabels: true });
+
+      addTask({
+        title: 'Reopened issue feature',
+        source: 'github',
+        status: 'done',
+        url: 'https://github.com/org/widkanban/issues/62',
+        sourceMeta: { repo: 'org/widkanban', issueNumber: 62, isPullRequest: false },
+      });
+
+      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Reopened issue feature')!;
+      await moveTask(task.id, 'in_progress');
+
+      expect(testSyncAdapter.transitions).toEqual([
+        {
+          provider: 'github',
+          taskId: task.id,
+          newStatus: 'in_progress',
+          containerId: 'org/widkanban',
+          issueNumber: 62,
+          targetLabel: 'in-progress',
+          opposingLabel: 'done',
+          postCommentFallback: false,
+          remoteState: 'open',
+          stateReason: 'reopened',
+        },
+      ]);
+      expect(useTaskStore.getState().tasks.find((t) => t.id === task.id)?.status).toBe('in_progress');
     });
   });
 });

@@ -16,6 +16,7 @@ import { useTaskStore } from '../store/useTaskStore';
 import { UnifiedTask, TaskStatus } from '../types/task';
 import { Column } from './Column';
 import { TaskCard } from './TaskCard';
+import { groupTasksWithLinkedPRs } from '../utils/githubLinking';
 import { filterAndSortTasks } from '../utils/deadline';
 
 export const KanbanBoard: React.FC = () => {
@@ -26,6 +27,7 @@ export const KanbanBoard: React.FC = () => {
     filterSource,
     deadlineFilter,
     deadlineSort,
+    groupLinkedPRs,
   } = useTaskStore();
   const [activeTask, setActiveTask] = useState<UnifiedTask | null>(null);
 
@@ -52,8 +54,10 @@ export const KanbanBoard: React.FC = () => {
     })
   );
 
+  const groupedTasks = groupTasksWithLinkedPRs(tasks, groupLinkedPRs);
+
   const filteredTasks = filterAndSortTasks(
-    tasks,
+    groupedTasks,
     searchQuery,
     filterSource,
     deadlineFilter,

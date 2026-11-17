@@ -5,6 +5,7 @@ import { AddTaskModal } from './components/AddTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GitHubSetupModal } from './components/GitHubSetupModal';
 import { DeleteTaskModal } from './components/DeleteTaskModal';
+import { GitHubDoneModal } from './components/GitHubDoneModal';
 import { StartupPromptModal } from './components/StartupPromptModal';
 import { AutoSyncPromptModal } from './components/AutoSyncPromptModal';
 import { useTaskStore } from './store/useTaskStore';
@@ -162,6 +163,7 @@ export const App: React.FC = () => {
       <SettingsModal />
       <GitHubSetupModal />
       <DeleteTaskModal />
+      <GitHubDoneModal />
       <StartupPromptModal />
       <AutoSyncPromptModal />
     </div>

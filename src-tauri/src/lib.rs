@@ -191,6 +191,8 @@ pub struct PRBranchInfo {
     pub deletions: Option<u64>,
     #[serde(rename = "changedFiles")]
     pub changed_files: Option<u64>,
+    #[serde(rename = "isMerged")]
+    pub is_merged: Option<bool>,
 }
 
 // ─── UnifiedTask (mirrored for Rust serialization) ──────────────────────────
@@ -3385,6 +3387,7 @@ mod tests {
             additions: Some(150),
             deletions: Some(40),
             changed_files: Some(5),
+            is_merged: Some(false),
         };
         let serialized = serde_json::to_string(&branch).expect("Failed to serialize PRBranchInfo");
         let deserialized: PRBranchInfo =

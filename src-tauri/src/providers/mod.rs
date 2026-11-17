@@ -22,6 +22,10 @@ pub struct TaskTransitionRequest {
     pub opposing_label: Option<String>,
     #[serde(default)]
     pub post_comment_fallback: bool,
+    #[serde(default)]
+    pub remote_state: Option<String>,
+    #[serde(default)]
+    pub state_reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

@@ -1,4 +1,5 @@
 import {
+  GitHubDoneAction,
   GitHubLabel,
   GitHubSyncSettings,
   RemoteDeleteMode,
@@ -43,23 +44,53 @@ function formatError(err: unknown): string {
 }
 
 /**
- * Computes updated GitHub workflow labels when a task sits in todo or in_progress.
+ * Computes updated GitHub workflow labels when a task transitions between columns.
  */
 export function applyGitHubLabelsForStatus(
   currentLabels: GitHubLabel[],
   targetStatus: TaskStatus,
-  settings: GitHubSyncSettings
+  settings: GitHubSyncSettings,
+  doneActionOverride?: Exclude<GitHubDoneAction, 'ask'>
 ): GitHubLabel[] {
-  if (!settings.manageLabels || (targetStatus !== 'todo' && targetStatus !== 'in_progress')) {
+  const effectiveDoneAction = doneActionOverride ?? settings.doneAction;
+  const todoTrim = settings.todoLabel.trim();
+  const inProgTrim = settings.inProgressLabel.trim();
+  const doneTrim = settings.doneLabel.trim();
+  const todoLower = todoTrim.toLowerCase();
+  const inProgLower = inProgTrim.toLowerCase();
+  const doneLower = doneTrim.toLowerCase();
+
+  let nextLabels = [...currentLabels];
+
+  if (targetStatus === 'done') {
+    if (settings.manageLabels) {
+      if (inProgLower) {
+        nextLabels = nextLabels.filter((l) => l.name.toLowerCase() !== inProgLower);
+      }
+      if (todoLower) {
+        nextLabels = nextLabels.filter((l) => l.name.toLowerCase() !== todoLower);
+      }
+    }
+    if (effectiveDoneAction === 'label' && doneTrim) {
+      if (!nextLabels.some((l) => l.name.toLowerCase() === doneLower)) {
+        nextLabels.push({
+          name: doneTrim,
+          color: '2ea44f',
+          description: 'Tasks completed (managed by WidKanban)',
+        });
+      }
+    }
+    return nextLabels;
+  }
+
+  if (!settings.manageLabels) {
     return currentLabels;
   }
 
-  const todoTrim = settings.todoLabel.trim();
-  const inProgTrim = settings.inProgressLabel.trim();
-  const todoLower = todoTrim.toLowerCase();
-  const inProgLower = inProgTrim.toLowerCase();
+  if (doneLower) {
+    nextLabels = nextLabels.filter((l) => l.name.toLowerCase() !== doneLower);
+  }
 
-  let nextLabels = [...currentLabels];
   if (targetStatus === 'in_progress') {
     if (todoLower) {
       nextLabels = nextLabels.filter((l) => l.name.toLowerCase() !== todoLower);
@@ -90,7 +121,8 @@ export function applyGitHubLabelsForStatus(
 function buildTransitionRequest(
   task: UnifiedTask,
   targetStatus: TaskStatus,
-  settings: GitHubSyncSettings
+  settings: GitHubSyncSettings,
+  doneActionOverride?: Exclude<GitHubDoneAction, 'ask'>
 ): TaskTransitionRequest | null {
   if (task.source === 'google_tasks') {
     if (!task.sourceMeta?.listId) return null;
@@ -103,18 +135,65 @@ function buildTransitionRequest(
   }
 
   if (task.source === 'github') {
-    const canSyncLabels =
-      settings.manageLabels &&
-      Boolean(task.sourceMeta?.repo && task.sourceMeta?.issueNumber) &&
-      (targetStatus === 'todo' || targetStatus === 'in_progress') &&
-      (task.status === 'todo' || task.status === 'in_progress');
+    if (!task.sourceMeta?.repo || !task.sourceMeta?.issueNumber) {
+      return null;
+    }
 
-    if (!canSyncLabels) return null;
+    const inProgTrim = settings.inProgressLabel.trim() || null;
 
+    if (targetStatus === 'done') {
+      const effectiveDoneAction = doneActionOverride ?? settings.doneAction;
+      if (effectiveDoneAction === 'local_only' || effectiveDoneAction === 'ask') {
+        return null;
+      }
+
+      if (effectiveDoneAction === 'close') {
+        return {
+          provider: 'github',
+          taskId: task.id,
+          newStatus: targetStatus,
+          containerId: task.sourceMeta.repo,
+          issueNumber: task.sourceMeta.issueNumber,
+          targetLabel: null,
+          opposingLabel: settings.manageLabels ? inProgTrim : null,
+          postCommentFallback: false,
+          remoteState: 'closed',
+          stateReason: 'completed',
+        };
+      }
+
+      const doneTrim = settings.doneLabel.trim() || null;
+      const opposingLabel = settings.manageLabels ? inProgTrim : null;
+      if (!doneTrim && !opposingLabel) return null;
+
+      return {
+        provider: 'github',
+        taskId: task.id,
+        newStatus: targetStatus,
+        containerId: task.sourceMeta.repo,
+        issueNumber: task.sourceMeta.issueNumber,
+        targetLabel: doneTrim,
+        opposingLabel,
+        postCommentFallback: settings.postCommentsFallback,
+      };
+    }
+
+    const wasDone = task.status === 'done';
     const isProgress = targetStatus === 'in_progress';
-    const targetLabel = (isProgress ? settings.inProgressLabel : settings.todoLabel).trim() || null;
-    const opposingLabel =
-      (isProgress ? settings.todoLabel : settings.inProgressLabel).trim() || null;
+    const targetLabel = settings.manageLabels
+      ? (isProgress ? settings.inProgressLabel : settings.todoLabel).trim() || null
+      : null;
+    const activeOpposing = settings.manageLabels
+      ? (isProgress ? settings.todoLabel : settings.inProgressLabel).trim() || null
+      : null;
+    const doneOpposing = wasDone ? settings.doneLabel.trim() || null : null;
+    const opposingLabel = doneOpposing || activeOpposing;
+    const shouldReopen =
+      wasDone && (settings.doneAction === 'close' || settings.doneAction === 'ask');
+
+    if (!targetLabel && !opposingLabel && !shouldReopen) {
+      return null;
+    }
 
     return {
       provider: 'github',
@@ -125,6 +204,7 @@ function buildTransitionRequest(
       targetLabel,
       opposingLabel,
       postCommentFallback: settings.postCommentsFallback,
+      ...(shouldReopen ? { remoteState: 'open' as const, stateReason: 'reopened' as const } : {}),
     };
   }
 
@@ -166,13 +246,18 @@ async function withOptimisticRollback<T>(
   }
 }
 
+export interface TransitionTaskOptions {
+  doneActionOverride?: Exclude<GitHubDoneAction, 'ask'>;
+}
+
 export async function transitionTask(
   get: GetSyncState,
   set: SetSyncState,
   adapter: TaskSyncAdapter,
   taskId: string,
   targetStatus: TaskStatus,
-  targetIndex?: number
+  targetIndex?: number,
+  options?: TransitionTaskOptions
 ): Promise<ActionResult> {
   const { tasks: prevTasks, githubSyncSettings } = get();
   const originalTask = prevTasks.find((t) => t.id === taskId);
@@ -180,7 +265,12 @@ export async function transitionTask(
     return { success: false, error: 'Task not found' };
   }
 
-  const transitionRequest = buildTransitionRequest(originalTask, targetStatus, githubSyncSettings);
+  const transitionRequest = buildTransitionRequest(
+    originalTask,
+    targetStatus,
+    githubSyncSettings,
+    options?.doneActionOverride
+  );
 
   const patch = (tasks: UnifiedTask[]): UnifiedTask[] => {
     const taskIndex = tasks.findIndex((t) => t.id === taskId);
@@ -194,7 +284,8 @@ export async function transitionTask(
         ? applyGitHubLabelsForStatus(
             movedTask.sourceMeta?.labels || [],
             targetStatus,
-            githubSyncSettings
+            githubSyncSettings,
+            options?.doneActionOverride
           )
         : movedTask.sourceMeta?.labels;
 
@@ -228,6 +319,20 @@ export async function transitionTask(
     console.warn(`[Sync] Background transition failed for ${taskId}. Reverted: ${res.error}`);
   }
   return res.success ? { success: true } : { success: false, error: res.error };
+}
+
+export async function executeGitHubDoneAction(
+  get: GetSyncState,
+  set: SetSyncState,
+  adapter: TaskSyncAdapter,
+  task: UnifiedTask,
+  action: GitHubDoneAction
+): Promise<ActionResult> {
+  const resolvedAction: Exclude<GitHubDoneAction, 'ask'> =
+    action === 'ask' ? 'local_only' : action;
+  return transitionTask(get, set, adapter, task.id, 'done', undefined, {
+    doneActionOverride: resolvedAction,
+  });
 }
 
 export async function setTaskDeadline(

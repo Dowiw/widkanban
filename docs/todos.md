@@ -109,12 +109,12 @@ This document tracks completed capabilities, active milestones, and planned feat
 - [x] Interactive date/time picker writing back to GitHub description bodies with visible markdown and machine HTML comment.
 
 ### Configurable GitHub Done Action ([#19](https://github.com/Dowiw/widkanban/issues/19))
-- [ ] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
-- [ ] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
+- [x] Choice between closing remote issue as `completed`, applying `done` label only, or local-only completion.
+- [x] Action prompt with "Remember my choice" checkbox and persistent Settings configuration.
 
 ### GitHub PR-to-Issue Linking & Board De-cluttering ([#20](https://github.com/Dowiw/widkanban/issues/20))
-- [ ] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
-- [ ] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
+- [x] Auto-detect `closes #X` / `fixes #X` links and merge PRs into primary issue cards.
+- [x] Rich PR badges with branch information, diff counters, and expandable PR description drawer.
 
 ### Multi-Column Board Configuration & Action Triggers ([#21](https://github.com/Dowiw/widkanban/issues/21))
 - [ ] Visual Column Manager in Settings to add, rename, color, and reorder workflow columns.
