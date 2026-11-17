@@ -1,7 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
   DeadlineUpdateResult,
+  GoogleTaskListSummary,
+  MSToDoListSummary,
+  OrganizationRoles,
   RemoteDeleteRequest,
+  RepoSummary,
   SubtaskItem,
   SubtaskMutationRequest,
   TaskDeadlineRequest,
@@ -22,6 +26,12 @@ export interface TaskSyncAdapter {
   updateTaskDeadline(request: TaskDeadlineRequest): Promise<DeadlineUpdateResult>;
   deleteTaskRemote(request: RemoteDeleteRequest): Promise<void>;
   mutateSubtask(request: SubtaskMutationRequest): Promise<SubtaskItem | null>;
+  fetchUserGitHubRepos(): Promise<RepoSummary[]>;
+  fetchGoogleTaskLists(): Promise<GoogleTaskListSummary[]>;
+  createGoogleTaskList(title: string): Promise<GoogleTaskListSummary>;
+  fetchMicrosoftToDoLists(): Promise<MSToDoListSummary[]>;
+  createMicrosoftToDoList(title: string): Promise<MSToDoListSummary>;
+  getOrganizationRoles(): Promise<OrganizationRoles>;
 }
 
 /**
@@ -46,6 +56,30 @@ export class TauriTaskSyncAdapter implements TaskSyncAdapter {
 
   async mutateSubtask(request: SubtaskMutationRequest): Promise<SubtaskItem | null> {
     return await invoke<SubtaskItem | null>('mutate_task_subtask', { request });
+  }
+
+  async fetchUserGitHubRepos(): Promise<RepoSummary[]> {
+    return await invoke<RepoSummary[]>('fetch_user_github_repos');
+  }
+
+  async fetchGoogleTaskLists(): Promise<GoogleTaskListSummary[]> {
+    return await invoke<GoogleTaskListSummary[]>('fetch_google_task_lists');
+  }
+
+  async createGoogleTaskList(title: string): Promise<GoogleTaskListSummary> {
+    return await invoke<GoogleTaskListSummary>('create_google_task_list', { title });
+  }
+
+  async fetchMicrosoftToDoLists(): Promise<MSToDoListSummary[]> {
+    return await invoke<MSToDoListSummary[]>('fetch_microsoft_todo_lists');
+  }
+
+  async createMicrosoftToDoList(title: string): Promise<MSToDoListSummary> {
+    return await invoke<MSToDoListSummary>('create_microsoft_todo_list', { title });
+  }
+
+  async getOrganizationRoles(): Promise<OrganizationRoles> {
+    return await invoke<OrganizationRoles>('get_organization_roles');
   }
 }
 
@@ -76,6 +110,30 @@ export class PreviewTaskSyncAdapter implements TaskSyncAdapter {
     }
     return null;
   }
+
+  async fetchUserGitHubRepos(): Promise<RepoSummary[]> {
+    return [];
+  }
+
+  async fetchGoogleTaskLists(): Promise<GoogleTaskListSummary[]> {
+    return [];
+  }
+
+  async createGoogleTaskList(title: string): Promise<GoogleTaskListSummary> {
+    return { id: `preview_gt_list_${Date.now()}`, title: title.trim() };
+  }
+
+  async fetchMicrosoftToDoLists(): Promise<MSToDoListSummary[]> {
+    return [];
+  }
+
+  async createMicrosoftToDoList(title: string): Promise<MSToDoListSummary> {
+    return { id: `preview_ms_list_${Date.now()}`, title: title.trim(), isOwner: true };
+  }
+
+  async getOrganizationRoles(): Promise<OrganizationRoles> {
+    return { teamsRole: 'student' };
+  }
 }
 
 /**
@@ -88,10 +146,18 @@ export class InMemoryTaskSyncAdapter implements TaskSyncAdapter {
   public deadlineUpdates: TaskDeadlineRequest[] = [];
   public remoteDeletions: RemoteDeleteRequest[] = [];
   public subtaskMutations: SubtaskMutationRequest[] = [];
+  public githubRepos: RepoSummary[] = [];
+  public googleLists: GoogleTaskListSummary[] = [];
+  public microsoftLists: MSToDoListSummary[] = [];
+  public createdGoogleLists: string[] = [];
+  public createdMicrosoftLists: string[] = [];
+  public organizationRoles: OrganizationRoles = { teamsRole: 'student' };
 
   public nextError: Error | null = null;
   public nextDeadlineResult: DeadlineUpdateResult | null = null;
   public nextCreatedSubtask: SubtaskItem | null = null;
+  public nextCreatedGoogleList: GoogleTaskListSummary | null = null;
+  public nextCreatedMicrosoftList: MSToDoListSummary | null = null;
 
   private maybeThrow() {
     if (this.nextError) {
@@ -143,6 +209,48 @@ export class InMemoryTaskSyncAdapter implements TaskSyncAdapter {
       };
     }
     return null;
+  }
+
+  async fetchUserGitHubRepos(): Promise<RepoSummary[]> {
+    this.maybeThrow();
+    return [...this.githubRepos];
+  }
+
+  async fetchGoogleTaskLists(): Promise<GoogleTaskListSummary[]> {
+    this.maybeThrow();
+    return [...this.googleLists];
+  }
+
+  async createGoogleTaskList(title: string): Promise<GoogleTaskListSummary> {
+    this.createdGoogleLists.push(title);
+    this.maybeThrow();
+    if (this.nextCreatedGoogleList) {
+      const list = this.nextCreatedGoogleList;
+      this.nextCreatedGoogleList = null;
+      return list;
+    }
+    return { id: `mem_gt_list_${this.createdGoogleLists.length}`, title };
+  }
+
+  async fetchMicrosoftToDoLists(): Promise<MSToDoListSummary[]> {
+    this.maybeThrow();
+    return [...this.microsoftLists];
+  }
+
+  async createMicrosoftToDoList(title: string): Promise<MSToDoListSummary> {
+    this.createdMicrosoftLists.push(title);
+    this.maybeThrow();
+    if (this.nextCreatedMicrosoftList) {
+      const list = this.nextCreatedMicrosoftList;
+      this.nextCreatedMicrosoftList = null;
+      return list;
+    }
+    return { id: `mem_ms_list_${this.createdMicrosoftLists.length}`, title, isOwner: true };
+  }
+
+  async getOrganizationRoles(): Promise<OrganizationRoles> {
+    this.maybeThrow();
+    return { ...this.organizationRoles };
   }
 }
 

@@ -1,8 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
-    BoxFuture, DeadlineUpdateResult, ProviderContext, RemoteDeleteRequest, SubtaskMutationRequest,
-    TaskDeadlineRequest, TaskProvider, TaskTransitionRequest,
+    BoxFuture, DeadlineUpdateResult, MSToDoListSummary, OrganizationRoles, ProviderContext,
+    RemoteDeleteRequest, SubtaskMutationRequest, TaskDeadlineRequest, TaskProvider,
+    TaskTransitionRequest,
 };
 use crate::{
     chrono_now_iso, current_epoch_seconds, ensure_valid_microsoft_token, get_health_store,
@@ -90,6 +91,128 @@ struct MSToDoTask {
     due_date_time: Option<MSToDoDateTime>,
     checklist_items: Option<Vec<MSToDoChecklistItem>>,
     linked_resources: Option<Vec<MSToDoLinkedResource>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateToDoListPayload<'a> {
+    display_name: &'a str,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct MSEduUserProfile {
+    primary_role: Option<String>,
+}
+
+/// Fetch Microsoft To Do task lists via Microsoft Graph.
+pub async fn fetch_todo_lists(ctx: &ProviderContext) -> Result<Vec<MSToDoListSummary>, String> {
+    let token = ensure_valid_microsoft_token(&ctx.app_handle).await?;
+    let client = ctx.http_client()?;
+
+    let resp = client
+        .get("https://graph.microsoft.com/v1.0/me/todo/lists")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Microsoft To Do lists: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Microsoft Graph API error: {} {}", status, body));
+    }
+
+    let body: MSGraphCollection<MSToDoList> = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(body
+        .value
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| MSToDoListSummary {
+            id: l.id,
+            title: l.display_name.unwrap_or_else(|| "Tasks".to_string()),
+            is_owner: true,
+        })
+        .collect())
+}
+
+/// Create a new Microsoft To Do task list via Microsoft Graph.
+pub async fn create_todo_list(
+    ctx: &ProviderContext,
+    title: &str,
+) -> Result<MSToDoListSummary, String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("List title cannot be empty".to_string());
+    }
+
+    let token = ensure_valid_microsoft_token(&ctx.app_handle).await?;
+    let client = ctx.http_client()?;
+    let payload = CreateToDoListPayload {
+        display_name: trimmed,
+    };
+
+    let resp = client
+        .post("https://graph.microsoft.com/v1.0/me/todo/lists")
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create Microsoft To Do list: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Microsoft Graph API error (create list): {} {}",
+            status, body
+        ));
+    }
+
+    let created: MSToDoList = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(MSToDoListSummary {
+        id: created.id,
+        title: created.display_name.unwrap_or_else(|| trimmed.to_string()),
+        is_owner: true,
+    })
+}
+
+/// Evaluate Microsoft Teams Education role; defaults safely to "student" when unavailable.
+pub async fn get_organization_roles(ctx: &ProviderContext) -> Result<OrganizationRoles, String> {
+    if let Ok(token) = ensure_valid_microsoft_token(&ctx.app_handle).await {
+        if let Ok(client) = ctx.http_client() {
+            if let Ok(resp) = client
+                .get("https://graph.microsoft.com/v1.0/education/me/user")
+                .bearer_auth(&token)
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(profile) = resp.json::<MSEduUserProfile>().await {
+                        let is_instructor = profile
+                            .primary_role
+                            .as_deref()
+                            .map(|r| {
+                                r.eq_ignore_ascii_case("teacher")
+                                    || r.eq_ignore_ascii_case("faculty")
+                            })
+                            .unwrap_or(false);
+                        return Ok(OrganizationRoles {
+                            teams_role: if is_instructor {
+                                "instructor".to_string()
+                            } else {
+                                "student".to_string()
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(OrganizationRoles {
+        teams_role: "student".to_string(),
+    })
 }
 
 /// Normalize Microsoft To Do tasks into UnifiedTask, mapping checklist item status strictly to "done" | "todo".

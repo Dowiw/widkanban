@@ -72,6 +72,33 @@ pub struct SubtaskMutationRequest {
     pub title: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSummary {
+    pub name: String,
+    pub is_owner: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GoogleTaskListSummary {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MSToDoListSummary {
+    pub id: String,
+    pub title: String,
+    pub is_owner: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationRoles {
+    pub teams_role: String,
+}
+
 pub struct ProviderContext {
     pub app_handle: tauri::AppHandle,
 }
@@ -151,5 +178,36 @@ mod tests {
             Ok("microsoft_teams")
         );
         assert!(resolve_provider("unknown").is_err());
+    }
+
+    #[test]
+    fn test_container_and_roles_serialization() {
+        let repo = RepoSummary {
+            name: "Dowiw/widkanban".to_string(),
+            is_owner: true,
+        };
+        let repo_json = serde_json::to_string(&repo).unwrap();
+        assert!(repo_json.contains(r#""isOwner":true"#));
+
+        let g_list = GoogleTaskListSummary {
+            id: "personal".to_string(),
+            title: "Personal".to_string(),
+        };
+        let g_json = serde_json::to_string(&g_list).unwrap();
+        assert!(g_json.contains(r#""title":"Personal""#));
+
+        let ms = MSToDoListSummary {
+            id: "tasks".to_string(),
+            title: "Tasks".to_string(),
+            is_owner: true,
+        };
+        let ms_json = serde_json::to_string(&ms).unwrap();
+        assert!(ms_json.contains(r#""isOwner":true"#));
+
+        let roles = OrganizationRoles {
+            teams_role: "student".to_string(),
+        };
+        let roles_json = serde_json::to_string(&roles).unwrap();
+        assert!(roles_json.contains(r#""teamsRole":"student""#));
     }
 }

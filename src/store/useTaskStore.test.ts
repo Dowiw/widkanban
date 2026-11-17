@@ -1535,5 +1535,73 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().tasks.find((t) => t.id === task.id)?.status).toBe('in_progress');
     });
   });
+
+  describe('Smart container discovery and permissions (Batch 4)', () => {
+    it('fetchAvailableContainers populates repos, google lists, microsoft lists, and roles through syncAdapter', async () => {
+      testSyncAdapter.githubRepos = [
+        { name: 'Dowiw/widkanban', isOwner: true },
+        { name: 'microsoft/vscode', isOwner: false },
+      ];
+      testSyncAdapter.googleLists = [
+        { id: 'g_list_1', title: 'Personal Tasks' },
+        { id: 'g_list_2', title: 'Work' },
+      ];
+      testSyncAdapter.microsoftLists = [{ id: 'ms_list_1', title: 'Daily Tasks', isOwner: true }];
+      testSyncAdapter.organizationRoles = { teamsRole: 'instructor' };
+
+      const { fetchAvailableContainers } = useTaskStore.getState();
+      await fetchAvailableContainers();
+
+      const state = useTaskStore.getState();
+      expect(state.availableRepos).toHaveLength(2);
+      expect(state.availableRepos[0].name).toBe('Dowiw/widkanban');
+      expect(state.availableGoogleLists).toHaveLength(2);
+      expect(state.availableMicrosoftLists).toHaveLength(1);
+      expect(state.organizationRoles.teamsRole).toBe('instructor');
+    });
+
+    it('createGoogleTaskList dispatches through syncAdapter and appends newly created list', async () => {
+      testSyncAdapter.nextCreatedGoogleList = {
+        id: 'new_g_list_123',
+        title: 'Sprint Planning',
+      };
+
+      const { createGoogleTaskList } = useTaskStore.getState();
+      const created = await createGoogleTaskList('Sprint Planning');
+
+      expect(created).toEqual({ id: 'new_g_list_123', title: 'Sprint Planning' });
+      expect(testSyncAdapter.createdGoogleLists).toEqual(['Sprint Planning']);
+      expect(
+        useTaskStore.getState().availableGoogleLists.some((l) => l.id === 'new_g_list_123')
+      ).toBe(true);
+    });
+
+    it('createMicrosoftTodoList dispatches through syncAdapter and appends newly created list', async () => {
+      testSyncAdapter.nextCreatedMicrosoftList = {
+        id: 'new_ms_list_456',
+        title: 'Project Roadmap',
+        isOwner: true,
+      };
+
+      const { createMicrosoftTodoList } = useTaskStore.getState();
+      const created = await createMicrosoftTodoList('Project Roadmap');
+
+      expect(created).toEqual({
+        id: 'new_ms_list_456',
+        title: 'Project Roadmap',
+        isOwner: true,
+      });
+      expect(testSyncAdapter.createdMicrosoftLists).toEqual(['Project Roadmap']);
+      expect(
+        useTaskStore.getState().availableMicrosoftLists.some((l) => l.id === 'new_ms_list_456')
+      ).toBe(true);
+    });
+
+    it('setLastUsedRepo updates lastUsedRepo in store', () => {
+      const { setLastUsedRepo } = useTaskStore.getState();
+      setLastUsedRepo('facebook/react');
+      expect(useTaskStore.getState().lastUsedRepo).toBe('facebook/react');
+    });
+  });
 });
 

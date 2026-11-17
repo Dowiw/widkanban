@@ -42,6 +42,10 @@ import {
   MicrosoftOAuthResult,
   DeadlineFilterOption,
   DeadlineSortOption,
+  RepoSummary,
+  GoogleTaskListSummary,
+  MSToDoListSummary,
+  OrganizationRoles,
 } from '../types/task';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 
@@ -205,6 +209,15 @@ interface TaskState {
   fetchApiHealth: () => Promise<ApiHealthState | null>;
   sendDesktopNotification: (title: string, body: string) => Promise<void>;
   refreshTasksWithDiff: () => Promise<{ addedCount: number; newTasks: UnifiedTask[] }>;
+  availableRepos: RepoSummary[];
+  availableGoogleLists: GoogleTaskListSummary[];
+  availableMicrosoftLists: MSToDoListSummary[];
+  lastUsedRepo: string;
+  organizationRoles: OrganizationRoles;
+  setLastUsedRepo: (repo: string) => void;
+  fetchAvailableContainers: () => Promise<void>;
+  createGoogleTaskList: (title: string) => Promise<GoogleTaskListSummary | null>;
+  createMicrosoftTodoList: (title: string) => Promise<MSToDoListSummary | null>;
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -254,6 +267,22 @@ export const useTaskStore = create<TaskState>()(
       isAutoSyncPromptOpen: false,
       apiHealth: DEFAULT_API_HEALTH_STATE,
       syncBanner: null,
+      availableRepos: [
+        { name: 'Dowiw/widkanban', isOwner: true },
+        { name: 'org/project-dashboard', isOwner: false },
+      ],
+      availableGoogleLists: [
+        { id: 'personal', title: 'Personal Tasks' },
+        { id: 'work', title: 'Work & Projects' },
+      ],
+      availableMicrosoftLists: [
+        { id: 'tasks', title: 'Tasks', isOwner: true },
+        { id: 'work_projects', title: 'Work Projects', isOwner: true },
+      ],
+      lastUsedRepo: 'Dowiw/widkanban',
+      organizationRoles: {
+        teamsRole: 'student',
+      },
       syncAdapter: defaultTaskSyncAdapter(),
       setSyncAdapter: (adapter) => set({ syncAdapter: adapter }),
       setAutoSyncSettings: (settings) =>
@@ -572,6 +601,9 @@ export const useTaskStore = create<TaskState>()(
         if (status.has_microsoft) {
           promises.push(get().fetchMicrosoftTasks());
         }
+        if (status.has_google || status.has_github || status.has_microsoft) {
+          promises.push(get().fetchAvailableContainers());
+        }
 
         await Promise.allSettled(promises);
         await get().fetchApiHealth();
@@ -773,6 +805,69 @@ export const useTaskStore = create<TaskState>()(
         }
         return false;
       },
+
+      setLastUsedRepo: (repo) => set({ lastUsedRepo: repo }),
+
+      fetchAvailableContainers: async () => {
+        const adapter = get().syncAdapter;
+        const [ghRes, gRes, msRes, rolesRes] = await Promise.allSettled([
+          adapter.fetchUserGitHubRepos(),
+          adapter.fetchGoogleTaskLists(),
+          adapter.fetchMicrosoftToDoLists(),
+          adapter.getOrganizationRoles(),
+        ]);
+
+        const patch: Partial<TaskState> = {};
+        if (ghRes.status === 'fulfilled' && ghRes.value.length > 0) {
+          patch.availableRepos = ghRes.value;
+        }
+        if (gRes.status === 'fulfilled' && gRes.value.length > 0) {
+          patch.availableGoogleLists = gRes.value;
+        }
+        if (msRes.status === 'fulfilled' && msRes.value.length > 0) {
+          patch.availableMicrosoftLists = msRes.value;
+        }
+        if (rolesRes.status === 'fulfilled' && rolesRes.value) {
+          patch.organizationRoles = rolesRes.value;
+        }
+        if (Object.keys(patch).length > 0) {
+          set(patch);
+        }
+      },
+
+      createGoogleTaskList: async (title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+
+        let newList: GoogleTaskListSummary;
+        try {
+          newList = await get().syncAdapter.createGoogleTaskList(trimmed);
+        } catch {
+          newList = { id: `gt_list_${Date.now()}`, title: trimmed };
+        }
+
+        set((state) => ({
+          availableGoogleLists: [...state.availableGoogleLists, newList],
+        }));
+        return newList;
+      },
+
+      createMicrosoftTodoList: async (title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+
+        let newList: MSToDoListSummary;
+        try {
+          newList = await get().syncAdapter.createMicrosoftToDoList(trimmed);
+        } catch {
+          newList = { id: `ms_list_${Date.now()}`, title: trimmed, isOwner: true };
+        }
+
+        set((state) => ({
+          availableMicrosoftLists: [...state.availableMicrosoftLists, newList],
+        }));
+        return newList;
+      },
     }),
     {
       name: 'widkanban-store',
@@ -792,6 +887,7 @@ export const useTaskStore = create<TaskState>()(
         startupSettings: state.startupSettings,
         deadlineFilter: state.deadlineFilter,
         deadlineSort: state.deadlineSort,
+        lastUsedRepo: state.lastUsedRepo,
       }),
       merge: (persistedState, currentState) => {
         const merged = { ...currentState, ...(persistedState as Partial<TaskState>) };

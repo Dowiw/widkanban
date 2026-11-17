@@ -188,6 +188,26 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   pinMode: 'always-on-top',
 };
 
+export interface RepoSummary {
+  name: string;
+  isOwner: boolean;
+}
+
+export interface GoogleTaskListSummary {
+  id: string;
+  title: string;
+}
+
+export interface MSToDoListSummary {
+  id: string;
+  title: string;
+  isOwner: boolean;
+}
+
+export interface OrganizationRoles {
+  teamsRole: 'student' | 'instructor';
+}
+
 export interface StartupSettings {
   autostartEnabled: boolean;
   startMinimized: boolean;
@@ -352,5 +372,3 @@ export interface CredentialInspectionReport {
   providers: ProviderInspection[];
   canProceed: boolean;
 }
-
-

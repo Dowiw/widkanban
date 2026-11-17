@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BoxFuture, DeadlineUpdateResult, ProviderContext, RemoteDeleteRequest, SubtaskMutationRequest,
-    TaskDeadlineRequest, TaskProvider, TaskTransitionRequest,
+    BoxFuture, DeadlineUpdateResult, ProviderContext, RemoteDeleteRequest, RepoSummary,
+    SubtaskMutationRequest, TaskDeadlineRequest, TaskProvider, TaskTransitionRequest,
 };
 use crate::{
     chrono_now_iso, current_epoch_seconds, get_health_store, github_issue_status,
@@ -760,6 +760,67 @@ impl TaskProvider for GitHubProvider {
     ) -> BoxFuture<'a, Result<Option<SubtaskItem>, String>> {
         Box::pin(async { Err("GitHub issues do not support subtask mutations".to_string()) })
     }
+}
+
+/// Fetch user-accessible GitHub repositories (owned, collaborator, and external assigned).
+pub async fn fetch_user_repos(ctx: &ProviderContext) -> Result<Vec<RepoSummary>, String> {
+    let token = resolve_github_token(ctx, false)?;
+    let client = ctx.http_client()?;
+
+    let mut repo_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+
+    let resp = client
+        .get("https://api.github.com/user/repos?affiliation=owner,collaborator&sort=updated&per_page=100")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await;
+
+    if let Ok(res) = resp {
+        if res.status().is_success() {
+            if let Ok(raw_repos) = res.json::<Vec<serde_json::Value>>().await {
+                for r in raw_repos {
+                    if let Some(full_name) = r.get("full_name").and_then(|v| v.as_str()) {
+                        let is_owner = r
+                            .get("permissions")
+                            .and_then(|p| p.get("admin"))
+                            .and_then(|a| a.as_bool())
+                            .unwrap_or(true);
+                        repo_map.insert(full_name.to_string(), is_owner);
+                    }
+                }
+            }
+        }
+    }
+
+    let issues_resp = client
+        .get("https://api.github.com/user/issues?filter=all&state=open&per_page=50")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(&token)
+        .send()
+        .await;
+
+    if let Ok(res) = issues_resp {
+        if res.status().is_success() {
+            if let Ok(issues) = res.json::<Vec<GHIssue>>().await {
+                for issue in issues {
+                    if let Some(repo) = parse_github_repo_from_url(&issue.html_url) {
+                        repo_map.entry(repo).or_insert(false);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<RepoSummary> = repo_map
+        .into_iter()
+        .map(|(name, is_owner)| RepoSummary { name, is_owner })
+        .collect();
+
+    result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(result)
 }
 
 #[cfg(test)]

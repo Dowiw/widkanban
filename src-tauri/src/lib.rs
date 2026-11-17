@@ -2670,6 +2670,56 @@ async fn mutate_task_subtask(
     adapter.mutate_subtask(&ctx, request).await
 }
 
+#[tauri::command]
+async fn fetch_user_github_repos(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<providers::RepoSummary>, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::github::fetch_user_repos(&ctx).await
+}
+
+#[tauri::command]
+async fn fetch_google_task_lists(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<providers::GoogleTaskListSummary>, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::google_tasks::fetch_task_lists(&ctx).await
+}
+
+#[tauri::command]
+async fn create_google_task_list(
+    app_handle: tauri::AppHandle,
+    title: String,
+) -> Result<providers::GoogleTaskListSummary, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::google_tasks::create_task_list(&ctx, &title).await
+}
+
+#[tauri::command]
+async fn fetch_microsoft_todo_lists(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<providers::MSToDoListSummary>, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::microsoft::fetch_todo_lists(&ctx).await
+}
+
+#[tauri::command]
+async fn create_microsoft_todo_list(
+    app_handle: tauri::AppHandle,
+    title: String,
+) -> Result<providers::MSToDoListSummary, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::microsoft::create_todo_list(&ctx, &title).await
+}
+
+#[tauri::command]
+async fn get_organization_roles(
+    app_handle: tauri::AppHandle,
+) -> Result<providers::OrganizationRoles, String> {
+    let ctx = providers::ProviderContext::new(app_handle);
+    providers::microsoft::get_organization_roles(&ctx).await
+}
+
 /// Discover or create To-Do and In-Progress labels on a GitHub repository.
 #[tauri::command]
 async fn setup_github_repo_labels(
@@ -3058,6 +3108,12 @@ pub fn run() {
             update_task_deadline,
             delete_task_remote,
             mutate_task_subtask,
+            fetch_user_github_repos,
+            fetch_google_task_lists,
+            create_google_task_list,
+            fetch_microsoft_todo_lists,
+            create_microsoft_todo_list,
+            get_organization_roles,
             setup_github_repo_labels,
             open_oauth_preview,
         ])

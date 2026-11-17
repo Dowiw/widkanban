@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    BoxFuture, DeadlineUpdateResult, ProviderContext, RemoteDeleteRequest, SubtaskMutationRequest,
-    TaskDeadlineRequest, TaskProvider, TaskTransitionRequest,
+    BoxFuture, DeadlineUpdateResult, GoogleTaskListSummary, ProviderContext, RemoteDeleteRequest,
+    SubtaskMutationRequest, TaskDeadlineRequest, TaskProvider, TaskTransitionRequest,
 };
 use crate::{
     chrono_epoch_to_iso, chrono_now_iso, current_epoch_seconds, ensure_valid_google_token,
@@ -65,6 +65,71 @@ struct GTaskPatchPayload {
 #[derive(Serialize)]
 struct CreateSubtaskPayload<'a> {
     title: &'a str,
+}
+
+/// Fetch all Google Tasks lists for the authenticated user.
+pub async fn fetch_task_lists(ctx: &ProviderContext) -> Result<Vec<GoogleTaskListSummary>, String> {
+    let token = ensure_valid_google_token(&ctx.app_handle).await?;
+    let client = ctx.http_client()?;
+
+    let resp = client
+        .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Google task lists: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error: {} {}", status, body));
+    }
+
+    let body: GTaskListsResponse = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(body
+        .items
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| GoogleTaskListSummary {
+            id: l.id,
+            title: l.title,
+        })
+        .collect())
+}
+
+/// Create a new Google Tasks list.
+pub async fn create_task_list(
+    ctx: &ProviderContext,
+    title: &str,
+) -> Result<GoogleTaskListSummary, String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("List title cannot be empty".to_string());
+    }
+
+    let token = ensure_valid_google_token(&ctx.app_handle).await?;
+    let client = ctx.http_client()?;
+    let payload = CreateSubtaskPayload { title: trimmed };
+
+    let resp = client
+        .post("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create Google task list: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Google Tasks API error (create list): {} {}", status, body));
+    }
+
+    let created: GTaskList = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(GoogleTaskListSummary {
+        id: created.id,
+        title: created.title,
+    })
 }
 
 struct RawTaskEntry {
