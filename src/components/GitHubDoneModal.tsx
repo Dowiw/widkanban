@@ -27,6 +27,7 @@ export const GitHubDoneModal: React.FC = () => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div 
         onClick={(e) => e.stopPropagation()}
+        style={{ borderRadius: 'var(--modal-radius, 16px)' }}
         className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-4.5 text-slate-800 dark:text-slate-100 animate-in zoom-in-95 duration-150 select-none"
       >
         {/* Modal Header */}

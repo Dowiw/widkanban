@@ -1,5 +1,6 @@
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft_teams';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface GitHubLabel {
   name: string;
@@ -50,20 +51,23 @@ export interface LinkedPRInfo {
 }
 
 export interface UnifiedTask {
-  id: string;             // e.g., 'gh_102' or 'gt_abc123'
+  id: string;             // e.g., 'gh_102' or 'gt_abc123' or 'ms_xyz789'
   title: string;
   source: TaskSource;
   status: TaskStatus;
+  priority?: TaskPriority;
   url: string;            // Direct link to issue/task
   updatedAt: string;
   description?: string;   // Markdown body or task notes
 
   sourceMeta: {
+    priority?: TaskPriority;
     // --- Google Tasks ---
     listId?: string;
     listTitle?: string;
     notes?: string;
     dueDate?: string;            // RFC 3339 timestamp (e.g. "2026-10-15T00:00:00.000Z")
+    deadlineType?: 'deadline' | 'review' | string;
     parentId?: string;
     hasSubtasks?: boolean;
     subtaskCount?: number;
@@ -85,12 +89,38 @@ export interface UnifiedTask {
     branchInfo?: PRBranchInfo;
     linkedPR?: LinkedPRInfo;
     linkedIssueNumber?: number;
+
+    // --- Microsoft 365 & Teams ---
+    teamName?: string;           // Teams channel or team name
+    courseName?: string;         // Teams for Education class name
+    assignmentId?: string;       // Unique assignment ID
+    isAssignment?: boolean;      // Teams for Education Assignment
+    isPlanner?: boolean;         // Microsoft Planner card
+    isFlaggedEmail?: boolean;    // Outlook flagged email
+    percentComplete?: number;    // Planner task percentage (0 - 100)
+    submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
+
+export type DeadlineFilterOption = 'all' | 'overdue' | 'today' | 'this_week' | 'has_deadline' | 'no_deadline';
+export type DeadlineSortOption = 'none' | 'soonest' | 'latest' | 'updated' | 'alphabetical';
 
 export interface AuthStatus {
   has_github: boolean;
   has_google: boolean;
+  has_microsoft: boolean;
+  github_from_env?: boolean;
+  google_from_env?: boolean;
+  google_has_refresh_token?: boolean;
+  microsoft_from_env?: boolean;
+  microsoft_has_refresh_token?: boolean;
+  microsoft_client_id?: string;
+  microsoft_include_education?: boolean;
+}
+
+export interface MicrosoftOAuthResult {
+  authStatus: AuthStatus;
+  report: CredentialInspectionReport;
 }
 
 export type GitHubDoneAction = 'close' | 'label' | 'local_only' | 'ask';
@@ -123,6 +153,8 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export type FontFamilyOption = 'outfit' | 'unifont' | 'system' | 'mono';
 export type CardDensity = 'compact' | 'normal' | 'relaxed';
 
+export type PinMode = 'always-on-top' | 'desktop-layer' | 'normal';
+
 export interface WidgetCustomizationSettings {
   // Appearance
   theme: ThemeMode;
@@ -135,10 +167,11 @@ export interface WidgetCustomizationSettings {
   columnMinWidth: number; // 200 to 400px (default 260px)
   cardDensity: CardDensity;
 
-  // Window Defaults
+  // Window Defaults & Pin Mode
   defaultWidth: number;
   defaultHeight: number;
   rememberWindowPlacement: boolean;
+  pinMode: PinMode; // 'always-on-top' | 'desktop-layer' | 'normal'
 }
 
 export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
@@ -152,5 +185,172 @@ export const DEFAULT_CUSTOMIZATION_SETTINGS: WidgetCustomizationSettings = {
   defaultWidth: 380,
   defaultHeight: 680,
   rememberWindowPlacement: true,
+  pinMode: 'always-on-top',
 };
+
+export interface StartupSettings {
+  autostartEnabled: boolean;
+  startMinimized: boolean;
+  hasPrompted: boolean;
+}
+
+export const DEFAULT_STARTUP_SETTINGS: StartupSettings = {
+  autostartEnabled: false,
+  startMinimized: false,
+  hasPrompted: false,
+};
+
+export interface AutoSyncSettings {
+  enabled: boolean;
+  intervalMinutes: number; // 1, 3, 5, 15
+  notifyOnNewTasks: boolean;
+  hasPrompted: boolean;
+}
+
+export const DEFAULT_AUTOSYNC_SETTINGS: AutoSyncSettings = {
+  enabled: false,
+  intervalMinutes: 3,
+  notifyOnNewTasks: true,
+  hasPrompted: false,
+};
+
+export interface ProviderHealth {
+  connected: boolean;
+  rateLimitRemaining?: number;
+  rateLimitLimit?: number;
+  rateLimitReset?: number; // Unix epoch seconds
+  tokenExpiresAt?: string | null;
+  isExpiringSoon?: boolean; // e.g. < 7 days
+  isRateLimited?: boolean;
+  lastChecked?: number;
+  errorMessage?: string | null;
+}
+
+export interface ApiHealthState {
+  github: ProviderHealth;
+  google: ProviderHealth;
+  microsoft?: ProviderHealth;
+}
+
+export const DEFAULT_API_HEALTH_STATE: ApiHealthState = {
+  github: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
+  google: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
+  microsoft: {
+    connected: false,
+    rateLimitRemaining: undefined,
+    rateLimitLimit: undefined,
+    rateLimitReset: undefined,
+    tokenExpiresAt: null,
+    isExpiringSoon: false,
+    isRateLimited: false,
+    lastChecked: undefined,
+    errorMessage: null,
+  },
+};
+
+export interface PermissionItem {
+  scope: string;
+  description: string;
+  isRequired: boolean;
+  isGranted: boolean;
+  featureImpact?: string;
+}
+
+export interface ProviderInspection {
+  provider: 'github' | 'google' | 'microsoft';
+  isValid: boolean;
+  errorMessage?: string;
+  userName?: string;
+  userEmail?: string;
+  avatarUrl?: string;
+  accountType?: string;
+  permissions: PermissionItem[];
+  allRequiredGranted: boolean;
+}
+
+export type RemoteDeleteMode = 'close' | 'permanent';
+
+export interface TaskCapabilities {
+  canEditDeadline: boolean;
+  canManageSubtasks: boolean;
+  supportedRemoteDeleteModes: RemoteDeleteMode[];
+  containerLabel: string;
+  deadlinePopoverTitle: string;
+  supportsDeadlineTypeToggle: boolean;
+  supportsDateTimePicker: boolean;
+}
+
+export interface TaskTransitionRequest {
+  provider: TaskSource;
+  taskId: string;
+  newStatus: TaskStatus;
+  containerId?: string;
+  issueNumber?: number;
+  targetLabel?: string | null;
+  opposingLabel?: string | null;
+  postCommentFallback?: boolean;
+  remoteState?: 'open' | 'closed';
+  stateReason?: 'completed' | 'reopened' | 'not_planned';
+}
+
+export interface TaskDeadlineRequest {
+  provider: TaskSource;
+  taskId: string;
+  containerId?: string;
+  issueNumber?: number;
+  isPr?: boolean;
+  dueDate: string | null;
+  deadlineType?: string | null;
+}
+
+export interface DeadlineUpdateResult {
+  dueDate?: string | null;
+  updatedDescription?: string | null;
+}
+
+export interface RemoteDeleteRequest {
+  provider: TaskSource;
+  taskId: string;
+  containerId?: string;
+  issueNumber?: number;
+  mode: RemoteDeleteMode;
+  reason?: string;
+  duplicateOf?: number;
+}
+
+export interface SubtaskMutationRequest {
+  provider: TaskSource;
+  action: 'toggle' | 'create' | 'delete';
+  containerId: string;
+  taskId: string;
+  subtaskId?: string;
+  newStatus?: TaskStatus;
+  title?: string;
+}
+
+export interface CredentialInspectionReport {
+  providers: ProviderInspection[];
+  canProceed: boolean;
+}
+
 

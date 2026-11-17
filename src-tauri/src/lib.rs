@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Manager,
 };
+
+pub mod providers;
 
 // ─── Credential Structures ──────────────────────────────────────────────────
 
@@ -12,12 +15,126 @@ use tauri::{
 pub struct StoredCredentials {
     pub github_token: Option<String>,
     pub google_token: Option<String>,
+    #[serde(default)]
+    pub microsoft_token: Option<String>,
+    #[serde(default)]
+    pub microsoft_refresh_token: Option<String>,
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    #[serde(default)]
+    pub microsoft_token_expiry: Option<u64>,
+    #[serde(default)]
+    pub microsoft_include_education: Option<bool>,
+    #[serde(default)]
+    pub google_refresh_token: Option<String>,
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    #[serde(default)]
+    pub google_token_expiry: Option<u64>,
+    #[serde(default)]
+    pub github_disconnected: Option<bool>,
+    #[serde(default)]
+    pub google_disconnected: Option<bool>,
+    #[serde(default)]
+    pub microsoft_disconnected: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AuthStatus {
     pub has_github: bool,
     pub has_google: bool,
+    pub has_microsoft: bool,
+    #[serde(default)]
+    pub github_from_env: bool,
+    #[serde(default)]
+    pub google_from_env: bool,
+    #[serde(default)]
+    pub google_has_refresh_token: bool,
+    #[serde(default)]
+    pub microsoft_from_env: bool,
+    #[serde(default)]
+    pub microsoft_has_refresh_token: bool,
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    #[serde(default)]
+    pub microsoft_include_education: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrosoftOAuthResult {
+    pub auth_status: AuthStatus,
+    pub report: CredentialInspectionReport,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealth {
+    pub connected: bool,
+    pub rate_limit_remaining: Option<u32>,
+    pub rate_limit_limit: Option<u32>,
+    pub rate_limit_reset: Option<u64>,
+    pub token_expires_at: Option<String>,
+    pub is_expiring_soon: Option<bool>,
+    pub is_rate_limited: Option<bool>,
+    pub last_checked: Option<u64>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiHealthState {
+    pub github: ProviderHealth,
+    pub google: ProviderHealth,
+    #[serde(default)]
+    pub microsoft: Option<ProviderHealth>,
+}
+
+pub(crate) fn current_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+pub(crate) fn get_health_store() -> &'static Mutex<ApiHealthState> {
+    static STORE: std::sync::OnceLock<Mutex<ApiHealthState>> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(ApiHealthState::default()))
+}
+
+// ─── Permission & Credential Inspection Models ──────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionItem {
+    pub scope: String,
+    pub description: String,
+    pub is_required: bool,
+    pub is_granted: bool,
+    pub feature_impact: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInspection {
+    pub provider: String,
+    pub is_valid: bool,
+    pub error_message: Option<String>,
+    pub user_name: Option<String>,
+    pub user_email: Option<String>,
+    pub avatar_url: Option<String>,
+    pub account_type: Option<String>,
+    pub permissions: Vec<PermissionItem>,
+    pub all_required_granted: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialInspectionReport {
+    pub providers: Vec<ProviderInspection>,
+    pub can_proceed: bool,
 }
 
 // ─── Provider Specific Detailed Models ──────────────────────────────────────
@@ -70,12 +187,12 @@ pub struct PRBranchInfo {
     pub head_repo: Option<String>,
     #[serde(rename = "isDraft")]
     pub is_draft: Option<bool>,
-    #[serde(rename = "isMerged")]
-    pub is_merged: Option<bool>,
     pub additions: Option<u64>,
     pub deletions: Option<u64>,
     #[serde(rename = "changedFiles")]
     pub changed_files: Option<u64>,
+    #[serde(rename = "isMerged")]
+    pub is_merged: Option<bool>,
 }
 
 // ─── UnifiedTask (mirrored for Rust serialization) ──────────────────────────
@@ -102,6 +219,8 @@ pub struct SourceMeta {
     pub notes: Option<String>,
     #[serde(rename = "dueDate")]
     pub due_date: Option<String>,
+    #[serde(rename = "deadlineType", default)]
+    pub deadline_type: Option<String>,
     #[serde(rename = "parentId")]
     pub parent_id: Option<String>,
     #[serde(rename = "hasSubtasks")]
@@ -110,6 +229,24 @@ pub struct SourceMeta {
     pub subtask_count: Option<usize>,
     pub subtasks: Option<Vec<SubtaskItem>>,
     pub links: Option<Vec<TaskLink>>,
+    #[serde(rename = "teamName")]
+    pub team_name: Option<String>,
+    #[serde(rename = "courseName")]
+    pub course_name: Option<String>,
+    #[serde(rename = "assignmentId")]
+    pub assignment_id: Option<String>,
+    #[serde(rename = "isAssignment")]
+    pub is_assignment: Option<bool>,
+    #[serde(rename = "isPlanner")]
+    pub is_planner: Option<bool>,
+    #[serde(rename = "isFlaggedEmail")]
+    pub is_flagged_email: Option<bool>,
+    #[serde(rename = "percentComplete")]
+    pub percent_complete: Option<u8>,
+    #[serde(rename = "submissionUrl")]
+    pub submission_url: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -118,6 +255,8 @@ pub struct UnifiedTask {
     pub title: String,
     pub source: String,      // "github" | "google_tasks"
     pub status: String,      // "todo" | "in_progress" | "done"
+    #[serde(default)]
+    pub priority: Option<String>,
     pub url: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
@@ -126,120 +265,9 @@ pub struct UnifiedTask {
     pub source_meta: SourceMeta,
 }
 
-// ─── Google Tasks API Types ──────────────────────────────────────────────────
+// ─── Shared Repo Label Helpers ───────────────────────────────────────────────
 
-#[derive(Deserialize, Debug)]
-struct GTaskList {
-    id: String,
-    title: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct GTaskListsResponse {
-    items: Option<Vec<GTaskList>>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[allow(dead_code)]
-struct GTaskLink {
-    description: Option<String>,
-    link: Option<String>,
-    #[serde(rename = "type")]
-    link_type: Option<String>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct GTask {
-    id: String,
-    title: Option<String>,
-    status: Option<String>,       // "needsAction" | "completed"
-    notes: Option<String>,
-    due: Option<String>,
-    updated: Option<String>,
-    parent: Option<String>,
-    links: Option<Vec<GTaskLink>>,
-    #[serde(rename = "selfLink")]
-    self_link: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GTasksResponse {
-    items: Option<Vec<GTask>>,
-}
-
-#[derive(Serialize)]
-struct GTaskPatchPayload {
-    status: String,
-}
-
-// ─── GitHub API Types ────────────────────────────────────────────────────────
-
-#[derive(Deserialize, Debug)]
-struct GHUser {
-    login: String,
-    avatar_url: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHLabel {
-    name: String,
-    color: String,
-    description: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHMilestone {
-    title: String,
-    due_on: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct GHPullRequestRef {
-    url: Option<String>,
-    html_url: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHRepoRef {
-    full_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct GHBranchRef {
-    r#ref: String,
-    label: Option<String>,
-    repo: Option<GHRepoRef>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHPullDetail {
-    head: Option<GHBranchRef>,
-    base: Option<GHBranchRef>,
-    draft: Option<bool>,
-    merged: Option<bool>,
-    additions: Option<u64>,
-    deletions: Option<u64>,
-    changed_files: Option<u64>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHIssue {
-    id: u64,
-    number: u64,
-    title: String,
-    state: String, // "open" | "closed"
-    body: Option<String>,
-    html_url: String,
-    comments: Option<u64>,
-    updated_at: Option<String>,
-    user: Option<GHUser>,
-    assignees: Option<Vec<GHUser>>,
-    labels: Option<Vec<GHLabel>>,
-    milestone: Option<GHMilestone>,
-    pull_request: Option<GHPullRequestRef>,
-}
+use providers::github::GHLabel;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -257,17 +285,7 @@ struct CreateLabelPayload<'a> {
     description: &'a str,
 }
 
-#[derive(Serialize)]
-struct AddLabelsPayload<'a> {
-    labels: Vec<&'a str>,
-}
-
-#[derive(Serialize)]
-struct CreateCommentPayload<'a> {
-    body: &'a str,
-}
-
-fn url_encode(input: &str) -> String {
+pub(crate) fn url_encode(input: &str) -> String {
     let mut encoded = String::new();
     for b in input.bytes() {
         match b {
@@ -316,7 +334,19 @@ fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::Path
     Ok(dir)
 }
 
-fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+fn get_env_credential(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(val) = std::env::var(key) {
+            let trimmed = val.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if let Ok(path) = get_credentials_path(app_handle) {
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(&path) {
@@ -329,7 +359,100 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     StoredCredentials::default()
 }
 
-fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
+pub(crate) fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+    let mut creds = read_stored_credentials_file(app_handle);
+
+    // 1. GitHub: App-stored token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token exists
+    // and the user has not explicitly disconnected GitHub.
+    let has_stored_github = creds
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_github && creds.github_disconnected != Some(true) {
+        if let Some(gh) = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]) {
+            creds.github_token = Some(gh);
+        }
+    }
+
+    // 2. Google: App-stored token or refresh token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token or refresh token exists
+    // and the user has not explicitly disconnected Google.
+    let has_stored_google = creds
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || creds
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_google && creds.google_disconnected != Some(true) {
+        if let Some(gt) = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]) {
+            creds.google_token = Some(gt);
+        }
+        if let Some(gr) = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]) {
+            creds.google_refresh_token = Some(gr);
+        }
+    }
+
+    // 3. Client ID & Secret: App-entered/stored takes precedence; fall back to .env if empty
+    let has_stored_cid = creds
+        .google_client_id
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_cid {
+        if let Some(cid) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]) {
+            creds.google_client_id = Some(cid);
+        }
+    }
+
+    let has_stored_sec = creds
+        .google_client_secret
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_sec {
+        if let Some(sec) = get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]) {
+            creds.google_client_secret = Some(sec);
+        }
+    }
+
+    // 4. Microsoft: App-stored token or refresh token takes highest precedence.
+    // Only fall back to environment variable (.env) if no valid stored token exists
+    // and the user has not explicitly disconnected Microsoft.
+    let has_stored_microsoft = creds
+        .microsoft_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || creds
+            .microsoft_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    if !has_stored_microsoft && creds.microsoft_disconnected != Some(true) {
+        if let Some(ms) = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]) {
+            creds.microsoft_token = Some(ms);
+        }
+        if let Some(mr) = get_env_credential(&["WIDKANBAN_MICROSOFT_REFRESH_TOKEN", "MICROSOFT_REFRESH_TOKEN"]) {
+            creds.microsoft_refresh_token = Some(mr);
+        }
+    }
+
+    let has_stored_ms_cid = creds
+        .microsoft_client_id
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    if !has_stored_ms_cid {
+        if let Some(cid) = get_env_credential(&["WIDKANBAN_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"]) {
+            creds.microsoft_client_id = Some(cid);
+        }
+    }
+
+    creds
+}
+
+pub(crate) fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
     let path = get_credentials_path(app_handle)?;
     let serialized = serde_json::to_string_pretty(creds)
         .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
@@ -349,21 +472,55 @@ fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -
 
 // ─── Status & Helper Mappings ────────────────────────────────────────────────
 
-fn google_status_to_task_status(gs: Option<&str>) -> String {
+pub(crate) fn google_status_to_task_status(gs: Option<&str>) -> String {
     match gs {
         Some("completed") => "done".to_string(),
         _ => "todo".to_string(),
     }
 }
 
-fn task_status_to_google_status(ts: &str) -> String {
+pub(crate) fn task_status_to_google_status(ts: &str) -> String {
     match ts {
         "done" => "completed".to_string(),
         _ => "needsAction".to_string(),
     }
 }
 
-fn parse_github_repo_from_url(url: &str) -> Option<String> {
+pub fn ms_status_to_task_status(status: Option<&str>, percent_complete: Option<u8>) -> String {
+    if let Some(pct) = percent_complete {
+        if pct == 100 {
+            return "done".to_string();
+        } else if pct > 0 {
+            return "in_progress".to_string();
+        } else {
+            return "todo".to_string();
+        }
+    }
+
+    match status.unwrap_or("").to_lowercase().as_str() {
+        "completed" | "submitted" | "returned" => "done".to_string(),
+        "inprogress" | "in_progress" => "in_progress".to_string(),
+        "notstarted" | "assigned" | "draft" | "scheduled" | _ => "todo".to_string(),
+    }
+}
+
+pub fn task_status_to_ms_todo_status(ts: &str) -> String {
+    match ts {
+        "done" => "completed".to_string(),
+        "in_progress" => "inProgress".to_string(),
+        _ => "notStarted".to_string(),
+    }
+}
+
+pub fn task_status_to_ms_planner_percent(ts: &str) -> u8 {
+    match ts {
+        "done" => 100,
+        "in_progress" => 50,
+        _ => 0,
+    }
+}
+
+pub(crate) fn parse_github_repo_from_url(url: &str) -> Option<String> {
     let parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
     if parts.len() >= 5 {
         let owner = parts[3];
@@ -375,7 +532,7 @@ fn parse_github_repo_from_url(url: &str) -> Option<String> {
     None
 }
 
-fn github_issue_status(state: &str, labels: Option<&[GHLabel]>) -> String {
+pub(crate) fn github_issue_status(state: &str, labels: Option<&[GHLabel]>) -> String {
     if state == "closed" {
         return "done".to_string();
     }
@@ -403,10 +560,436 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+async fn get_api_health(app_handle: tauri::AppHandle) -> Result<ApiHealthState, String> {
+    let creds = read_credentials(&app_handle);
+    let mut health = get_health_store().lock().map(|h| h.clone()).unwrap_or_default();
+
+    if let Some(token) = creds.github_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let now = current_epoch_seconds();
+        let should_check = health.github.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get("https://api.github.com/rate_limit")
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                {
+                    let rate_limit_limit = resp
+                        .headers()
+                        .get("x-ratelimit-limit")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_remaining = resp
+                        .headers()
+                        .get("x-ratelimit-remaining")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u32>().ok());
+                    let rate_limit_reset = resp
+                        .headers()
+                        .get("x-ratelimit-reset")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok());
+                    let token_expires_at = resp
+                        .headers()
+                        .get("github-authentication-token-expiration")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
+                    let is_success = resp.status().is_success();
+                    let status_code = resp.status().as_u16();
+
+                    let updated = ProviderHealth {
+                        connected: is_success,
+                        rate_limit_remaining,
+                        rate_limit_limit,
+                        rate_limit_reset,
+                        token_expires_at,
+                        is_expiring_soon: Some(false),
+                        is_rate_limited: Some(is_rate_limited),
+                        last_checked: Some(now),
+                        error_message: if is_success {
+                            None
+                        } else if status_code == 401 {
+                            Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
+                        } else if status_code == 403 && is_rate_limited {
+                            Some("GitHub API rate limit exceeded".to_string())
+                        } else {
+                            Some(format!("HTTP {}", resp.status()))
+                        },
+                    };
+
+                    if let Ok(mut store) = get_health_store().lock() {
+                        store.github = updated.clone();
+                    }
+                    health.github = updated;
+                }
+            }
+        }
+    } else {
+        health.github.connected = false;
+        health.github.error_message = None;
+    }
+
+    if let Some(token) = creds.google_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let now = current_epoch_seconds();
+        let should_check = health.google.last_checked.map_or(true, |t| now.saturating_sub(t) > 60);
+
+        if should_check {
+            if let Ok(client) = reqwest::Client::builder().use_native_tls().build() {
+                if let Ok(resp) = client
+                    .get(format!("https://oauth2.googleapis.com/tokeninfo?access_token={}", token))
+                    .header("User-Agent", "WidKanban-Desktop")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(info) = resp.json::<serde_json::Value>().await {
+                            let expires_in = info
+                                .get("expires_in")
+                                .and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| v.as_u64()));
+
+                            let token_expires_at = expires_in.map(|secs| chrono_epoch_to_iso(now + secs));
+                            let is_expiring_soon = expires_in.map(|secs| secs < 300).unwrap_or(false);
+
+                            let updated = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at,
+                                is_expiring_soon: Some(is_expiring_soon),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+
+                            if let Ok(mut store) = get_health_store().lock() {
+                                store.google = updated.clone();
+                            }
+                            health.google = updated;
+                        }
+                    } else {
+                        let is_invalid = resp.status().as_u16() == 400 || resp.status().as_u16() == 401;
+                        let updated = ProviderHealth {
+                            connected: false,
+                            rate_limit_remaining: None,
+                            rate_limit_limit: None,
+                            rate_limit_reset: None,
+                            token_expires_at: Some("Expired".to_string()),
+                            is_expiring_soon: Some(true),
+                            is_rate_limited: Some(false),
+                            last_checked: Some(now),
+                            error_message: if is_invalid {
+                                Some("Google OAuth access token expired or revoked".to_string())
+                            } else {
+                                Some(format!("HTTP {}", resp.status()))
+                            },
+                        };
+
+                        if let Ok(mut store) = get_health_store().lock() {
+                            store.google = updated.clone();
+                        }
+                        health.google = updated;
+                    }
+                }
+            }
+        }
+    } else if creds.google_refresh_token.is_some() {
+        health.google.connected = false;
+        if health.google.error_message.is_none() {
+            health.google.error_message = Some("Google access token expired. Sync to refresh.".to_string());
+        }
+    } else {
+        health.google.connected = false;
+        health.google.error_message = None;
+    }
+
+    Ok(health)
+}
+
+#[tauri::command]
+fn send_desktop_notification(title: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_title = title.replace('\'', "''").replace('"', "`\"");
+        let escaped_body = body.replace('\'', "''").replace('"', "`\"");
+        let script = format!(
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
+             $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); \
+             $textNodes = $template.GetElementsByTagName('text'); \
+             $textNodes.Item(0).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $textNodes.Item(1).AppendChild($template.CreateTextNode('{}')) > $null; \
+             $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('WidKanban'); \
+             $notification = [Windows.UI.Notifications.ToastNotification]::new($template); \
+             $notifier.Show($notification);",
+            escaped_title,
+            escaped_body
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("notify-send")
+            .args([&title, &body])
+            .spawn();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn toggle_always_on_top(window: tauri::Window) -> Result<bool, String> {
     let is_on_top = window.is_always_on_top().unwrap_or(false);
     window.set_always_on_top(!is_on_top).map_err(|e| e.to_string())?;
     Ok(!is_on_top)
+}
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn SetWindowPos(
+        hwnd: isize,
+        hwnd_insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
+}
+
+#[tauri::command]
+fn set_window_pin_mode(window: tauri::Window, mode: String) -> Result<String, String> {
+    match mode.as_str() {
+        "always-on-top" => {
+            window.set_always_on_top(true).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            Ok("always-on-top".to_string())
+        }
+        "desktop-layer" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(h) = window.hwnd() {
+                    let raw = h.0 as isize;
+                    unsafe {
+                        SetWindowPos(raw, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                    }
+                }
+            }
+            Ok("desktop-layer".to_string())
+        }
+        "normal" | "unpinned" => {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window.set_resizable(true).map_err(|e| e.to_string())?;
+            Ok("normal".to_string())
+        }
+        other => Err(format!("Unknown pin mode: {}", other)),
+    }
+}
+
+pub fn build_linux_desktop_entry(exe_path: &str, start_minimized: bool) -> String {
+    let exec_cmd = if start_minimized {
+        format!("{} --minimized", exe_path)
+    } else {
+        exe_path.to_string()
+    };
+    format!(
+        "[Desktop Entry]\nType=Application\nName=WidKanban\nComment=Lightweight desktop Kanban widget\nExec={}\nTerminal=false\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n",
+        exec_cmd
+    )
+}
+
+pub fn build_macos_plist(exe_path: &str, start_minimized: bool) -> String {
+    let arg_element = if start_minimized {
+        "        <string>--minimized</string>\n"
+    } else {
+        ""
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.widkanban.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+{}    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+"#,
+        exe_path, arg_element
+    )
+}
+
+#[tauri::command]
+fn is_autostart_enabled(_app_handle: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = r#"$r = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if (-not $r) { 'false' } else { $a = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name 'WidKanban' -ErrorAction SilentlyContinue).WidKanban; if ($null -ne $a -and $a.Length -gt 0 -and ($a[0] -band 1)) { 'false' } else { 'true' } }"#;
+
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        if let Ok(out) = cmd.output() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            return Ok(s == "true");
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("X-GNOME-Autostart-enabled=false") || content.contains("Hidden=true") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if !path.exists() {
+            return Ok(false);
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("<key>Disabled</key>") && content.contains("<true/>") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn enable_autostart(_app_handle: tauri::AppHandle, start_minimized: bool) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| format!("Failed to get current executable path: {}", e))?;
+    let exe_path = current_exe.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let val = if start_minimized {
+            format!("\"{}\" --minimized", exe_path)
+        } else {
+            format!("\"{}\"", exe_path)
+        };
+        let ps_cmd = format!(
+            "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -Value '{}' -Type String; \
+             try {{ Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -Value ([byte[]](0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)) -Type Binary -ErrorAction Stop }} catch {{}}",
+            val.replace("'", "''")
+        );
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to execute powershell registry command: {}", e))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Registry autostart enable failed: {}", err));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let autostart_dir = std::path::PathBuf::from(&home).join(".config/autostart");
+        let _ = std::fs::create_dir_all(&autostart_dir);
+        let file_path = autostart_dir.join("widkanban.desktop");
+        let content = build_linux_desktop_entry(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write autostart desktop file: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+        let launch_dir = std::path::PathBuf::from(&home).join("Library/LaunchAgents");
+        let _ = std::fs::create_dir_all(&launch_dir);
+        let file_path = launch_dir.join("com.widkanban.desktop.plist");
+        let content = build_macos_plist(&exe_path, start_minimized);
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write macOS launch agent plist: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err("Unsupported operating system for autostart".to_string())
+    }
+}
+
+#[tauri::command]
+fn disable_autostart(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let ps_cmd = "try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; \
+                      try { Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -Name 'WidKanban' -ErrorAction Stop } catch {}; exit 0";
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let _ = cmd.output();
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join(".config/autostart/widkanban.desktop");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let file_path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.widkanban.desktop.plist");
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -421,10 +1004,77 @@ fn close_app(app_handle: tauri::AppHandle) {
 
 #[tauri::command]
 fn get_auth_status(app_handle: tauri::AppHandle) -> Result<AuthStatus, String> {
+    let stored = read_stored_credentials_file(&app_handle);
     let creds = read_credentials(&app_handle);
+
+    let has_stored_github = stored
+        .github_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty());
+
+    let has_stored_google = stored
+        .google_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || stored
+            .google_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    let env_github = get_env_credential(&["WIDKANBAN_GITHUB_TOKEN", "GITHUB_TOKEN"]);
+    let env_google = get_env_credential(&["WIDKANBAN_GOOGLE_TASKS_TOKEN", "GOOGLE_TASKS_TOKEN"]);
+    let env_google_refresh = get_env_credential(&["WIDKANBAN_GOOGLE_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN"]);
+
+    let has_github = creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_google_token = creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_refresh_token = creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_google = has_google_token || has_refresh_token;
+
+    // Sourced from env ONLY if NOT stored in credentials.json, NOT explicitly disconnected, and env provided the active credential
+    let github_from_env = !has_stored_github
+        && stored.github_disconnected != Some(true)
+        && env_github.is_some()
+        && has_github;
+
+    let google_from_env = !has_stored_google
+        && stored.google_disconnected != Some(true)
+        && (env_google.is_some() || env_google_refresh.is_some())
+        && has_google;
+
+    let has_stored_microsoft = stored
+        .microsoft_token
+        .as_ref()
+        .map_or(false, |t| !t.trim().is_empty())
+        || stored
+            .microsoft_refresh_token
+            .as_ref()
+            .map_or(false, |t| !t.trim().is_empty());
+
+    let env_microsoft = get_env_credential(&["WIDKANBAN_MICROSOFT_TOKEN", "MICROSOFT_TOKEN"]);
+    let env_microsoft_refresh = get_env_credential(&["WIDKANBAN_MICROSOFT_REFRESH_TOKEN", "MICROSOFT_REFRESH_TOKEN"]);
+    let has_microsoft_token = creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_ms_refresh_token = creds.microsoft_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+    let has_microsoft = has_microsoft_token || has_ms_refresh_token;
+
+    let microsoft_from_env = !has_stored_microsoft
+        && stored.microsoft_disconnected != Some(true)
+        && (env_microsoft.is_some() || env_microsoft_refresh.is_some())
+        && has_microsoft;
+
+    let microsoft_client_id = creds.microsoft_client_id.clone();
+    let microsoft_include_education = creds.microsoft_include_education.unwrap_or(false);
+
     Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+        has_github,
+        has_google,
+        has_microsoft,
+        github_from_env,
+        google_from_env,
+        google_has_refresh_token: has_refresh_token,
+        microsoft_from_env,
+        microsoft_has_refresh_token: has_ms_refresh_token,
+        microsoft_client_id,
+        microsoft_include_education,
     })
 }
 
@@ -433,30 +1083,113 @@ fn save_credentials(
     app_handle: tauri::AppHandle,
     github_token: Option<String>,
     google_token: Option<String>,
+    google_refresh_token: Option<String>,
+    google_client_id: Option<String>,
+    google_client_secret: Option<String>,
+    microsoft_token: Option<String>,
+    microsoft_refresh_token: Option<String>,
+    microsoft_client_id: Option<String>,
+    microsoft_include_education: Option<bool>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
-    if let Some(gh) = github_token {
+    let mut creds = read_stored_credentials_file(&app_handle);
+    if let Some(gh) = github_token.as_ref() {
         let trimmed = gh.trim().to_string();
         if trimmed.is_empty() {
             creds.github_token = None;
+            creds.github_disconnected = Some(true);
         } else {
             creds.github_token = Some(trimmed);
+            creds.github_disconnected = Some(false);
         }
     }
-    if let Some(gt) = google_token {
+    if let Some(gt) = google_token.as_ref() {
         let trimmed = gt.trim().to_string();
         if trimmed.is_empty() {
             creds.google_token = None;
+            creds.google_disconnected = Some(true);
         } else {
             creds.google_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
         }
+    }
+    if let Some(gr) = google_refresh_token.as_ref() {
+        let trimmed = gr.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_refresh_token = None;
+            creds.google_disconnected = Some(true);
+        } else {
+            creds.google_refresh_token = Some(trimmed);
+            creds.google_disconnected = Some(false);
+        }
+    }
+    if let Some(cid) = google_client_id.as_ref() {
+        let trimmed = cid.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_id = None;
+        } else {
+            creds.google_client_id = Some(trimmed);
+        }
+    }
+    if let Some(cs) = google_client_secret.as_ref() {
+        let trimmed = cs.trim().to_string();
+        if trimmed.is_empty() {
+            creds.google_client_secret = None;
+        } else {
+            creds.google_client_secret = Some(trimmed);
+        }
+    }
+    if let Some(ms) = microsoft_token.as_ref() {
+        let trimmed = ms.trim().to_string();
+        if trimmed.is_empty() {
+            creds.microsoft_token = None;
+            creds.microsoft_disconnected = Some(true);
+        } else {
+            creds.microsoft_token = Some(trimmed);
+            creds.microsoft_disconnected = Some(false);
+        }
+    }
+    if let Some(mr) = microsoft_refresh_token.as_ref() {
+        let trimmed = mr.trim().to_string();
+        if trimmed.is_empty() {
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_disconnected = Some(true);
+        } else {
+            creds.microsoft_refresh_token = Some(trimmed);
+            creds.microsoft_disconnected = Some(false);
+        }
+    }
+    if let Some(mcid) = microsoft_client_id.as_ref() {
+        let trimmed = mcid.trim().to_string();
+        if trimmed.is_empty() {
+            creds.microsoft_client_id = None;
+        } else {
+            creds.microsoft_client_id = Some(trimmed);
+        }
+    }
+    if let Some(inc_edu) = microsoft_include_education {
+        creds.microsoft_include_education = Some(inc_edu);
     }
     write_credentials(&app_handle, &creds)?;
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    let full_creds = read_credentials(&app_handle);
+    if let Ok(mut health) = get_health_store().lock() {
+        if github_token.is_some() {
+            health.github.connected = full_creds.github_token.is_some();
+            health.github.error_message = None;
+        }
+        if google_token.is_some() || google_refresh_token.is_some() {
+            health.google.connected = full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some();
+            health.google.error_message = None;
+        }
+        if microsoft_token.is_some() || microsoft_refresh_token.is_some() {
+            health.microsoft = Some(ProviderHealth {
+                connected: full_creds.microsoft_token.is_some() || full_creds.microsoft_refresh_token.is_some(),
+                ..Default::default()
+            });
+        }
+    }
+
+    get_auth_status(app_handle)
 }
 
 #[tauri::command]
@@ -464,402 +1197,1477 @@ fn clear_credentials(
     app_handle: tauri::AppHandle,
     provider: Option<String>,
 ) -> Result<AuthStatus, String> {
-    let mut creds = read_credentials(&app_handle);
+    let mut creds = read_stored_credentials_file(&app_handle);
     match provider.as_deref() {
-        Some("github") => creds.github_token = None,
-        Some("google") => creds.google_token = None,
+        Some("github") => {
+            creds.github_token = None;
+            creds.github_disconnected = Some(true);
+        }
+        Some("google") => {
+            creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
+            creds.google_disconnected = Some(true);
+        }
+        Some("microsoft") => {
+            creds.microsoft_token = None;
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_token_expiry = None;
+            creds.microsoft_disconnected = Some(true);
+        }
         _ => {
             creds.github_token = None;
             creds.google_token = None;
+            creds.google_refresh_token = None;
+            creds.google_token_expiry = None;
+            creds.microsoft_token = None;
+            creds.microsoft_refresh_token = None;
+            creds.microsoft_token_expiry = None;
+            creds.github_disconnected = Some(true);
+            creds.google_disconnected = Some(true);
+            creds.microsoft_disconnected = Some(true);
         }
     }
     write_credentials(&app_handle, &creds)?;
 
-    Ok(AuthStatus {
-        has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-        has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-    })
+    let full_creds = read_credentials(&app_handle);
+    if let Ok(mut health) = get_health_store().lock() {
+        if provider.as_deref() == Some("github") || provider.is_none() {
+            health.github = ProviderHealth {
+                connected: full_creds.github_token.is_some(),
+                ..Default::default()
+            };
+        }
+        if provider.as_deref() == Some("google") || provider.is_none() {
+            health.google = ProviderHealth {
+                connected: full_creds.google_token.is_some() || full_creds.google_refresh_token.is_some(),
+                ..Default::default()
+            };
+        }
+        if provider.as_deref() == Some("microsoft") || provider.is_none() {
+            health.microsoft = Some(ProviderHealth {
+                connected: full_creds.microsoft_token.is_some() || full_creds.microsoft_refresh_token.is_some(),
+                ..Default::default()
+            });
+        }
+    }
+
+    get_auth_status(app_handle)
 }
 
-/// Fetch all Google Tasks across all task lists for the authenticated user,
-/// resolving subtask hierarchy and deep links.
-#[tauri::command]
-async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
+// ─── Token Permission Inspection Logic ──────────────────────────────────────
 
+fn decode_base64_url(input: &str) -> Option<Vec<u8>> {
+    let b64_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [0xffu8; 256];
+    for (i, &c) in b64_chars.iter().enumerate() {
+        lookup[c as usize] = i as u8;
+    }
+    let mut s = input.replace('-', "+").replace('_', "/");
+    while s.len() % 4 != 0 {
+        s.push('=');
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        if chunk.len() < 4 {
+            break;
+        }
+        let c0 = chunk[0];
+        let c1 = chunk[1];
+        let c2 = chunk[2];
+        let c3 = chunk[3];
+        if c0 == b'=' || c1 == b'=' {
+            break;
+        }
+        let b0 = lookup[c0 as usize];
+        let b1 = lookup[c1 as usize];
+        if b0 == 0xff || b1 == 0xff {
+            return None;
+        }
+        let triple = ((b0 as u32) << 18) | ((b1 as u32) << 12);
+        out.push(((triple >> 16) & 0xff) as u8);
+        if c2 != b'=' {
+            let b2 = lookup[c2 as usize];
+            if b2 == 0xff {
+                return None;
+            }
+            let triple = triple | ((b2 as u32) << 6);
+            out.push(((triple >> 8) & 0xff) as u8);
+            if c3 != b'=' {
+                let b3 = lookup[c3 as usize];
+                if b3 == 0xff {
+                    return None;
+                }
+                let triple = triple | (b3 as u32);
+                out.push((triple & 0xff) as u8);
+            }
+        }
+    }
+    Some(out)
+}
+
+fn extract_microsoft_jwt_claims(token: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>, Option<u64>) {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return (None, None, None, None, None);
+    }
+    let payload_bytes = match decode_base64_url(parts[1]) {
+        Some(b) => b,
+        None => return (None, None, None, None, None),
+    };
+    let json: serde_json::Value = match serde_json::from_slice(&payload_bytes) {
+        Ok(j) => j,
+        Err(_) => return (None, None, None, None, None),
+    };
+    let scp = json.get("scp").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let upn = json
+        .get("upn")
+        .or_else(|| json.get("unique_name"))
+        .or_else(|| json.get("email"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let tid = json.get("tid").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let exp = json
+        .get("exp")
+        .and_then(|v| v.as_u64())
+        .or_else(|| json.get("exp").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()));
+    (scp, upn, name, tid, exp)
+}
+
+async fn inspect_github_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "github".to_string(),
+            is_valid: false,
+            error_message: Some("GitHub token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get("https://api.github.com/user")
+        .header("User-Agent", "WidKanban-Desktop")
+        .header("Accept", "application/vnd.github.v3+json")
+        .bearer_auth(trimmed)
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let scopes_header = res
+                    .headers()
+                    .get("x-oauth-scopes")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+
+                let scopes_list: Vec<String> = scopes_header
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let login = json.get("login").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let avatar = json.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let plan_type = json.get("type").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                let is_fine_grained = scopes_header.is_empty();
+                let has_repo = is_fine_grained || scopes_list.iter().any(|s| s == "repo");
+                let has_public_repo = scopes_list.iter().any(|s| s == "public_repo");
+                let has_read_org = is_fine_grained || scopes_list.iter().any(|s| s == "read:org");
+                let has_user = is_fine_grained || scopes_list.iter().any(|s| s == "user" || s == "read:user");
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "repo".to_string(),
+                    description: "Full control of private and public repositories, issues, and pull requests".to_string(),
+                    is_required: true,
+                    is_granted: has_repo,
+                    feature_impact: if !has_repo {
+                        if has_public_repo {
+                            Some("Only public repositories accessible. Private issues and PRs cannot be synced.".to_string())
+                        } else {
+                            Some("Cannot access, create, or update issues and pull requests (requires 'repo' scope).".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "read:org".to_string(),
+                    description: "Read organization and team memberships".to_string(),
+                    is_required: false,
+                    is_granted: has_read_org,
+                    feature_impact: if !has_read_org {
+                        Some("Organization-owned repositories may not be auto-discovered.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "user".to_string(),
+                    description: "Read user profile data and email".to_string(),
+                    is_required: false,
+                    is_granted: has_user,
+                    feature_impact: None,
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: name.or_else(|| login.clone()),
+                    user_email: login.map(|l| format!("@{}", l)),
+                    avatar_url: avatar,
+                    account_type: plan_type,
+                    permissions,
+                    all_required_granted,
+                }
+            } else if status.as_u16() == 401 {
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: false,
+                    error_message: Some("Invalid, expired, or revoked GitHub Personal Access Token (401 Unauthorized)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "github".to_string(),
+                    is_valid: false,
+                    error_message: Some(format!("GitHub API returned HTTP {}", status)),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "github".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to GitHub: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+async fn inspect_google_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "google".to_string(),
+            is_valid: false,
+            error_message: Some("Google token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get(format!("https://oauth2.googleapis.com/tokeninfo?access_token={}", trimmed))
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let email = json.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let scope_str = json.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+                let scopes: Vec<String> = scope_str.split_whitespace().map(|s| s.to_string()).collect();
+
+                let has_tasks_rw = scopes.iter().any(|s| s == "https://www.googleapis.com/auth/tasks");
+                let has_tasks_ro = scopes.iter().any(|s| s == "https://www.googleapis.com/auth/tasks.readonly");
+                let has_email = scopes.iter().any(|s| s.contains("email"));
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "tasks".to_string(),
+                    description: "Create, edit, organize, and delete all your Google Tasks and lists".to_string(),
+                    is_required: true,
+                    is_granted: has_tasks_rw,
+                    feature_impact: if !has_tasks_rw {
+                        if has_tasks_ro {
+                            Some("Read-only access: dragging cards or completing tasks will not sync back to Google Tasks.".to_string())
+                        } else {
+                            Some("Cannot access or synchronize Google Tasks (requires 'tasks' scope).".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "email".to_string(),
+                    description: "View your email address to verify account identity".to_string(),
+                    is_required: false,
+                    is_granted: has_email || email.is_some(),
+                    feature_impact: None,
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "google".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: email.clone(),
+                    user_email: email,
+                    avatar_url: None,
+                    account_type: Some("Google Account".to_string()),
+                    permissions,
+                    all_required_granted,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "google".to_string(),
+                    is_valid: false,
+                    error_message: Some("Google OAuth access token is invalid, expired, or revoked (400/401)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "google".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to Google OAuth: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+async fn inspect_microsoft_token(client: &reqwest::Client, token: &str) -> ProviderInspection {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return ProviderInspection {
+            provider: "microsoft".to_string(),
+            is_valid: false,
+            error_message: Some("Microsoft token is empty".to_string()),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        };
+    }
+
+    let resp = client
+        .get("https://graph.microsoft.com/v1.0/me")
+        .header("User-Agent", "WidKanban-Desktop")
+        .bearer_auth(trimmed)
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            let status = res.status();
+            if status.is_success() {
+                let json: serde_json::Value = res.json().await.unwrap_or_default();
+                let api_display_name = json.get("displayName").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let api_email = json
+                    .get("userPrincipalName")
+                    .or_else(|| json.get("mail"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let (jwt_scp, jwt_upn, jwt_name, jwt_tid, _jwt_exp) = extract_microsoft_jwt_claims(trimmed);
+                let final_name = api_display_name.or(jwt_name);
+                let final_email = api_email.or(jwt_upn);
+
+                // Microsoft Personal Account Tenant ID is "9188040d-6c67-4c5b-b112-36a304b66dad"
+                let is_personal = match jwt_tid.as_deref() {
+                    Some("9188040d-6c67-4c5b-b112-36a304b66dad") => true,
+                    Some(_) => false,
+                    None => {
+                        if let Some(ref email) = final_email {
+                            let lower = email.to_lowercase();
+                            lower.ends_with("@outlook.com")
+                                || lower.ends_with("@hotmail.com")
+                                || lower.ends_with("@live.com")
+                                || lower.ends_with("@gmail.com")
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                let account_type = if is_personal {
+                    Some("Personal Microsoft Account".to_string())
+                } else {
+                    Some("School / Work Organization Account".to_string())
+                };
+
+                let scopes_str = jwt_scp.unwrap_or_default();
+                let scopes: Vec<String> = scopes_str.split_whitespace().map(|s| s.to_string()).collect();
+
+                let is_unscoped = scopes.is_empty();
+                let has_tasks_rw = is_unscoped || scopes.iter().any(|s| s.eq_ignore_ascii_case("Tasks.ReadWrite"));
+                let has_tasks_ro = scopes.iter().any(|s| s.eq_ignore_ascii_case("Tasks.Read"));
+                let has_user_read = is_unscoped || scopes.iter().any(|s| s.eq_ignore_ascii_case("User.Read"));
+                let has_edu = scopes.iter().any(|s| {
+                    s.eq_ignore_ascii_case("EduAssignments.ReadBasic") || s.eq_ignore_ascii_case("EduAssignments.Read")
+                });
+                let has_group = scopes.iter().any(|s| {
+                    s.eq_ignore_ascii_case("Group.Read.All") || s.eq_ignore_ascii_case("Group.ReadWrite.All")
+                });
+
+                let mut permissions = Vec::new();
+                permissions.push(PermissionItem {
+                    scope: "Tasks.ReadWrite".to_string(),
+                    description: "Read, create, update, and complete tasks in Microsoft To Do and Planner".to_string(),
+                    is_required: true,
+                    is_granted: has_tasks_rw,
+                    feature_impact: if !has_tasks_rw {
+                        if has_tasks_ro {
+                            Some("Read-only access: dragging cards to Done or In Progress will fail to sync back.".to_string())
+                        } else {
+                            Some("Cannot read or update Microsoft tasks (requires 'Tasks.ReadWrite').".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "User.Read".to_string(),
+                    description: "Sign in and read user profile and account details".to_string(),
+                    is_required: true,
+                    is_granted: has_user_read,
+                    feature_impact: if !has_user_read {
+                        Some("Cannot identify authenticated Microsoft account.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "EduAssignments.ReadBasic".to_string(),
+                    description: "Read class homework, assignments, and due dates in Teams for Education".to_string(),
+                    is_required: false,
+                    is_granted: has_edu,
+                    feature_impact: if !has_edu {
+                        Some("Teams for Education assignments disabled (normal for personal or business accounts).".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                permissions.push(PermissionItem {
+                    scope: "Group.Read.All".to_string(),
+                    description: "Discover group-associated Microsoft Planner boards and Teams channels".to_string(),
+                    is_required: false,
+                    is_granted: has_group,
+                    feature_impact: if !has_group {
+                        Some("Planner boards belonging to Microsoft 365 groups may not be discovered.".to_string())
+                    } else {
+                        None
+                    },
+                });
+
+                let all_required_granted = permissions.iter().filter(|p| p.is_required).all(|p| p.is_granted);
+
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: true,
+                    error_message: None,
+                    user_name: final_name,
+                    user_email: final_email,
+                    avatar_url: None,
+                    account_type,
+                    permissions,
+                    all_required_granted,
+                }
+            } else if status.as_u16() == 401 {
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: false,
+                    error_message: Some("Invalid, expired, or revoked Microsoft access token (401 Unauthorized)".to_string()),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            } else {
+                ProviderInspection {
+                    provider: "microsoft".to_string(),
+                    is_valid: false,
+                    error_message: Some(format!("Microsoft Graph returned HTTP {}", status)),
+                    user_name: None,
+                    user_email: None,
+                    avatar_url: None,
+                    account_type: None,
+                    permissions: vec![],
+                    all_required_granted: false,
+                }
+            }
+        }
+        Err(e) => ProviderInspection {
+            provider: "microsoft".to_string(),
+            is_valid: false,
+            error_message: Some(format!("Failed to connect to Microsoft Graph: {}", e)),
+            user_name: None,
+            user_email: None,
+            avatar_url: None,
+            account_type: None,
+            permissions: vec![],
+            all_required_granted: false,
+        },
+    }
+}
+
+#[tauri::command]
+async fn inspect_credentials(
+    _app_handle: tauri::AppHandle,
+    github_token: Option<String>,
+    google_token: Option<String>,
+    microsoft_token: Option<String>,
+) -> Result<CredentialInspectionReport, String> {
     let client = reqwest::Client::builder()
         .use_native_tls()
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    // 1. Fetch all task lists
-    let lists_resp = client
-        .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch task lists: {}", e))?;
+    let mut providers = Vec::new();
 
-    if !lists_resp.status().is_success() {
-        let status = lists_resp.status();
-        let body = lists_resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (lists) {}: {}", status, body));
+    if let Some(token) = github_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_github_token(&client, &token).await);
     }
 
-    let lists_body: GTaskListsResponse = lists_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse task lists response: {}", e))?;
-
-    let lists = lists_body.items.unwrap_or_default();
-
-    struct RawTaskEntry {
-        task: GTask,
-        list_id: String,
-        list_title: String,
+    if let Some(token) = google_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_google_token(&client, &token).await);
     }
 
-    let mut raw_entries: Vec<RawTaskEntry> = Vec::new();
+    if let Some(token) = microsoft_token.filter(|t| !t.trim().is_empty()) {
+        providers.push(inspect_microsoft_token(&client, &token).await);
+    }
 
-    // 2. Fetch tasks from each list
-    for list in &lists {
-        let tasks_resp = client
-            .get(format!(
-                "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
-                list.id
-            ))
-            .query(&[
-                ("showCompleted", "true"),
-                ("showHidden", "false"),
-                ("maxResults", "100"),
-            ])
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
+    let can_proceed = !providers.is_empty() && providers.iter().all(|p| p.is_valid && p.all_required_granted);
 
-        if !tasks_resp.status().is_success() {
-            continue;
+    Ok(CredentialInspectionReport {
+        providers,
+        can_proceed,
+    })
+}
+
+/// Ensures that a valid Google access token is available.
+/// If the current access token is expired (or will expire in < 5 minutes)
+/// and a refresh token is available, automatically requests a new access token
+/// from Google's OAuth 2.0 token endpoint and updates stored credentials.
+pub(crate) async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let creds = read_credentials(app_handle);
+    let now = current_epoch_seconds();
+
+    // Check if current token is still valid (has > 300s remaining)
+    let is_still_valid = match (creds.google_token.as_ref(), creds.google_token_expiry) {
+        (Some(tok), Some(expiry)) => !tok.trim().is_empty() && expiry > now + 300,
+        (Some(tok), None) => !tok.trim().is_empty(), // Legacy or manual token without known expiry
+        _ => false,
+    };
+
+    if is_still_valid {
+        if let Some(tok) = creds.google_token {
+            return Ok(tok);
         }
+    }
 
-        let tasks_body: GTasksResponse = match tasks_resp.json().await {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
+    // If we have a refresh token, attempt silent background refresh
+    if let Some(refresh_tok) = creds.google_refresh_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let client_id = creds.google_client_id.as_deref().unwrap_or("");
+        let client_secret = creds.google_client_secret.as_deref().unwrap_or("");
 
-        for task in tasks_body.items.unwrap_or_default() {
-            if let Some(ref t) = task.title {
-                if !t.trim().is_empty() {
-                    raw_entries.push(RawTaskEntry {
-                        task,
-                        list_id: list.id.clone(),
-                        list_title: list.title.clone(),
-                    });
+        if !client_id.is_empty() {
+            let client = reqwest::Client::builder()
+                .use_native_tls()
+                .build()
+                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+            let mut params = vec![
+                ("client_id", client_id),
+                ("refresh_token", refresh_tok.as_str()),
+                ("grant_type", "refresh_token"),
+            ];
+            if !client_secret.is_empty() {
+                params.push(("client_secret", client_secret));
+            }
+
+            let resp = client
+                .post("https://oauth2.googleapis.com/token")
+                .form(&params)
+                .header("User-Agent", "WidKanban-Desktop")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send token refresh request: {}", e))?;
+
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(new_access_token) = data.get("access_token").and_then(|v| v.as_str()) {
+                        let expires_in = data
+                            .get("expires_in")
+                            .and_then(|v| v.as_u64())
+                            .or_else(|| data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+                            .unwrap_or(3600);
+
+                        let mut stored = read_stored_credentials_file(app_handle);
+                        stored.google_token = Some(new_access_token.to_string());
+                        stored.google_token_expiry = Some(now + expires_in);
+                        let _ = write_credentials(app_handle, &stored);
+
+                        // Update in-memory health
+                        if let Ok(mut health) = get_health_store().lock() {
+                            health.google = ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+                                is_expiring_soon: Some(false),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            };
+                        }
+
+                        return Ok(new_access_token.to_string());
+                    }
                 }
+            } else {
+                let err_body = resp.text().await.unwrap_or_default();
+                let is_deleted_or_revoked = err_body.contains("deleted_client")
+                    || err_body.contains("invalid_grant")
+                    || err_body.contains("invalid_client")
+                    || err_body.contains("unauthorized_client");
+
+                // Invalidate stored access token so we never re-use a stale dead token
+                let mut stored = read_stored_credentials_file(app_handle);
+                stored.google_token = None;
+                stored.google_token_expiry = None;
+                let _ = write_credentials(app_handle, &stored);
+
+                let error_msg = if is_deleted_or_revoked {
+                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
+                } else {
+                    format!("Google token refresh failed: {}", err_body)
+                };
+
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.google.connected = false;
+                    health.google.token_expires_at = Some("Expired".to_string());
+                    health.google.is_expiring_soon = Some(true);
+                    health.google.last_checked = Some(now);
+                    health.google.error_message = Some(error_msg.clone());
+                }
+                return Err(error_msg);
             }
         }
     }
 
-    // 3. Map parent task -> subtask items
-    let mut subtasks_map: HashMap<String, Vec<SubtaskItem>> = HashMap::new();
-    for entry in &raw_entries {
-        if let Some(ref parent_id) = entry.task.parent {
-            let status = google_status_to_task_status(entry.task.status.as_deref());
-            let title = entry.task.title.clone().unwrap_or_default();
-            subtasks_map
-                .entry(parent_id.clone())
-                .or_default()
-                .push(SubtaskItem {
-                    id: format!("gt_{}", entry.task.id),
-                    title,
-                    status,
-                });
+    // Fall back to existing token if present
+    if let Some(tok) = creds.google_token {
+        if !tok.trim().is_empty() {
+            return Ok(tok);
         }
     }
 
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
-
-    // 4. Construct UnifiedTask records
-    for entry in raw_entries {
-        let task = entry.task;
-        let title = task.title.unwrap_or_default();
-        let status = google_status_to_task_status(task.status.as_deref());
-        let updated_at = task.updated.unwrap_or_else(|| chrono_now_iso());
-        let url = task
-            .self_link
-            .unwrap_or_else(|| "https://tasks.google.com".to_string());
-
-        let raw_id = task.id;
-        let parent_id = task.parent.as_ref().map(|p| format!("gt_{}", p));
-
-        let subtasks = subtasks_map.get(&raw_id).cloned();
-        let has_subtasks = subtasks.as_ref().map(|s| !s.is_empty());
-        let subtask_count = subtasks.as_ref().map(|s| s.len());
-
-        let links: Option<Vec<TaskLink>> = task.links.map(|gls| {
-            gls.into_iter()
-                .filter_map(|l| {
-                    let link = l.link?;
-                    let link_type = if link.starts_with("mailto:") || link.contains("mail.google.com") {
-                        Some("email".to_string())
-                    } else if link.contains("calendar.google.com") {
-                        Some("calendar".to_string())
-                    } else {
-                        Some("generic".to_string())
-                    };
-                    Some(TaskLink {
-                        description: l.description,
-                        link,
-                        link_type,
-                    })
-                })
-                .collect()
-        });
-
-        unified_tasks.push(UnifiedTask {
-            id: format!("gt_{}", raw_id),
-            title,
-            source: "google_tasks".to_string(),
-            status,
-            url,
-            updated_at,
-            description: task.notes.clone(),
-            source_meta: SourceMeta {
-                repo: None,
-                issue_number: None,
-                labels: None,
-                is_pull_request: None,
-                comments_count: None,
-                milestone: None,
-                author: None,
-                assignees: None,
-                branch_info: None,
-                list_id: Some(entry.list_id),
-                list_title: Some(entry.list_title),
-                notes: task.notes,
-                due_date: task.due,
-                parent_id,
-                has_subtasks,
-                subtask_count,
-                subtasks,
-                links,
-            },
-        });
-    }
-
-    Ok(unified_tasks)
+    Err("Google Tasks token not configured or expired. Please sign in with Google or enter a valid token in Settings.".to_string())
 }
 
-/// Fetch assigned GitHub issues and pull requests with rich metadata.
-#[tauri::command]
-async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
+/// Ensures that the active Microsoft access token is valid. If it has expired or will expire within 5 minutes,
+/// and a refresh token is available, automatically requests a new access token
+/// from Microsoft's OAuth 2.0 token endpoint and updates stored credentials.
+pub(crate) async fn ensure_valid_microsoft_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let creds = read_credentials(app_handle);
+    let now = current_epoch_seconds();
 
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    // Check if current token is still valid (has > 300s remaining)
+    let is_still_valid = match (creds.microsoft_token.as_ref(), creds.microsoft_token_expiry) {
+        (Some(tok), Some(expiry)) => !tok.trim().is_empty() && expiry > now + 300,
+        (Some(tok), None) => {
+            if let Some((_, _, _, _, Some(exp))) = Some(extract_microsoft_jwt_claims(tok)) {
+                exp > now + 300
+            } else {
+                !tok.trim().is_empty()
+            }
+        }
+        _ => false,
+    };
 
-    let resp = client
-        .get("https://api.github.com/user/issues?filter=all&state=open&per_page=100")
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch GitHub issues: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
+    if is_still_valid {
+        if let Some(tok) = creds.microsoft_token {
+            return Ok(tok);
+        }
     }
 
-    let issues: Vec<GHIssue> = resp
-        .json()
+    // If we have a refresh token, attempt silent background refresh
+    if let Some(refresh_tok) = creds.microsoft_refresh_token.as_ref().filter(|t| !t.trim().is_empty()) {
+        let client_id = creds.microsoft_client_id.as_deref().unwrap_or("");
+
+        if !client_id.is_empty() {
+            let client = reqwest::Client::builder()
+                .use_native_tls()
+                .build()
+                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+            let params = [
+                ("client_id", client_id),
+                ("refresh_token", refresh_tok.as_str()),
+                ("grant_type", "refresh_token"),
+                ("scope", "offline_access https://graph.microsoft.com/.default"),
+            ];
+
+            let resp = client
+                .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
+                .form(&params)
+                .header("User-Agent", "WidKanban-Desktop")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send Microsoft token refresh request: {}", e))?;
+
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(new_access_token) = data.get("access_token").and_then(|v| v.as_str()) {
+                        let expires_in = data
+                            .get("expires_in")
+                            .and_then(|v| v.as_u64())
+                            .or_else(|| data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+                            .unwrap_or(3600);
+
+                        let mut stored = read_stored_credentials_file(app_handle);
+                        stored.microsoft_token = Some(new_access_token.to_string());
+                        if let Some(new_refresh) = data.get("refresh_token").and_then(|v| v.as_str()) {
+                            stored.microsoft_refresh_token = Some(new_refresh.to_string());
+                        }
+                        stored.microsoft_token_expiry = Some(now + expires_in);
+                        let _ = write_credentials(app_handle, &stored);
+
+                        // Update in-memory health
+                        if let Ok(mut health) = get_health_store().lock() {
+                            health.microsoft = Some(ProviderHealth {
+                                connected: true,
+                                rate_limit_remaining: None,
+                                rate_limit_limit: None,
+                                rate_limit_reset: None,
+                                token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+                                is_expiring_soon: Some(false),
+                                is_rate_limited: Some(false),
+                                last_checked: Some(now),
+                                error_message: None,
+                            });
+                        }
+
+                        return Ok(new_access_token.to_string());
+                    }
+                }
+            } else {
+                let err_body = resp.text().await.unwrap_or_default();
+                let is_revoked = err_body.contains("invalid_grant")
+                    || err_body.contains("invalid_client")
+                    || err_body.contains("unauthorized_client");
+
+                // Invalidate stored access token so we never re-use a stale dead token
+                let mut stored = read_stored_credentials_file(app_handle);
+                stored.microsoft_token = None;
+                stored.microsoft_token_expiry = None;
+                let _ = write_credentials(app_handle, &stored);
+
+                let error_msg = if is_revoked {
+                    "Microsoft session expired or access was revoked. Please reconnect in Settings.".to_string()
+                } else {
+                    format!("Microsoft token refresh failed: {}", err_body)
+                };
+
+                if let Ok(mut health) = get_health_store().lock() {
+                    health.microsoft = Some(ProviderHealth {
+                        connected: false,
+                        token_expires_at: Some("Expired".to_string()),
+                        is_expiring_soon: Some(true),
+                        last_checked: Some(now),
+                        error_message: Some(error_msg.clone()),
+                        ..Default::default()
+                    });
+                }
+
+                return Err(error_msg);
+            }
+        }
+    }
+
+    // Fall back to direct token if present
+    if let Some(tok) = creds.microsoft_token {
+        if !tok.trim().is_empty() {
+            return Ok(tok);
+        }
+    }
+
+    Err("Microsoft 365 token not configured or expired. Please sign in with Microsoft or enter a valid token in Settings.".to_string())
+}
+
+/// Generates a modern, responsive HTML page served by the local loopback OAuth server
+static OAUTH_VERIFIED_HTML: &str = include_str!("../../public/oauth-verified.html");
+static OAUTH_FAILED_HTML: &str = include_str!("../../public/oauth-failed.html");
+
+/// Generates a modern, responsive HTML page served by the local loopback OAuth server
+/// to confirm successful authentication or explain an authorization failure.
+fn render_oauth_callback_html(is_success: bool, error_msg: Option<&str>) -> String {
+    if is_success {
+        OAUTH_VERIFIED_HTML.to_string()
+    } else {
+        let raw_error = error_msg.unwrap_or("Access was denied or the request was cancelled.");
+        let sanitized_error = raw_error
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+
+        let is_denied = raw_error.contains("access_denied");
+        let display_desc = if is_denied {
+            "You cancelled the Google sign-in request in your browser."
+        } else {
+            "Google authorization was not completed. Please check your OAuth Client settings in Settings."
+        };
+
+        OAUTH_FAILED_HTML
+            .replace("{{DESC}}", display_desc)
+            .replace("{{DETAIL}}", &sanitized_error)
+    }
+}
+
+/// Opens the OAuth callback page (verified or failed) in the default system browser for dev preview.
+/// Gated to debug mode; returns an error in production / release builds.
+#[tauri::command]
+fn open_oauth_preview(is_success: bool, error_msg: Option<String>) -> Result<(), String> {
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (is_success, error_msg);
+        return Err("OAuth preview is disabled in production builds.".to_string());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let url = if is_success {
+            "http://localhost:1420/oauth-verified.html".to_string()
+        } else {
+            match error_msg {
+                Some(err) if !err.trim().is_empty() => {
+                    format!("http://localhost:1420/oauth-failed.html?error={}", url_encode(&err))
+                }
+                _ => "http://localhost:1420/oauth-failed.html".to_string(),
+            }
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!("Start-Process '{}'", url.replace('\'', "''"));
+            let _ = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        }
+        Ok(())
+    }
+}
+
+/// Start an in-app "Sign in with Google" OAuth loopback flow.
+/// Listens on an ephemeral localhost port, launches the browser, captures the auth code,
+/// exchanges it for both access and refresh tokens, and saves them securely in native credentials.
+#[tauri::command]
+async fn start_google_oauth_flow(
+    app_handle: tauri::AppHandle,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> Result<AuthStatus, String> {
+    let creds = read_credentials(&app_handle);
+    let resolved_client_id = client_id
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_id)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"]))
+        .ok_or_else(|| "Google Client ID is required to start the OAuth flow. Please enter your OAuth Client ID in Settings.".to_string())?;
+
+    let resolved_client_secret = client_secret
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.google_client_secret)
+        .or_else(|| get_env_credential(&["WIDKANBAN_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"]))
+        .unwrap_or_default();
+
+    // 1. Bind TCP listener on ephemeral port (127.0.0.1:0)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|e| format!("Failed to parse GitHub issues response: {}", e))?;
+        .map_err(|e| format!("Failed to start local OAuth loopback server: {}", e))?;
 
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local port: {}", e))?
+        .port();
 
-    for issue in issues {
-        let repo = parse_github_repo_from_url(&issue.html_url);
-        let status = github_issue_status(&issue.state, issue.labels.as_deref());
-        let is_pull_request = issue.pull_request.is_some();
+    let redirect_uri = format!("http://127.0.0.1:{}", port);
+    let state = format!("widkanban_{}", current_epoch_seconds());
 
-        let labels = issue.labels.map(|labs| {
-            labs.into_iter()
-                .map(|l| GitHubLabel {
-                    name: l.name,
-                    color: l.color,
-                    description: l.description,
-                })
-                .collect()
-        });
+    // 2. Build Google authorization URL
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?\
+        client_id={}&\
+        redirect_uri={}&\
+        response_type=code&\
+        scope={}&\
+        access_type=offline&\
+        prompt=consent&\
+        state={}",
+        url_encode(&resolved_client_id),
+        url_encode(&redirect_uri),
+        url_encode("https://www.googleapis.com/auth/tasks"),
+        url_encode(&state),
+    );
 
-        let author = issue.user.map(|u| TaskUser {
-            login: u.login,
-            avatar_url: u.avatar_url.unwrap_or_default(),
-        });
+    // 3. Open browser
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_url = auth_url.replace('\'', "''");
+        let script = format!("Start-Process '{}'", escaped_url);
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    }
 
-        let assignees = issue.assignees.map(|users| {
-            users
-                .into_iter()
-                .map(|u| TaskUser {
-                    login: u.login,
-                    avatar_url: u.avatar_url.unwrap_or_default(),
-                })
-                .collect()
-        });
+    // 4. Wait for incoming redirect with 120-second timeout
+    let timeout_duration = std::time::Duration::from_secs(120);
+    let code = match tokio::time::timeout(timeout_duration, async {
+        loop {
+            let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            let mut buf = [0u8; 4096];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+            let req_str = String::from_utf8_lossy(&buf[..n]);
 
-        let milestone = issue.milestone.map(|m| TaskMilestone {
-            title: m.title,
-            due_on: m.due_on,
-        });
+            if let Some(first_line) = req_str.lines().next() {
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "GET" {
+                    let path = parts[1];
+                    let query = path.split('?').nth(1).unwrap_or("");
+                    let mut code_val: Option<String> = None;
+                    let mut error_val: Option<String> = None;
 
-        // If this issue is a pull request with an API URL, fetch branch and diff comparison info
-        let mut branch_info: Option<PRBranchInfo> = None;
-        if let Some(ref pr_ref) = issue.pull_request {
-            if let Some(ref pr_url) = pr_ref.url {
-                let pr_resp = client
-                    .get(pr_url)
-                    .header("User-Agent", "WidKanban-Desktop")
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .bearer_auth(&token)
-                    .send()
-                    .await;
-
-                if let Ok(resp) = pr_resp {
-                    if resp.status().is_success() {
-                        if let Ok(pr_detail) = resp.json::<GHPullDetail>().await {
-                            let head_ref = pr_detail
-                                .head
-                                .as_ref()
-                                .map(|h| h.r#ref.clone())
-                                .unwrap_or_default();
-                            let base_ref = pr_detail
-                                .base
-                                .as_ref()
-                                .map(|b| b.r#ref.clone())
-                                .unwrap_or_else(|| "main".to_string());
-
-                            let head_repo = pr_detail
-                                .head
-                                .as_ref()
-                                .and_then(|h| h.repo.as_ref())
-                                .and_then(|r| r.full_name.clone());
-                            let base_repo = pr_detail
-                                .base
-                                .as_ref()
-                                .and_then(|b| b.repo.as_ref())
-                                .and_then(|r| r.full_name.clone());
-
-                            let is_fork = match (&head_repo, &base_repo) {
-                                (Some(h), Some(b)) => Some(h != b),
-                                _ => None,
-                            };
-
-                            if !head_ref.is_empty() {
-                                branch_info = Some(PRBranchInfo {
-                                    head_ref,
-                                    base_ref,
-                                    is_fork,
-                                    head_repo,
-                                    is_draft: pr_detail.draft,
-                                    is_merged: pr_detail.merged,
-                                    additions: pr_detail.additions,
-                                    deletions: pr_detail.deletions,
-                                    changed_files: pr_detail.changed_files,
-                                });
+                    for param in query.split('&') {
+                        let mut kv = param.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" {
+                                code_val = Some(v.to_string());
+                            } else if k == "error" {
+                                error_val = Some(v.to_string());
                             }
                         }
+                    }
+
+                    let (html_body, status_line) = if code_val.is_some() {
+                        (
+                            render_oauth_callback_html(true, None),
+                            "HTTP/1.1 200 OK",
+                        )
+                    } else {
+                        (
+                            render_oauth_callback_html(false, error_val.as_deref()),
+                            "HTTP/1.1 400 Bad Request",
+                        )
+                    };
+
+                    let html_bytes = html_body.as_bytes();
+                    let response = format!(
+                        "{}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        html_bytes.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+
+                    if let Some(err) = error_val {
+                        return Err(format!("Google OAuth authorization error: {}", err));
+                    }
+                    if let Some(c) = code_val {
+                        return Ok(c);
                     }
                 }
             }
         }
+    }).await {
+        Ok(res) => res?,
+        Err(_) => return Err("Google OAuth flow timed out (2 minutes elapsed). Please try again.".to_string()),
+    };
 
-        unified_tasks.push(UnifiedTask {
-            id: format!("gh_{}", issue.id),
-            title: issue.title,
-            source: "github".to_string(),
-            status,
-            url: issue.html_url,
-            updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
-            description: issue.body,
-            source_meta: SourceMeta {
-                repo,
-                issue_number: Some(issue.number),
-                labels,
-                is_pull_request: Some(is_pull_request),
-                comments_count: issue.comments,
-                milestone,
-                author,
-                assignees,
-                branch_info,
-                list_id: None,
-                list_title: None,
-                notes: None,
-                due_date: None,
-                parent_id: None,
-                has_subtasks: None,
-                subtask_count: None,
-                subtasks: None,
-                links: None,
-            },
-        });
-    }
-
-    Ok(unified_tasks)
-}
-
-/// Update a single Google Task's completion status.
-#[tauri::command]
-async fn update_google_task(
-    app_handle: tauri::AppHandle,
-    task_id: String,
-    list_id: String,
-    new_status: String,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .google_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "Google Tasks token not configured".to_string())?;
-
-    let google_status = task_status_to_google_status(&new_status);
-    let payload = GTaskPatchPayload { status: google_status };
-
+    // 5. Exchange code for access & refresh tokens
     let client = reqwest::Client::builder()
         .use_native_tls()
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    let resp = client
-        .patch(format!(
-            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-            list_id, task_id
-        ))
-        .bearer_auth(&token)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to update task: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (update) {}: {}", status, body));
+    let mut token_params = vec![
+        ("client_id", resolved_client_id.as_str()),
+        ("code", code.as_str()),
+        ("grant_type", "authorization_code"),
+        ("redirect_uri", redirect_uri.as_str()),
+    ];
+    if !resolved_client_secret.is_empty() {
+        token_params.push(("client_secret", resolved_client_secret.as_str()));
     }
 
-    Ok(())
+    let token_resp = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&token_params)
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to exchange authorization code: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        let err_body = token_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to retrieve Google tokens: {}", err_body));
+    }
+
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = token_data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Google token response did not contain an access_token".to_string())?
+        .to_string();
+
+    let refresh_token = token_data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let expires_in = token_data
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .or_else(|| token_data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(3600);
+
+    let now = current_epoch_seconds();
+
+    // 6. Save in native OS credentials
+    let mut stored = read_stored_credentials_file(&app_handle);
+    stored.google_token = Some(access_token);
+    if refresh_token.is_some() {
+        stored.google_refresh_token = refresh_token;
+    }
+    stored.google_client_id = Some(resolved_client_id);
+    if !resolved_client_secret.is_empty() {
+        stored.google_client_secret = Some(resolved_client_secret);
+    }
+    stored.google_token_expiry = Some(now + expires_in);
+    stored.google_disconnected = Some(false);
+    write_credentials(&app_handle, &stored)?;
+
+    // 7. Update health state
+    if let Ok(mut health) = get_health_store().lock() {
+        health.google = ProviderHealth {
+            connected: true,
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: None,
+        };
+    }
+
+    get_auth_status(app_handle)
+}
+
+fn encode_base64_url(input: &[u8]) -> String {
+    const B64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((input.len() * 4 + 2) / 3);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+
+        out.push(B64_CHARS[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(B64_CHARS[((triple >> 12) & 0x3f) as usize] as char);
+
+        if chunk.len() > 1 {
+            out.push(B64_CHARS[((triple >> 6) & 0x3f) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(B64_CHARS[(triple & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+fn generate_pkce_pair() -> (String, String) {
+    use sha2::{Digest, Sha256};
+    use std::time::SystemTime;
+
+    let mut random_bytes = [0u8; 48];
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seed1 = now.as_nanos();
+    let seed2 = (std::process::id() as u128) ^ 0x9e3779b97f4a7c15;
+
+    for i in 0..48 {
+        let shift = ((i % 16) * 8) as u32;
+        let mixed = seed1.wrapping_mul((i + 1) as u128) ^ seed2.rotate_left(shift);
+        random_bytes[i] = (mixed & 0xff) as u8;
+    }
+
+    let code_verifier = encode_base64_url(&random_bytes);
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let code_challenge = encode_base64_url(&hasher.finalize());
+
+    (code_verifier, code_challenge)
+}
+
+/// Start an in-app "Sign in with Microsoft" OAuth loopback flow using PKCE and ephemeral port.
+#[tauri::command]
+async fn start_microsoft_oauth_flow(
+    app_handle: tauri::AppHandle,
+    client_id: Option<String>,
+    include_education: Option<bool>,
+) -> Result<MicrosoftOAuthResult, String> {
+    let creds = read_credentials(&app_handle);
+    let resolved_client_id = client_id
+        .filter(|s| !s.trim().is_empty())
+        .or(creds.microsoft_client_id)
+        .or_else(|| get_env_credential(&["WIDKANBAN_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"]))
+        .ok_or_else(|| "Microsoft Client ID is required to start the OAuth flow. Please enter your OAuth Client ID in Settings.".to_string())?;
+
+    let inc_edu = include_education
+        .or(creds.microsoft_include_education)
+        .unwrap_or(false);
+
+    // 1. Generate PKCE pair (code_verifier, code_challenge)
+    let (code_verifier, code_challenge) = generate_pkce_pair();
+
+    // 2. Bind TCP listener on ephemeral port (127.0.0.1:0)
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to start local OAuth loopback server: {}", e))?;
+
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local port: {}", e))?
+        .port();
+
+    let redirect_uri = format!("http://127.0.0.1:{}", port);
+    let state = format!("widkanban_ms_{}", current_epoch_seconds());
+
+    // 3. Build scopes
+    let scopes_str = if inc_edu {
+        "offline_access User.Read Tasks.ReadWrite EduAssignments.ReadBasic Group.Read.All"
+    } else {
+        "offline_access User.Read Tasks.ReadWrite"
+    };
+
+    // 4. Build Microsoft authorization URL
+    let auth_url = format!(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?\
+        client_id={}&\
+        response_type=code&\
+        redirect_uri={}&\
+        response_mode=query&\
+        scope={}&\
+        code_challenge={}&\
+        code_challenge_method=S256&\
+        state={}",
+        url_encode(&resolved_client_id),
+        url_encode(&redirect_uri),
+        url_encode(scopes_str),
+        url_encode(&code_challenge),
+        url_encode(&state),
+    );
+
+    // 5. Open browser
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_url = auth_url.replace('\'', "''");
+        let script = format!("Start-Process '{}'", escaped_url);
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    }
+
+    // 6. Wait for incoming redirect with 120-second timeout
+    let timeout_duration = std::time::Duration::from_secs(120);
+    let code = match tokio::time::timeout(timeout_duration, async {
+        loop {
+            let (mut socket, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            let mut buf = [0u8; 4096];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let n = socket.read(&mut buf).await.map_err(|e| e.to_string())?;
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if let Some(first_line) = req_str.lines().next() {
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "GET" {
+                    let path = parts[1];
+                    let query = path.split('?').nth(1).unwrap_or("");
+                    let mut code_val: Option<String> = None;
+                    let mut error_val: Option<String> = None;
+
+                    for param in query.split('&') {
+                        let mut kv = param.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" {
+                                code_val = Some(v.to_string());
+                            } else if k == "error" || k == "error_description" {
+                                error_val = Some(v.to_string());
+                            }
+                        }
+                    }
+
+                    let (html_body, status_line) = if code_val.is_some() {
+                        (
+                            render_oauth_callback_html(true, None),
+                            "HTTP/1.1 200 OK",
+                        )
+                    } else {
+                        (
+                            render_oauth_callback_html(false, error_val.as_deref()),
+                            "HTTP/1.1 400 Bad Request",
+                        )
+                    };
+
+                    let html_bytes = html_body.as_bytes();
+                    let response = format!(
+                        "{}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        html_bytes.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+
+                    if let Some(err) = error_val {
+                        return Err(format!("Microsoft OAuth authorization error: {}", err));
+                    }
+                    if let Some(c) = code_val {
+                        return Ok(c);
+                    }
+                }
+            }
+        }
+    }).await {
+        Ok(res) => res?,
+        Err(_) => return Err("Microsoft OAuth flow timed out (2 minutes elapsed). Please try again.".to_string()),
+    };
+
+    // 7. Exchange code for access & refresh tokens at token endpoint using code_verifier (PKCE)
+    let client = reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let token_params = [
+        ("client_id", resolved_client_id.as_str()),
+        ("grant_type", "authorization_code"),
+        ("code", code.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("code_verifier", code_verifier.as_str()),
+    ];
+
+    let token_resp = client
+        .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
+        .form(&token_params)
+        .header("User-Agent", "WidKanban-Desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to exchange authorization code: {}", e))?;
+
+    if !token_resp.status().is_success() {
+        let err_body = token_resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to retrieve Microsoft tokens: {}", err_body));
+    }
+
+    let token_data: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    let access_token = token_data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Microsoft token response did not contain an access_token".to_string())?
+        .to_string();
+
+    let refresh_token = token_data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let expires_in = token_data
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .or_else(|| token_data.get("expires_in").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(3600);
+
+    let now = current_epoch_seconds();
+    let mut stored = read_stored_credentials_file(&app_handle);
+    stored.microsoft_token = Some(access_token.clone());
+    stored.microsoft_refresh_token = refresh_token;
+    stored.microsoft_client_id = Some(resolved_client_id.clone());
+    stored.microsoft_token_expiry = Some(now + expires_in);
+    stored.microsoft_include_education = Some(inc_edu);
+    stored.microsoft_disconnected = Some(false);
+    write_credentials(&app_handle, &stored)?;
+
+    // 8. Update in-memory health
+    if let Ok(mut health) = get_health_store().lock() {
+        health.microsoft = Some(ProviderHealth {
+            connected: true,
+            rate_limit_remaining: None,
+            rate_limit_limit: None,
+            rate_limit_reset: None,
+            token_expires_at: Some(chrono_epoch_to_iso(now + expires_in)),
+            is_expiring_soon: Some(false),
+            is_rate_limited: Some(false),
+            last_checked: Some(now),
+            error_message: None,
+        });
+    }
+
+    // 9. Inspect identity and build CredentialInspectionReport
+    let ms_inspection = inspect_microsoft_token(&client, &access_token).await;
+    let auth_status = get_auth_status(app_handle.clone())?;
+
+    let report = CredentialInspectionReport {
+        can_proceed: ms_inspection.is_valid && ms_inspection.all_required_granted,
+        providers: vec![ms_inspection],
+    };
+
+    Ok(MicrosoftOAuthResult {
+        auth_status,
+        report,
+    })
+}
+
+// ─── Unified Task Provider IPC Commands ─────────────────────────────────────
+
+#[tauri::command]
+async fn fetch_provider_tasks(
+    app_handle: tauri::AppHandle,
+    provider: String,
+) -> Result<Vec<UnifiedTask>, String> {
+    let adapter = providers::resolve_provider(&provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.fetch_tasks(&ctx).await
+}
+
+#[tauri::command]
+async fn transition_task_status(
+    app_handle: tauri::AppHandle,
+    request: providers::TaskTransitionRequest,
+) -> Result<(), String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.transition_status(&ctx, request).await
+}
+
+#[tauri::command]
+async fn update_task_deadline(
+    app_handle: tauri::AppHandle,
+    request: providers::TaskDeadlineRequest,
+) -> Result<providers::DeadlineUpdateResult, String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.update_deadline(&ctx, request).await
+}
+
+#[tauri::command]
+async fn delete_task_remote(
+    app_handle: tauri::AppHandle,
+    request: providers::RemoteDeleteRequest,
+) -> Result<(), String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.delete_remote(&ctx, request).await
+}
+
+#[tauri::command]
+async fn mutate_task_subtask(
+    app_handle: tauri::AppHandle,
+    request: providers::SubtaskMutationRequest,
+) -> Result<Option<SubtaskItem>, String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.mutate_subtask(&ctx, request).await
 }
 
 /// Discover or create To-Do and In-Progress labels on a GitHub repository.
@@ -995,385 +2803,140 @@ async fn setup_github_repo_labels(
     })
 }
 
-/// Update labels on a GitHub issue or pull request when moved between To-Do and In-Progress.
-#[tauri::command]
-async fn update_github_issue_labels(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    target_label: Option<String>,
-    opposing_label: Option<String>,
-    post_comment_fallback: bool,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
+// ─── Widkanban Deadline Helpers & Commands ──────────────────────────────────
 
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. Remove opposing label if specified
-    if let Some(ref opp) = opposing_label {
-        let opp_trim = opp.trim();
-        if !opp_trim.is_empty() {
-            let delete_url = format!(
-                "https://api.github.com/repos/{}/issues/{}/labels/{}",
-                repo,
-                issue_number,
-                url_encode(opp_trim)
-            );
-            let _ = client
-                .delete(&delete_url)
-                .header("User-Agent", "WidKanban-Desktop")
-                .header("Accept", "application/vnd.github.v3+json")
-                .bearer_auth(&token)
-                .send()
-                .await;
-        }
-    }
-
-    // 2. Add target label if specified
-    let target_trim = target_label.as_deref().unwrap_or("").trim();
-    if !target_trim.is_empty() {
-        let add_url = format!("https://api.github.com/repos/{}/issues/{}/labels", repo, issue_number);
-        let payload = AddLabelsPayload {
-            labels: vec![target_trim],
-        };
-        let add_resp = client
-            .post(&add_url)
-            .header("User-Agent", "WidKanban-Desktop")
-            .header("Accept", "application/vnd.github.v3+json")
-            .bearer_auth(&token)
-            .json(&payload)
-            .send()
-            .await;
-
-        let add_failed = match add_resp {
-            Ok(ref resp) => !resp.status().is_success(),
-            Err(_) => true,
-        };
-
-        if add_failed {
-            if post_comment_fallback {
-                // Attempt comment fallback
-                let comment_url = format!(
-                    "https://api.github.com/repos/{}/issues/{}/comments",
-                    repo, issue_number
-                );
-                let comment_body = format!(
-                    "Task status updated to **{}** via WidKanban widget.",
-                    target_trim
-                );
-                let comment_payload = CreateCommentPayload {
-                    body: &comment_body,
-                };
-                let comment_resp = client
-                    .post(&comment_url)
-                    .header("User-Agent", "WidKanban-Desktop")
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .bearer_auth(&token)
-                    .json(&comment_payload)
-                    .send()
-                    .await;
-
-                if let Ok(c_resp) = comment_resp {
-                    if c_resp.status().is_success() {
-                        return Ok(());
-                    }
-                }
-            }
-
-            return Err(format!(
-                "Failed to apply label '{}' to {}#{}",
-                target_trim, repo, issue_number
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Serialize)]
-struct CloseIssuePayload<'a> {
-    state: &'a str,
-    state_reason: &'a str,
-}
-
-#[derive(Serialize)]
-struct GraphQLRequest<'a> {
-    query: &'a str,
-    variables: serde_json::Value,
-}
-
-/// Close a GitHub issue as "not_planned", with optional reason and duplicate reference comments.
-#[tauri::command]
-async fn close_github_issue(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    reason: Option<String>,
-    duplicate_of: Option<u64>,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. If duplicate or reason specified, post comment first
-    let mut comment_parts = Vec::new();
-    if let Some(dup) = duplicate_of {
-        comment_parts.push(format!("Duplicate of #{}", dup));
-    }
-    if let Some(r) = reason {
-        let r_trim = r.trim();
-        if !r_trim.is_empty() {
-            if duplicate_of.is_some() {
-                comment_parts.push(format!("Reason: {}", r_trim));
-            } else {
-                comment_parts.push(r_trim.to_string());
-            }
-        }
-    }
-
-    if !comment_parts.is_empty() {
-        let comment_body = comment_parts.join("\n\n");
-        let comment_payload = CreateCommentPayload {
-            body: &comment_body,
-        };
-        let comment_url = format!(
-            "https://api.github.com/repos/{}/issues/{}/comments",
-            repo, issue_number
-        );
-        let _ = client
-            .post(&comment_url)
-            .header("User-Agent", "WidKanban-Desktop")
-            .header("Accept", "application/vnd.github.v3+json")
-            .bearer_auth(&token)
-            .json(&comment_payload)
-            .send()
-            .await;
-    }
-
-    // 2. Close issue as not_planned
-    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
-    let patch_payload = CloseIssuePayload {
-        state: "closed",
-        state_reason: "not_planned",
-    };
-
-    let resp = client
-        .patch(&patch_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .json(&patch_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error closing issue: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Failed to close issue {}#{} ({}): {}", repo, issue_number, status, body));
-    }
-
-    Ok(())
-}
-
-#[derive(Serialize, Debug)]
-struct IssueStatePayload<'a> {
-    state: &'a str,
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct WidkanbanDeadlineComment {
+    pub due: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state_reason: Option<&'a str>,
+    pub r#type: Option<String>,
 }
 
-/// Set issue state ('open' or 'closed') with optional state_reason ('completed', 'reopened', 'not_planned').
-#[tauri::command]
-async fn set_github_issue_state(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    state: String,
-    state_reason: Option<String>,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
-    let payload = IssueStatePayload {
-        state: &state,
-        state_reason: state_reason.as_deref(),
-    };
-
-    let resp = client
-        .patch(&patch_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error updating issue state: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "Failed to update issue state {}#{} ({}): {}",
-            repo, issue_number, status, body
-        ));
-    }
-
-    Ok(())
-}
-
-/// Permanently delete an issue on GitHub via GraphQL (requires Repository Admin/Owner permissions).
-#[tauri::command]
-async fn delete_github_issue_permanently(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let parts: Vec<&str> = repo.split('/').collect();
-    if parts.len() != 2 {
-        return Err(format!("Invalid repository format '{}', expected 'owner/repo'", repo));
-    }
-    let owner = parts[0];
-    let name = parts[1];
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // Step 1: Query issue Node ID
-    let query = r#"
-        query($owner: String!, $name: String!, $number: Int!) {
-            repository(owner: $owner, name: $name) {
-                issue(number: $number) {
-                    id
+pub fn parse_widkanban_deadline(body: &str) -> Option<(String, Option<String>)> {
+    // 1. First look for HTML comment: <!-- Widkanban: { ... } -->
+    if let Some(start_idx) = body.find("<!-- Widkanban:") {
+        let remainder = &body[start_idx + "<!-- Widkanban:".len()..];
+        if let Some(end_idx) = remainder.find("-->") {
+            let json_str = remainder[..end_idx].trim();
+            if let Ok(comment_data) = serde_json::from_str::<WidkanbanDeadlineComment>(json_str) {
+                if !comment_data.due.trim().is_empty() {
+                    return Some((comment_data.due.trim().to_string(), comment_data.r#type));
                 }
             }
         }
-    "#;
-    let query_payload = GraphQLRequest {
-        query,
-        variables: serde_json::json!({
-            "owner": owner,
-            "name": name,
-            "number": issue_number,
-        }),
-    };
-
-    let q_resp = client
-        .post("https://api.github.com/graphql")
-        .header("User-Agent", "WidKanban-Desktop")
-        .bearer_auth(&token)
-        .json(&query_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error querying issue node ID: {}", e))?;
-
-    let q_json: serde_json::Value = q_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse issue ID response: {}", e))?;
-
-    if let Some(errors) = q_json.get("errors").and_then(|e| e.as_array()) {
-        if !errors.is_empty() {
-            let msg = errors[0]
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("GraphQL query failed");
-            return Err(format!("GitHub error: {}", msg));
-        }
     }
 
-    let issue_id = q_json
-        .pointer("/data/repository/issue/id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Issue {}#{} not found", repo, issue_number))?;
+    // 2. Check for natural text pattern like:
+    // Widkanban: due 2026-10-25 or Widkanban: deadline 2026-10-25 or Widkanban: review-by 2026-10-25 18:00
+    for line in body.lines() {
+        let lower = line.to_lowercase();
+        if let Some(pos) = lower.find("widkanban:") {
+            let sub = line[pos + "widkanban:".len()..].trim();
+            let sub_lower = sub.to_lowercase();
+            let mut date_part = sub;
+            let mut deadline_type = None;
 
-    // Step 2: Call deleteIssue mutation
-    let mutation = r#"
-        mutation($issueId: ID!) {
-            deleteIssue(input: { issueId: $issueId }) {
-                clientMutationId
+            if sub_lower.starts_with("review-by") {
+                date_part = sub["review-by".len()..].trim();
+                deadline_type = Some("review".to_string());
+            } else if sub_lower.starts_with("due") {
+                date_part = sub["due".len()..].trim();
+                deadline_type = Some("deadline".to_string());
+            } else if sub_lower.starts_with("deadline") {
+                date_part = sub["deadline".len()..].trim();
+                deadline_type = Some("deadline".to_string());
+            }
+
+            // Extract YYYY-MM-DD or ISO timestamp
+            if date_part.len() >= 10 {
+                let ymd = &date_part[..10];
+                let chars: Vec<char> = ymd.chars().collect();
+                if chars.len() == 10
+                    && chars[4] == '-'
+                    && chars[7] == '-'
+                    && chars[0..4].iter().all(|c| c.is_ascii_digit())
+                    && chars[5..7].iter().all(|c| c.is_ascii_digit())
+                    && chars[8..10].iter().all(|c| c.is_ascii_digit())
+                {
+                    let token: String = date_part
+                        .split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let iso = if token.contains('T') || token.contains(':') {
+                        token.replace(' ', "T")
+                    } else {
+                        format!("{}T23:59:59Z", ymd)
+                    };
+                    return Some((iso, deadline_type));
+                }
             }
         }
-    "#;
-    let mutation_payload = GraphQLRequest {
-        query: mutation,
-        variables: serde_json::json!({
-            "issueId": issue_id,
-        }),
-    };
-
-    let m_resp = client
-        .post("https://api.github.com/graphql")
-        .header("User-Agent", "WidKanban-Desktop")
-        .bearer_auth(&token)
-        .json(&mutation_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error executing delete mutation: {}", e))?;
-
-    let m_json: serde_json::Value = m_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse delete mutation response: {}", e))?;
-
-    if let Some(errors) = m_json.get("errors").and_then(|e| e.as_array()) {
-        if !errors.is_empty() {
-            let msg = errors[0]
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Permanent deletion failed");
-            return Err(format!(
-                "Failed to permanently delete issue on GitHub: {}. (Note: Only repository admins/owners can permanently delete issues)",
-                msg
-            ));
-        }
     }
 
-    Ok(())
+    None
+}
+
+pub fn format_widkanban_deadline_tag(due_date_iso: &str, deadline_type: Option<&str>) -> String {
+    let comment_json = serde_json::json!({
+        "due": due_date_iso,
+        "type": deadline_type.unwrap_or("deadline")
+    });
+    format!(
+        "> ⏱️ **Widkanban Deadline**: {} <!-- Widkanban: {} -->",
+        due_date_iso, comment_json
+    )
+}
+
+pub fn remove_widkanban_deadline_from_body(body: &str) -> String {
+    let mut kept_lines = Vec::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("> ⏱️ **Widkanban Deadline**")
+            || (trimmed.starts_with("<!-- Widkanban:") && trimmed.ends_with("-->"))
+        {
+            continue;
+        }
+        kept_lines.push(line);
+    }
+    kept_lines.join("\n").trim_end().to_string()
+}
+
+pub fn update_body_with_widkanban_deadline(
+    original_body: Option<&str>,
+    due_date: Option<&str>,
+    deadline_type: Option<&str>,
+) -> String {
+    let base_body = original_body
+        .map(remove_widkanban_deadline_from_body)
+        .unwrap_or_default();
+    match due_date {
+        Some(due) if !due.trim().is_empty() => {
+            let tag = format_widkanban_deadline_tag(due.trim(), deadline_type);
+            if base_body.is_empty() {
+                tag
+            } else {
+                format!("{}\n\n{}", base_body, tag)
+            }
+        }
+        _ => base_body,
+    }
+}
+
+pub(crate) fn chrono_epoch_to_iso(secs: u64) -> String {
+    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
 }
 
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
-fn chrono_now_iso() -> String {
+pub(crate) fn chrono_now_iso() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // Basic ISO-8601 formatter (seconds precision, UTC)
-    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+    chrono_epoch_to_iso(secs)
 }
 
 fn unix_to_ymd_hms(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
@@ -1411,6 +2974,18 @@ fn is_leap(y: u32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+const MIN_WINDOW_WIDTH: f64 = 360.0;
+const MIN_WINDOW_HEIGHT: f64 = 420.0;
+const MAX_WINDOW_WIDTH: f64 = 1600.0;
+const MAX_WINDOW_HEIGHT: f64 = 1200.0;
+
+pub fn clamp_window_size(width: f64, height: f64) -> (f64, f64) {
+    (
+        width.clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
+        height.clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT),
+    )
+}
+
 #[tauri::command]
 fn set_window_resizable(app: tauri::AppHandle, resizable: bool) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
@@ -1422,8 +2997,12 @@ fn set_window_resizable(app: tauri::AppHandle, resizable: bool) -> Result<(), St
 #[tauri::command]
 fn set_window_size(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
+        let (clamped_w, clamped_h) = clamp_window_size(width, height);
         window
-            .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: clamped_w,
+                height: clamped_h,
+            }))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1447,35 +3026,67 @@ fn reset_window_geometry(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load developer environment variables from .env / .env.local
+    let _ = dotenvy::dotenv();
+    let _ = dotenvy::from_filename(".env.local");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_api_health,
+            send_desktop_notification,
             toggle_always_on_top,
+            set_window_pin_mode,
             minimize_window,
             close_app,
             set_window_resizable,
             set_window_size,
             reset_window_geometry,
+            is_autostart_enabled,
+            enable_autostart,
+            disable_autostart,
             get_auth_status,
             save_credentials,
             clear_credentials,
-            fetch_google_tasks,
-            fetch_github_tasks,
-            update_google_task,
+            inspect_credentials,
+            start_google_oauth_flow,
+            start_microsoft_oauth_flow,
+            fetch_provider_tasks,
+            transition_task_status,
+            update_task_deadline,
+            delete_task_remote,
+            mutate_task_subtask,
             setup_github_repo_labels,
-            update_github_issue_labels,
-            close_github_issue,
-            delete_github_issue_permanently,
-            set_github_issue_state,
+            open_oauth_preview,
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
+                    width: MIN_WINDOW_WIDTH,
+                    height: MIN_WINDOW_HEIGHT,
+                })));
+                let _ = window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize {
+                    width: MAX_WINDOW_WIDTH,
+                    height: MAX_WINDOW_HEIGHT,
+                })));
+            }
+
+            let is_minimized_arg = std::env::args().any(|arg| arg == "--minimized" || arg == "--hidden");
+            if is_minimized_arg {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Widget", true, None::<&str>)?;
-            let pin_i = MenuItem::with_id(app, "pin", "Toggle Always on Top", true, None::<&str>)?;
+            let pin_top_i = MenuItem::with_id(app, "pin_top", "Pin: Always on Top", true, None::<&str>)?;
+            let pin_desk_i = MenuItem::with_id(app, "pin_desktop", "Pin: Desktop Layer", true, None::<&str>)?;
+            let unpin_i = MenuItem::with_id(app, "unpin", "Unpin (Enable Resizing)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit WidKanban", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&toggle_i, &pin_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&toggle_i, &pin_top_i, &pin_desk_i, &unpin_i, &quit_i])?;
 
             let mut builder = TrayIconBuilder::new()
                 .menu(&menu)
@@ -1511,10 +3122,37 @@ pub fn run() {
                             }
                         }
                     }
+                    "pin_top" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(true);
+                            let _ = window.set_resizable(false);
+                        }
+                    }
+                    "pin_desktop" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(false);
+                            #[cfg(target_os = "windows")]
+                            {
+                                if let Ok(h) = window.hwnd() {
+                                    unsafe {
+                                        SetWindowPos(h.0 as isize, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "unpin" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_always_on_top(false);
+                            let _ = window.set_resizable(true);
+                        }
+                    }
                     "pin" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let is_on_top = window.is_always_on_top().unwrap_or(false);
                             let _ = window.set_always_on_top(!is_on_top);
+                            let _ = window.set_resizable(is_on_top);
                         }
                     }
                     "quit" => {
@@ -1556,6 +3194,18 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123456789".to_string()),
             google_token: Some("ya29.test123".to_string()),
+            microsoft_token: Some("eyJ0eXAi...".to_string()),
+            microsoft_refresh_token: Some("0.test_ms_refresh".to_string()),
+            microsoft_client_id: Some("ms-client-123".to_string()),
+            microsoft_token_expiry: Some(1792620000),
+            microsoft_include_education: Some(true),
+            google_refresh_token: Some("1//refresh_token_test".to_string()),
+            google_client_id: Some("12345.apps.googleusercontent.com".to_string()),
+            google_client_secret: Some("GOCSPX-secret".to_string()),
+            google_token_expiry: Some(1792615000),
+            github_disconnected: Some(false),
+            google_disconnected: Some(false),
+            microsoft_disconnected: Some(false),
         };
         let serialized = serde_json::to_string(&creds).expect("Serialization failed");
         let deserialized: StoredCredentials =
@@ -1569,13 +3219,106 @@ mod tests {
         let creds = StoredCredentials {
             github_token: Some("ghp_test123".to_string()),
             google_token: Some("   ".to_string()),
+            microsoft_token: Some("ms_token_valid".to_string()),
+            google_refresh_token: Some("1//valid_refresh".to_string()),
+            ..Default::default()
         };
         let status = AuthStatus {
             has_github: creds.github_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
-            has_google: creds.google_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_google: creds.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            has_microsoft: creds.microsoft_token.as_ref().map_or(false, |t| !t.trim().is_empty()),
+            github_from_env: false,
+            google_from_env: false,
+            google_has_refresh_token: true,
+            microsoft_from_env: false,
+            microsoft_has_refresh_token: false,
+            microsoft_client_id: None,
+            microsoft_include_education: false,
         };
         assert!(status.has_github);
-        assert!(!status.has_google);
+        assert!(status.has_google);
+        assert!(status.has_microsoft);
+        assert!(status.google_has_refresh_token);
+        assert!(!status.github_from_env);
+        assert!(!status.google_from_env);
+    }
+
+    #[test]
+    fn test_credential_hierarchy_logic() {
+        // Case 1: Stored credentials exist -> env is ignored, from_env is false
+        let stored = StoredCredentials {
+            github_token: Some("ghp_stored".to_string()),
+            google_token: None,
+            google_refresh_token: Some("1//stored_refresh".to_string()),
+            ..Default::default()
+        };
+        let env_github = Some("ghp_env".to_string());
+        let env_google = Some("ya29.env".to_string());
+
+        let has_stored_github = stored.github_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+        let has_stored_google = stored.google_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            || stored.google_refresh_token.as_ref().map_or(false, |t| !t.trim().is_empty());
+
+        let github_from_env = !has_stored_github
+            && stored.github_disconnected != Some(true)
+            && env_github.is_some();
+        let google_from_env = !has_stored_google
+            && stored.google_disconnected != Some(true)
+            && env_google.is_some();
+
+        assert!(!github_from_env);
+        assert!(!google_from_env);
+
+        // Case 2: No stored credentials, not disconnected -> env is used, from_env is true
+        let stored_empty = StoredCredentials::default();
+        let gh_from_env_fallback = !stored_empty.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_empty.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(gh_from_env_fallback);
+
+        // Case 3: Explicitly disconnected -> env fallback is suppressed
+        let stored_disconnected = StoredCredentials {
+            github_disconnected: Some(true),
+            google_disconnected: Some(true),
+            ..Default::default()
+        };
+        let gh_suppressed = !stored_disconnected.github_token.as_ref().map_or(false, |t| !t.trim().is_empty())
+            && stored_disconnected.github_disconnected != Some(true)
+            && env_github.is_some();
+        assert!(!gh_suppressed);
+    }
+
+    #[test]
+    fn test_auth_status_serialization_with_env_flags() {
+        let status = AuthStatus {
+            has_github: true,
+            has_google: false,
+            has_microsoft: false,
+            github_from_env: true,
+            google_from_env: false,
+            google_has_refresh_token: false,
+            microsoft_from_env: false,
+            microsoft_has_refresh_token: false,
+            microsoft_client_id: None,
+            microsoft_include_education: false,
+        };
+        let json = serde_json::to_string(&status).expect("Serialization failed");
+        assert!(json.contains("github_from_env"));
+        assert!(json.contains("google_has_refresh_token"));
+        assert!(json.contains("microsoft_from_env"));
+        let deserialized: AuthStatus = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(status, deserialized);
+    }
+
+    #[test]
+    fn test_get_env_credential_helper() {
+        std::env::set_var("TEST_WIDKANBAN_KEY_A", "  test_token_123  ");
+        assert_eq!(
+            get_env_credential(&["NON_EXISTENT_KEY", "TEST_WIDKANBAN_KEY_A"]),
+            Some("test_token_123".to_string())
+        );
+        assert_eq!(get_env_credential(&["NON_EXISTENT_KEY"]), None);
+        std::env::remove_var("TEST_WIDKANBAN_KEY_A");
     }
 
     #[test]
@@ -1641,10 +3384,10 @@ mod tests {
             is_fork: Some(true),
             head_repo: Some("contributor/widkanban".to_string()),
             is_draft: Some(false),
-            is_merged: Some(false),
             additions: Some(150),
             deletions: Some(40),
             changed_files: Some(5),
+            is_merged: Some(false),
         };
         let serialized = serde_json::to_string(&branch).expect("Failed to serialize PRBranchInfo");
         let deserialized: PRBranchInfo =
@@ -1713,46 +3456,259 @@ mod tests {
     }
 
     #[test]
-    fn test_close_issue_payload_serialization() {
-        let payload = CloseIssuePayload {
-            state: "closed",
-            state_reason: "not_planned",
-        };
-        let serialized = serde_json::to_string(&payload).expect("serialization failed");
-        assert!(serialized.contains(r#""state":"closed""#));
-        assert!(serialized.contains(r#""state_reason":"not_planned""#));
+    fn test_ms_status_to_task_status() {
+        assert_eq!(ms_status_to_task_status(Some("notStarted"), None), "todo");
+        assert_eq!(ms_status_to_task_status(Some("inProgress"), None), "in_progress");
+        assert_eq!(ms_status_to_task_status(Some("completed"), None), "done");
+        assert_eq!(ms_status_to_task_status(Some("assigned"), None), "todo");
+        assert_eq!(ms_status_to_task_status(Some("submitted"), None), "done");
+        assert_eq!(ms_status_to_task_status(Some("returned"), None), "done");
+
+        // Percentage-based (Planner)
+        assert_eq!(ms_status_to_task_status(None, Some(0)), "todo");
+        assert_eq!(ms_status_to_task_status(None, Some(50)), "in_progress");
+        assert_eq!(ms_status_to_task_status(None, Some(100)), "done");
     }
 
     #[test]
-    fn test_graphql_request_serialization() {
-        let payload = GraphQLRequest {
-            query: "query { viewer { login } }",
-            variables: serde_json::json!({ "foo": "bar" }),
-        };
-        let serialized = serde_json::to_string(&payload).expect("serialization failed");
-        assert!(serialized.contains("query"));
-        assert!(serialized.contains("variables"));
-        assert!(serialized.contains("foo"));
+    fn test_task_status_to_ms_mappings() {
+        assert_eq!(task_status_to_ms_todo_status("todo"), "notStarted");
+        assert_eq!(task_status_to_ms_todo_status("in_progress"), "inProgress");
+        assert_eq!(task_status_to_ms_todo_status("done"), "completed");
+
+        assert_eq!(task_status_to_ms_planner_percent("todo"), 0);
+        assert_eq!(task_status_to_ms_planner_percent("in_progress"), 50);
+        assert_eq!(task_status_to_ms_planner_percent("done"), 100);
     }
 
     #[test]
-    fn test_issue_state_payload_serialization() {
-        let payload_closed = IssueStatePayload {
-            state: "closed",
-            state_reason: Some("completed"),
-        };
-        let ser_closed = serde_json::to_string(&payload_closed).expect("serialization failed");
-        assert!(ser_closed.contains(r#""state":"closed""#));
-        assert!(ser_closed.contains(r#""state_reason":"completed""#));
+    fn test_build_linux_desktop_entry() {
+        let entry_normal = build_linux_desktop_entry("/usr/bin/widkanban", false);
+        assert!(entry_normal.contains("Exec=/usr/bin/widkanban\n"));
+        assert!(entry_normal.contains("Name=WidKanban"));
+        assert!(!entry_normal.contains("--minimized"));
 
-        let payload_open = IssueStatePayload {
-            state: "open",
-            state_reason: None,
+        let entry_min = build_linux_desktop_entry("/usr/bin/widkanban", true);
+        assert!(entry_min.contains("Exec=/usr/bin/widkanban --minimized\n"));
+    }
+
+    #[test]
+    fn test_build_macos_plist() {
+        let plist_normal = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", false);
+        assert!(plist_normal.contains("<string>/Applications/WidKanban.app/Contents/MacOS/widkanban</string>"));
+        assert!(!plist_normal.contains("<string>--minimized</string>"));
+        assert!(plist_normal.contains("<key>RunAtLoad</key>"));
+
+        let plist_min = build_macos_plist("/Applications/WidKanban.app/Contents/MacOS/widkanban", true);
+        assert!(plist_min.contains("<string>--minimized</string>"));
+    }
+
+    #[test]
+    fn test_api_health_state_serialization() {
+        let health = ApiHealthState {
+            github: ProviderHealth {
+                connected: true,
+                rate_limit_remaining: Some(4950),
+                rate_limit_limit: Some(5000),
+                rate_limit_reset: Some(1792529000),
+                token_expires_at: Some("2026-11-20 00:00:00 UTC".to_string()),
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: Some(1792520000),
+                error_message: None,
+            },
+            google: ProviderHealth {
+                connected: false,
+                rate_limit_remaining: None,
+                rate_limit_limit: None,
+                rate_limit_reset: None,
+                token_expires_at: None,
+                is_expiring_soon: Some(false),
+                is_rate_limited: Some(false),
+                last_checked: None,
+                error_message: Some("Google Tasks token not configured".to_string()),
+            },
+            microsoft: None,
         };
-        let ser_open = serde_json::to_string(&payload_open).expect("serialization failed");
-        assert!(ser_open.contains(r#""state":"open""#));
-        assert!(!ser_open.contains("state_reason"));
+        let serialized = serde_json::to_string(&health).expect("serialization failed");
+        assert!(serialized.contains("rateLimitRemaining"));
+        assert!(serialized.contains("4950"));
+        assert!(serialized.contains("tokenExpiresAt"));
+        assert!(serialized.contains("errorMessage"));
+        let deserialized: ApiHealthState = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(health, deserialized);
+    }
+
+    #[test]
+    fn test_render_oauth_callback_html() {
+        let success_html = render_oauth_callback_html(true, None);
+        assert!(success_html.contains("Google Authentication Verified"));
+        assert!(success_html.contains("close tab"));
+        assert!(success_html.contains("Unifont"));
+
+        let fail_html = render_oauth_callback_html(false, Some("access_denied"));
+        assert!(fail_html.contains("Google Authentication Failed"));
+        assert!(fail_html.contains("access_denied"));
+        assert!(fail_html.contains("close tab"));
+
+        let fail_generic = render_oauth_callback_html(false, Some("redirect_uri_mismatch"));
+        assert!(fail_generic.contains("Google Authentication Failed"));
+        assert!(fail_generic.contains("redirect_uri_mismatch"));
+    }
+
+    #[test]
+    fn test_decode_base64_url_and_jwt_claims() {
+        // Test base64url decode
+        let decoded = decode_base64_url("SGVsbG8gV29ybGQ").expect("decode failed");
+        assert_eq!(String::from_utf8_lossy(&decoded), "Hello World");
+
+        // Test sample mock JWT: header.payload.sig
+        // Payload: {"scp":"Tasks.ReadWrite User.Read","upn":"dev@tenant.onmicrosoft.com","name":"Dev Admin"}
+        // base64url of {"scp":"Tasks.ReadWrite User.Read","upn":"dev@tenant.onmicrosoft.com","name":"Dev Admin"}
+        // is eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0
+        let mock_jwt = "eyJhbGciOiJub25lIn0.eyJzY3AiOiJUYXNrcy5SZWFkV3JpdGUgVXNlci5SZWFkIiwidXBuIjoiZGV2QHRlbmFudC5vbm1pY3Jvc29mdC5jb20iLCJuYW1lIjoiRGV2IEFkbWluIn0.sig";
+        let (scp, upn, name, tid, exp) = extract_microsoft_jwt_claims(mock_jwt);
+        assert_eq!(scp.as_deref(), Some("Tasks.ReadWrite User.Read"));
+        assert_eq!(upn.as_deref(), Some("dev@tenant.onmicrosoft.com"));
+        assert_eq!(name.as_deref(), Some("Dev Admin"));
+        assert_eq!(tid, None);
+        assert_eq!(exp, None);
+    }
+
+    #[test]
+    fn test_credential_inspection_report_serialization() {
+        let report = CredentialInspectionReport {
+            providers: vec![ProviderInspection {
+                provider: "microsoft".to_string(),
+                is_valid: true,
+                error_message: None,
+                user_name: Some("Test User".to_string()),
+                user_email: Some("test@example.com".to_string()),
+                avatar_url: None,
+                account_type: Some("Microsoft 365 Account".to_string()),
+                permissions: vec![
+                    PermissionItem {
+                        scope: "Tasks.ReadWrite".to_string(),
+                        description: "Full task management".to_string(),
+                        is_required: true,
+                        is_granted: true,
+                        feature_impact: None,
+                    },
+                    PermissionItem {
+                        scope: "EduAssignments.ReadBasic".to_string(),
+                        description: "Education assignments".to_string(),
+                        is_required: false,
+                        is_granted: false,
+                        feature_impact: Some("Education disabled".to_string()),
+                    },
+                ],
+                all_required_granted: true,
+            }],
+            can_proceed: true,
+        };
+
+        let json = serde_json::to_string(&report).expect("serialization failed");
+        assert!(json.contains("canProceed"));
+        assert!(json.contains("allRequiredGranted"));
+        assert!(json.contains("Tasks.ReadWrite"));
+        assert!(json.contains("featureImpact"));
+    }
+
+    #[test]
+    fn test_pkce_generation() {
+        let (verifier, challenge) = generate_pkce_pair();
+        assert!(verifier.len() >= 43 && verifier.len() <= 128);
+        assert!(!challenge.is_empty());
+        assert!(!verifier.contains('='));
+        assert!(!challenge.contains('='));
+    }
+
+    #[test]
+    fn test_microsoft_oauth_result_serialization() {
+        let res = MicrosoftOAuthResult {
+            auth_status: AuthStatus {
+                has_github: false,
+                has_google: false,
+                has_microsoft: true,
+                github_from_env: false,
+                google_from_env: false,
+                google_has_refresh_token: false,
+                microsoft_from_env: false,
+                microsoft_has_refresh_token: true,
+                microsoft_client_id: Some("12345678-test".to_string()),
+                microsoft_include_education: true,
+            },
+            report: CredentialInspectionReport {
+                can_proceed: true,
+                providers: vec![],
+            },
+        };
+        let json = serde_json::to_string(&res).expect("serialization failed");
+        assert!(json.contains("authStatus"));
+        assert!(json.contains("microsoft_has_refresh_token"));
+        assert!(json.contains("microsoft_include_education"));
+    }
+
+    #[test]
+    fn test_subtask_item_serialization() {
+        let item = SubtaskItem {
+            id: "gt_sub123".to_string(),
+            title: "Subtask 1".to_string(),
+            status: "todo".to_string(),
+        };
+        let serialized = serde_json::to_string(&item).expect("serialization failed");
+        assert!(serialized.contains("gt_sub123"));
+        assert!(serialized.contains("Subtask 1"));
+        let deserialized: SubtaskItem = serde_json::from_str(&serialized).expect("deserialization failed");
+        assert_eq!(item, deserialized);
+    }
+
+    #[test]
+    fn test_parse_widkanban_deadline_comment() {
+        let body = "Here is the issue description.\n\n> ⏱️ **Widkanban Deadline**: 2026-10-25T18:00:00Z <!-- Widkanban: {\"due\": \"2026-10-25T18:00:00Z\", \"type\": \"review\"} -->\n";
+        let parsed = parse_widkanban_deadline(body);
+        assert_eq!(
+            parsed,
+            Some(("2026-10-25T18:00:00Z".to_string(), Some("review".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_parse_widkanban_deadline_fallback_text() {
+        let body1 = "Feature checklist\nWidkanban: due 2026-11-05\nThanks!";
+        assert_eq!(
+            parse_widkanban_deadline(body1),
+            Some(("2026-11-05T23:59:59Z".to_string(), Some("deadline".to_string())))
+        );
+
+        let body2 = "PR notes\nwidkanban: review-by 2026-10-30 14:00";
+        assert_eq!(
+            parse_widkanban_deadline(body2),
+            Some(("2026-10-30T14:00".to_string(), Some("review".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_update_body_with_widkanban_deadline() {
+        let original = "Hello world\n> ⏱️ **Widkanban Deadline**: old <!-- Widkanban: {\"due\": \"2026-01-01\"} -->";
+        let updated = update_body_with_widkanban_deadline(
+            Some(original),
+            Some("2026-10-25T18:00:00Z"),
+            Some("deadline"),
+        );
+        assert!(updated.contains("Hello world"));
+        assert!(!updated.contains("2026-01-01"));
+        assert!(updated.contains("2026-10-25T18:00:00Z"));
+
+        // Removing deadline
+        let cleared = update_body_with_widkanban_deadline(Some(&updated), None, None);
+        assert_eq!(cleared, "Hello world");
+    }
+
+    #[test]
+    fn test_clamp_window_size() {
+        assert_eq!(clamp_window_size(200.0, 250.0), (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT));
+        assert_eq!(clamp_window_size(3000.0, 2000.0), (MAX_WINDOW_WIDTH, MAX_WINDOW_HEIGHT));
+        assert_eq!(clamp_window_size(850.0, 600.0), (850.0, 600.0));
     }
 }
-
-

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTaskStore } from '../store/useTaskStore';
+import { getTaskCapabilities } from '../domain/taskCapabilities';
 import { DeleteActionType } from '../types/task';
 import {
   X,
@@ -16,9 +17,7 @@ export const DeleteTaskModal: React.FC = () => {
   const {
     deleteModalTask,
     closeDeleteModal,
-    deleteTaskLocally,
-    closeGitHubIssueOnRemote,
-    deleteGitHubIssuePermanentlyOnRemote,
+    removeTask,
     setDeletePreference,
   } = useTaskStore();
 
@@ -34,8 +33,8 @@ export const DeleteTaskModal: React.FC = () => {
   if (!deleteModalTask) return null;
 
   const isGitHub = deleteModalTask.source === 'github';
-  const repo = deleteModalTask.sourceMeta?.repo || '';
-  const issueNumber = deleteModalTask.sourceMeta?.issueNumber;
+  const capabilities = getTaskCapabilities(deleteModalTask);
+  const supportsRemoteDelete = capabilities.supportedRemoteDeleteModes.length > 0;
 
   const handleConfirm = async () => {
     setIsSubmitting(true);
@@ -43,40 +42,32 @@ export const DeleteTaskModal: React.FC = () => {
 
     let chosenAction: DeleteActionType = 'local';
 
-    if (mode === 'local' || !isGitHub) {
+    if (mode === 'local' || !supportsRemoteDelete) {
       chosenAction = 'local';
-      deleteTaskLocally(deleteModalTask.id);
-    } else if (githubMode === 'close') {
-      chosenAction = 'github_close';
-      if (repo && issueNumber) {
-        const dupNum = isDuplicate && duplicateNumber.trim() ? parseInt(duplicateNumber.trim(), 10) : undefined;
-        const res = await closeGitHubIssueOnRemote(
-          repo,
-          issueNumber,
-          reason.trim() || undefined,
-          isNaN(dupNum as number) ? undefined : dupNum
-        );
-        if (!res.success) {
-          setErrorMessage(res.error || `Failed to close issue ${repo}#${issueNumber} on GitHub.`);
-          setIsSubmitting(false);
-          return;
-        }
-      }
-      deleteTaskLocally(deleteModalTask.id);
+      await removeTask(deleteModalTask.id, { mode: 'local' });
     } else {
-      chosenAction = 'github_permanent';
-      if (repo && issueNumber) {
-        const res = await deleteGitHubIssuePermanentlyOnRemote(repo, issueNumber);
-        if (!res.success) {
-          setErrorMessage(
-            res.error ||
-              `Failed to permanently delete ${repo}#${issueNumber}. You must have Repository Admin/Owner permissions.`
-          );
-          setIsSubmitting(false);
-          return;
-        }
+      chosenAction = githubMode === 'close' ? 'github_close' : 'github_permanent';
+      const dupNum =
+        githubMode === 'close' && isDuplicate && duplicateNumber.trim()
+          ? parseInt(duplicateNumber.trim(), 10)
+          : undefined;
+
+      const res = await removeTask(deleteModalTask.id, {
+        mode: 'remote',
+        remoteMode: githubMode,
+        reason: githubMode === 'close' ? reason.trim() || undefined : undefined,
+        duplicateOf: dupNum !== undefined && !isNaN(dupNum) ? dupNum : undefined,
+      });
+
+      if (!res.success) {
+        const fallbackErr =
+          githubMode === 'close'
+            ? `Failed to close issue ${capabilities.containerLabel} on GitHub.`
+            : `Failed to permanently delete ${capabilities.containerLabel}. You must have Repository Admin/Owner permissions.`;
+        setErrorMessage(res.error || fallbackErr);
+        setIsSubmitting(false);
+        return;
       }
-      deleteTaskLocally(deleteModalTask.id);
     }
 
     if (rememberChoice) {
@@ -130,7 +121,7 @@ export const DeleteTaskModal: React.FC = () => {
               <Archive className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
             )}
             <span className="truncate">
-              {repo && issueNumber ? `${repo}#${issueNumber}` : deleteModalTask.source}
+              {capabilities.containerLabel}
             </span>
           </div>
           <p className="text-[11px] text-slate-800 dark:text-slate-100 font-medium line-clamp-2">
@@ -146,7 +137,7 @@ export const DeleteTaskModal: React.FC = () => {
         )}
 
         {/* Deletion Mode Selection */}
-        {isGitHub ? (
+        {supportsRemoteDelete ? (
           <div className="space-y-2 text-xs">
             <label className="font-semibold text-slate-800 dark:text-slate-200 block text-[11px]">
               Deletion Scope
@@ -258,7 +249,7 @@ export const DeleteTaskModal: React.FC = () => {
 
                       {isDuplicate && (
                         <div className="flex items-center space-x-1.5 pl-5">
-                          <span className="text-slate-500 text-xs font-mono">#</span>
+                          <span className="text-slate-500 text-xs">#</span>
                           <input
                             type="number"
                             value={duplicateNumber}

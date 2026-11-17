@@ -10,7 +10,8 @@ This document details the architectural design, security model, data schemas, an
 - [2. Data Normalization Schema](#2-data-normalization-schema)
 - [3. Security & Token Storage Model](#3-security--token-storage-model)
 - [4. Sync Model & Write-Back Engine](#4-sync-model--write-back-engine)
-- [5. Task Deletion & Local Trash Management](#5-task-deletion--local-trash-management)
+- [5. Deadline Tracking, Smart Parsing & Write-Back Engine](#5-deadline-tracking-smart-parsing--write-back-engine)
+- [6. Task Deletion & Local Trash Management](#6-task-deletion--local-trash-management)
 - [Related Documentation](#related-documentation)
 
 ---
@@ -38,20 +39,22 @@ graph TD
     subgraph ExternalProviders["External API Providers"]
         GitHubAPI["GitHub REST API<br/>(Issues, Labels, PRs)"]
         GoogleTasksAPI["Google Tasks REST API<br/>(Lists & Task items)"]
+        MicrosoftGraphAPI["Microsoft Graph REST API<br/>(Assignments, Planner, To Do, Emails)"]
     end
 
     SyncEngine <-->|"HTTPS / REST (PAT Auth)"| GitHubAPI
     SyncEngine <-->|"HTTPS / REST (OAuth 2.0)"| GoogleTasksAPI
+    SyncEngine <-->|"HTTPS / REST (Graph Token)"| MicrosoftGraphAPI
 ```
 
 ---
 
 ## 2. Data Normalization Schema
 
-All tasks fetched from disparate external providers (GitHub Issues/PRs, Google Tasks) are normalized into a unified TypeScript interface:
+All tasks fetched from disparate external providers (GitHub Issues/PRs, Google Tasks, Microsoft 365 & Teams) are normalized into a unified TypeScript interface:
 
 ```typescript
-export type TaskSource = 'github' | 'google_tasks';
+export type TaskSource = 'github' | 'google_tasks' | 'microsoft_teams';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export interface GitHubLabel {
@@ -72,9 +75,9 @@ export interface PRBranchInfo {
 }
 
 export interface UnifiedTask {
-  id: string;             // Unique identifier, e.g., 'gh_102' or 'gt_abc123'
+  id: string;             // Unique identifier, e.g., 'gh_102' or 'gt_abc123' or 'ms_xyz789'
   title: string;          // Human-readable task title
-  source: TaskSource;     // 'github' | 'google_tasks'
+  source: TaskSource;     // 'github' | 'google_tasks' | 'microsoft_teams'
   status: TaskStatus;     // 'todo' | 'in_progress' | 'done'
   url: string;            // Direct web URL to the issue or task item
   updatedAt: string;      // ISO 8601 timestamp
@@ -101,6 +104,16 @@ export interface UnifiedTask {
     assignees?: TaskUser[];
     labels?: GitHubLabel[];
     branchInfo?: PRBranchInfo;   // Branch, fork, draft status, and diff statistics
+
+    // --- Microsoft 365 & Teams ---
+    teamName?: string;           // Teams channel or team name
+    courseName?: string;         // Teams for Education class name
+    assignmentId?: string;       // Unique assignment ID
+    isAssignment?: boolean;      // Teams for Education Assignment
+    isPlanner?: boolean;         // Microsoft Planner card
+    isFlaggedEmail?: boolean;    // Outlook flagged email
+    percentComplete?: number;    // Planner task percentage (0 - 100)
+    submissionUrl?: string;      // Direct assignment submission portal URL
   };
 }
 ```
@@ -114,7 +127,7 @@ export interface UnifiedTask {
 
 1. **Rust Keychain Layer**: Auth tokens are encrypted and managed natively in Rust via OS Keychain services or `tauri-plugin-store`.
 2. **IPC Scoping**: The frontend webview only sends IPC requests like `invoke('sync_tasks')` or `invoke('update_task_status', { taskId, status })`.
-3. **No Direct Web Fetch for Auth**: All API network calls to GitHub and Google Tasks are executed inside Rust `reqwest` / async threads.
+3. **No Direct Web Fetch for Auth**: All API network calls to GitHub, Google Tasks, and Microsoft Graph are executed inside Rust `reqwest` / async threads.
 
 ---
 
@@ -122,13 +135,49 @@ export interface UnifiedTask {
 
 - **Optimistic UI**: Moving a card in `@dnd-kit` immediately mutates local Zustand store state for instant visual feedback.
 - **Async Write-back**: React invokes a Rust IPC command in the background:
-  - **GitHub Write-back**: Moving to *Done* closes the issue (`PATCH /repos/{owner}/{repo}/issues/{number}`). Moving to *In Progress* applies an `in-progress` label.
+  - **GitHub Write-back**: Moving between *To Do* and *In Progress* applies or removes labels (`to-do`, `in-progress`).
   - **Google Tasks Write-back**: Moving to *Done* sets task status to `completed` (`PATCH /tasks/v1/lists/{listId}/tasks/{taskId}`).
-- **Tokio Background Polling Loop**: A background thread polls APIs every ~3 minutes and emits a `tasks-updated` event to the webview.
+  - **Microsoft Tasks Write-back**:
+    - **To Do**: Updates status to `notStarted`, `inProgress`, or `completed`.
+    - **Planner**: Concurrently fetches the latest `@odata.etag` and patches `percentComplete` (`0%`, `50%`, `100%`).
+- **Tokio Background Polling Loop**: A background thread polls APIs and emits updates to the webview.
 
 ---
 
-## 5. Task Deletion & Local Trash Management
+## 5. Deadline Tracking, Smart Parsing & Write-Back Engine
+
+WidKanban provides unified, cross-provider deadline tracking and urgency visualization across GitHub Issues/PRs and Google Tasks:
+
+### 1. In-Card Urgency Badges & Smart Due Date Calculation
+Tasks with due dates display an intelligent, dynamic badge based on local calendar dates:
+- **Overdue**: Red badge with alert icon (`Overdue · 1d` or `Overdue · Nd`).
+- **Due Today**: Amber badge with clock icon (`Today` or `Due in Xh` for timestamped items).
+- **Due Tomorrow**: Indigo badge with calendar icon (`Tomorrow`).
+- **Due in 2–6 Days**: Formatted with weekday and date (e.g. `Sat, Nov 14`).
+- **Completed Tasks**: Muted badge indicating completion status (`Completed (Due was Nov 14)`).
+
+### 2. Provider-Specific Deadline Storage & Synchronization
+
+#### GitHub Issues & Pull Requests
+Because native GitHub Issues only support milestones rather than explicit task-level due dates, WidKanban persists deadlines directly inside the issue or PR description body using a non-intrusive markdown tag and machine-readable HTML comment:
+```markdown
+> ⏱️ **Widkanban Deadline**: 2026-11-14T23:59:59.999Z <!-- Widkanban: {"due":"2026-11-14T23:59:59.999Z","type":"deadline"} -->
+```
+- **Setting Deadlines**: Clicking the **Calendar+** icon opens an in-card popover supporting presets (*Today*, *Tomorrow*, *In 3 Days*, *Next Monday*, *Custom Date*) or toggling between *Task Due* and *Review Due*.
+- **Write-Back**: Dispatches `update_github_deadline` via Tauri IPC to `PATCH /repos/{owner}/{repo}/issues/{number}`.
+
+#### Google Tasks
+- **Date Normalization (`parseTaskDueDate`)**: The Google Tasks REST API v1 returns `due` as a date-only RFC 3339 timestamp normalized to UTC midnight (`YYYY-MM-DDT00:00:00.000Z`). WidKanban normalizes these timestamps to the local calendar day's end-of-day (`23:59:59.999`), preventing timezone shifts and false "Today" classifications.
+- **Write-Back**: Setting or changing a deadline on a Google Task card dispatches `update_google_task_deadline` via Tauri IPC, which `PATCH`es the task's `"due"` field (`YYYY-MM-DDT00:00:00.000Z`) on Google Tasks.
+
+### 3. Board Filtering and Column Sorting
+The header dropdown (`DeadlineFilterDropdown.tsx`) provides 1-click filtering and multi-column sorting:
+- **Filters**: *All Tasks*, *Overdue*, *Due Today*, *Due This Week*, *Has Deadline*, *No Deadline*.
+- **Sorting**: *Manual (Board drag order)*, *Due Soonest*, *Latest First*, *Recently Updated*, *Alphabetical (A-Z)*.
+
+---
+
+## 6. Task Deletion & Local Trash Management
 
 WidKanban provides a flexible two-tier deletion system for external tasks (GitHub Issues):
 
@@ -149,6 +198,7 @@ WidKanban provides a flexible two-tier deletion system for external tasks (GitHu
 
 - [Project README](../README.md): Overview, key features, and quick start.
 - [Contributor Guide & Manual](../CONTRIBUTORS.md): Development setup, testing with ephemeral keys, and PR checklist.
-- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT and Google Tasks OAuth configuration.
+- [Credentials Setup Guide](credentials-setup.md): Guide for GitHub PAT, Google Tasks OAuth, and Microsoft 365 configuration.
+- [Microsoft Teams Setup Guide](teams-setup.md): Guide for Microsoft Graph Explorer and Teams API setup.
 - [Developer Notes](notes.md): Environment dependencies, frameless window behavior, and MSVC setup.
 - [Roadmap & Feature Checklist](todos.md): Feature checklist and development roadmap.

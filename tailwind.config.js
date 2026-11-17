@@ -7,6 +7,14 @@ export default {
   ],
   theme: {
     extend: {
+      borderRadius: {
+        '2xl': 'var(--modal-radius, 1rem)',
+        'xl': 'var(--card-radius, 0.75rem)',
+        'lg': 'var(--subcard-radius, 0.5rem)',
+        'md': 'var(--input-radius, 0.375rem)',
+        DEFAULT: 'var(--input-radius, 0.25rem)',
+        'sm': 'var(--input-radius, 0.125rem)',
+      },
       colors: {
         slate: {
           750: '#243247',
