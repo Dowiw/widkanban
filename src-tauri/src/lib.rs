@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
@@ -7,6 +6,8 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager,
 };
+
+pub mod providers;
 
 // ─── Credential Structures ──────────────────────────────────────────────────
 
@@ -91,14 +92,14 @@ pub struct ApiHealthState {
     pub microsoft: Option<ProviderHealth>,
 }
 
-fn current_epoch_seconds() -> u64 {
+pub(crate) fn current_epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
 }
 
-fn get_health_store() -> &'static Mutex<ApiHealthState> {
+pub(crate) fn get_health_store() -> &'static Mutex<ApiHealthState> {
     static STORE: std::sync::OnceLock<Mutex<ApiHealthState>> = std::sync::OnceLock::new();
     STORE.get_or_init(|| Mutex::new(ApiHealthState::default()))
 }
@@ -262,123 +263,9 @@ pub struct UnifiedTask {
     pub source_meta: SourceMeta,
 }
 
-// ─── Google Tasks API Types ──────────────────────────────────────────────────
+// ─── Shared Repo Label Helpers ───────────────────────────────────────────────
 
-#[derive(Deserialize, Debug)]
-struct GTaskList {
-    id: String,
-    title: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct GTaskListsResponse {
-    items: Option<Vec<GTaskList>>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[allow(dead_code)]
-struct GTaskLink {
-    description: Option<String>,
-    link: Option<String>,
-    #[serde(rename = "type")]
-    link_type: Option<String>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct GTask {
-    id: String,
-    title: Option<String>,
-    status: Option<String>,       // "needsAction" | "completed"
-    notes: Option<String>,
-    due: Option<String>,
-    #[serde(default)]
-    deadline: Option<String>,
-    updated: Option<String>,
-    parent: Option<String>,
-    links: Option<Vec<GTaskLink>>,
-    #[serde(rename = "selfLink")]
-    self_link: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GTasksResponse {
-    items: Option<Vec<GTask>>,
-    #[serde(rename = "nextPageToken")]
-    next_page_token: Option<String>,
-}
-
-#[derive(Serialize)]
-struct GTaskPatchPayload {
-    status: String,
-}
-
-// ─── GitHub API Types ────────────────────────────────────────────────────────
-
-#[derive(Deserialize, Debug)]
-struct GHUser {
-    login: String,
-    avatar_url: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHLabel {
-    name: String,
-    color: String,
-    description: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHMilestone {
-    title: String,
-    due_on: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct GHPullRequestRef {
-    url: Option<String>,
-    html_url: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHRepoRef {
-    full_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct GHBranchRef {
-    r#ref: String,
-    label: Option<String>,
-    repo: Option<GHRepoRef>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHPullDetail {
-    head: Option<GHBranchRef>,
-    base: Option<GHBranchRef>,
-    draft: Option<bool>,
-    additions: Option<u64>,
-    deletions: Option<u64>,
-    changed_files: Option<u64>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GHIssue {
-    id: u64,
-    number: u64,
-    title: String,
-    state: String, // "open" | "closed"
-    body: Option<String>,
-    html_url: String,
-    comments: Option<u64>,
-    updated_at: Option<String>,
-    user: Option<GHUser>,
-    assignees: Option<Vec<GHUser>>,
-    labels: Option<Vec<GHLabel>>,
-    milestone: Option<GHMilestone>,
-    pull_request: Option<GHPullRequestRef>,
-}
+use providers::github::GHLabel;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -396,17 +283,7 @@ struct CreateLabelPayload<'a> {
     description: &'a str,
 }
 
-#[derive(Serialize)]
-struct AddLabelsPayload<'a> {
-    labels: Vec<&'a str>,
-}
-
-#[derive(Serialize)]
-struct CreateCommentPayload<'a> {
-    body: &'a str,
-}
-
-fn url_encode(input: &str) -> String {
+pub(crate) fn url_encode(input: &str) -> String {
     let mut encoded = String::new();
     for b in input.bytes() {
         match b {
@@ -440,88 +317,6 @@ fn find_matching_label(existing: &[GHLabel], target: &str, synonyms: &[&str]) ->
     None
 }
 
-// ─── Microsoft 365 API Types ────────────────────────────────────────────────
-
-#[derive(Deserialize, Debug)]
-struct MSGraphCollection<T> {
-    value: Option<Vec<T>>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSEducationAssignmentInstructions {
-    content: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSEducationAssignment {
-    id: String,
-    display_name: Option<String>,
-    instructions: Option<MSEducationAssignmentInstructions>,
-    due_date_time: Option<String>,
-    status: Option<String>,
-    web_url: Option<String>,
-    class_id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSPlannerTask {
-    id: String,
-    title: Option<String>,
-    percent_complete: Option<u8>,
-    due_date_time: Option<String>,
-    #[allow(dead_code)]
-    plan_id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoList {
-    id: String,
-    display_name: Option<String>,
-    wellknown_list_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSToDoBody {
-    content: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MSToDoDateTime {
-    #[serde(rename = "dateTime")]
-    date_time: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoChecklistItem {
-    id: String,
-    display_name: Option<String>,
-    is_checked: Option<bool>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoLinkedResource {
-    web_url: Option<String>,
-    application_name: Option<String>,
-    display_name: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct MSToDoTask {
-    id: String,
-    title: Option<String>,
-    status: Option<String>,
-    body: Option<MSToDoBody>,
-    due_date_time: Option<MSToDoDateTime>,
-    checklist_items: Option<Vec<MSToDoChecklistItem>>,
-    linked_resources: Option<Vec<MSToDoLinkedResource>>,
-}
-
 // ─── Credential File Helpers ─────────────────────────────────────────────────
 
 fn get_credentials_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -549,7 +344,7 @@ fn get_env_credential(keys: &[&str]) -> Option<String> {
     None
 }
 
-fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredentials {
+pub(crate) fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredentials {
     if let Ok(path) = get_credentials_path(app_handle) {
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(&path) {
@@ -562,7 +357,7 @@ fn read_stored_credentials_file(app_handle: &tauri::AppHandle) -> StoredCredenti
     StoredCredentials::default()
 }
 
-fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
+pub(crate) fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     let mut creds = read_stored_credentials_file(app_handle);
 
     // 1. GitHub: App-stored token takes highest precedence.
@@ -655,7 +450,7 @@ fn read_credentials(app_handle: &tauri::AppHandle) -> StoredCredentials {
     creds
 }
 
-fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
+pub(crate) fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -> Result<(), String> {
     let path = get_credentials_path(app_handle)?;
     let serialized = serde_json::to_string_pretty(creds)
         .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
@@ -675,14 +470,14 @@ fn write_credentials(app_handle: &tauri::AppHandle, creds: &StoredCredentials) -
 
 // ─── Status & Helper Mappings ────────────────────────────────────────────────
 
-fn google_status_to_task_status(gs: Option<&str>) -> String {
+pub(crate) fn google_status_to_task_status(gs: Option<&str>) -> String {
     match gs {
         Some("completed") => "done".to_string(),
         _ => "todo".to_string(),
     }
 }
 
-fn task_status_to_google_status(ts: &str) -> String {
+pub(crate) fn task_status_to_google_status(ts: &str) -> String {
     match ts {
         "done" => "completed".to_string(),
         _ => "needsAction".to_string(),
@@ -723,7 +518,7 @@ pub fn task_status_to_ms_planner_percent(ts: &str) -> u8 {
     }
 }
 
-fn parse_github_repo_from_url(url: &str) -> Option<String> {
+pub(crate) fn parse_github_repo_from_url(url: &str) -> Option<String> {
     let parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
     if parts.len() >= 5 {
         let owner = parts[3];
@@ -735,7 +530,7 @@ fn parse_github_repo_from_url(url: &str) -> Option<String> {
     None
 }
 
-fn github_issue_status(state: &str, labels: Option<&[GHLabel]>) -> String {
+pub(crate) fn github_issue_status(state: &str, labels: Option<&[GHLabel]>) -> String {
     if state == "closed" {
         return "done".to_string();
     }
@@ -2003,7 +1798,7 @@ async fn inspect_credentials(
 /// If the current access token is expired (or will expire in < 5 minutes)
 /// and a refresh token is available, automatically requests a new access token
 /// from Google's OAuth 2.0 token endpoint and updates stored credentials.
-async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+pub(crate) async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
     let creds = read_credentials(app_handle);
     let now = current_epoch_seconds();
 
@@ -2124,7 +1919,7 @@ async fn ensure_valid_google_token(app_handle: &tauri::AppHandle) -> Result<Stri
 /// Ensures that the active Microsoft access token is valid. If it has expired or will expire within 5 minutes,
 /// and a refresh token is available, automatically requests a new access token
 /// from Microsoft's OAuth 2.0 token endpoint and updates stored credentials.
-async fn ensure_valid_microsoft_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
+pub(crate) async fn ensure_valid_microsoft_token(app_handle: &tauri::AppHandle) -> Result<String, String> {
     let creds = read_credentials(app_handle);
     let now = current_epoch_seconds();
 
@@ -2821,951 +2616,56 @@ async fn start_microsoft_oauth_flow(
     })
 }
 
-/// Fetch all Google Tasks across all task lists for the authenticated user,
-/// resolving subtask hierarchy and deep links.
+// ─── Unified Task Provider IPC Commands ─────────────────────────────────────
+
 #[tauri::command]
-async fn fetch_google_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let mut token = match ensure_valid_google_token(&app_handle).await {
-        Ok(t) => t,
-        Err(e) => {
-            if let Ok(mut health) = get_health_store().lock() {
-                health.google.connected = false;
-                health.google.error_message = Some(e.clone());
-                health.google.last_checked = Some(current_epoch_seconds());
-            }
-            return Err(e);
-        }
-    };
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. Fetch all task lists
-    let mut lists_resp = client
-        .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| {
-            if let Ok(mut health) = get_health_store().lock() {
-                health.google.connected = false;
-                health.google.error_message = Some(format!("Network error: {}", e));
-                health.google.last_checked = Some(current_epoch_seconds());
-            }
-            format!("Failed to fetch task lists: {}", e)
-        })?;
-
-    // If 401 Unauthorized, the access token is dead or revoked.
-    // Invalidate cached token immediately and attempt silent refresh.
-    if lists_resp.status().as_u16() == 401 {
-        let mut stored = read_stored_credentials_file(&app_handle);
-        stored.google_token = None;
-        stored.google_token_expiry = None;
-        let _ = write_credentials(&app_handle, &stored);
-
-        match ensure_valid_google_token(&app_handle).await {
-            Ok(new_token) => {
-                token = new_token;
-                lists_resp = client
-                    .get("https://tasks.googleapis.com/tasks/v1/users/@me/lists")
-                    .bearer_auth(&token)
-                    .send()
-                    .await
-                    .map_err(|e| format!("Failed to fetch task lists after refresh: {}", e))?;
-            }
-            Err(refresh_err) => {
-                let is_deleted = refresh_err.contains("deleted_client")
-                    || refresh_err.contains("invalid_grant")
-                    || refresh_err.contains("invalid_client")
-                    || refresh_err.contains("credentials deleted or revoked");
-                let err_msg = if is_deleted {
-                    "Google OAuth credentials deleted or revoked. Please re-authenticate in Settings.".to_string()
-                } else {
-                    format!("Google authentication failed: {}", refresh_err)
-                };
-                if let Ok(mut health) = get_health_store().lock() {
-                    health.google.connected = false;
-                    health.google.token_expires_at = Some("Expired".to_string());
-                    health.google.is_expiring_soon = Some(true);
-                    health.google.last_checked = Some(current_epoch_seconds());
-                    health.google.error_message = Some(err_msg.clone());
-                }
-                return Err(err_msg);
-            }
-        }
-    }
-
-    let lists_status = lists_resp.status();
-    let now = current_epoch_seconds();
-    if let Ok(mut health) = get_health_store().lock() {
-        let is_unauthorized = lists_status.as_u16() == 401;
-        health.google = ProviderHealth {
-            connected: lists_status.is_success(),
-            rate_limit_remaining: None,
-            rate_limit_limit: None,
-            rate_limit_reset: None,
-            token_expires_at: if is_unauthorized {
-                Some("Expired".to_string())
-            } else {
-                health.google.token_expires_at.clone()
-            },
-            is_expiring_soon: Some(is_unauthorized),
-            is_rate_limited: Some(false),
-            last_checked: Some(now),
-            error_message: if lists_status.is_success() {
-                None
-            } else if is_unauthorized {
-                Some("Google token expired or revoked (401 Unauthorized)".to_string())
-            } else {
-                Some(format!("HTTP {}", lists_status))
-            },
-        };
-    }
-
-    if !lists_resp.status().is_success() {
-        let status = lists_resp.status();
-        let body = lists_resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (lists) {}: {}", status, body));
-    }
-
-    let lists_body: GTaskListsResponse = lists_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse task lists response: {}", e))?;
-
-    let lists = lists_body.items.unwrap_or_default();
-
-    struct RawTaskEntry {
-        task: GTask,
-        list_id: String,
-        list_title: String,
-    }
-
-    let mut raw_entries: Vec<RawTaskEntry> = Vec::new();
-
-    // 2. Fetch tasks from each list (following nextPageToken up to 5 pages)
-    for list in &lists {
-        let mut page_token: Option<String> = None;
-        for _page in 0..5 {
-            let mut query_params = vec![
-                ("showCompleted", "true".to_string()),
-                ("showHidden", "false".to_string()),
-                ("maxResults", "100".to_string()),
-            ];
-            if let Some(ref pt) = page_token {
-                query_params.push(("pageToken", pt.clone()));
-            }
-
-            let tasks_resp = client
-                .get(format!(
-                    "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
-                    list.id
-                ))
-                .query(&query_params)
-                .bearer_auth(&token)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to fetch tasks for list '{}': {}", list.title, e))?;
-
-            if !tasks_resp.status().is_success() {
-                break;
-            }
-
-            let tasks_body: GTasksResponse = match tasks_resp.json().await {
-                Ok(b) => b,
-                Err(_) => break,
-            };
-
-            for task in tasks_body.items.unwrap_or_default() {
-                if let Some(ref t) = task.title {
-                    if !t.trim().is_empty() {
-                        raw_entries.push(RawTaskEntry {
-                            task,
-                            list_id: list.id.clone(),
-                            list_title: list.title.clone(),
-                        });
-                    }
-                }
-            }
-
-            match tasks_body.next_page_token {
-                Some(next_pt) if !next_pt.is_empty() => page_token = Some(next_pt),
-                _ => break,
-            }
-        }
-    }
-
-    // 3. Map parent task -> subtask items
-    let mut subtasks_map: HashMap<String, Vec<SubtaskItem>> = HashMap::new();
-    for entry in &raw_entries {
-        if let Some(ref parent_id) = entry.task.parent {
-            let status = google_status_to_task_status(entry.task.status.as_deref());
-            let title = entry.task.title.clone().unwrap_or_default();
-            subtasks_map
-                .entry(parent_id.clone())
-                .or_default()
-                .push(SubtaskItem {
-                    id: format!("gt_{}", entry.task.id),
-                    title,
-                    status,
-                });
-        }
-    }
-
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
-
-    // 4. Construct UnifiedTask records
-    for entry in raw_entries {
-        let task = entry.task;
-        let title = task.title.unwrap_or_default();
-        let status = google_status_to_task_status(task.status.as_deref());
-        let updated_at = task.updated.unwrap_or_else(|| chrono_now_iso());
-        let url = task
-            .self_link
-            .unwrap_or_else(|| "https://tasks.google.com".to_string());
-
-        let raw_id = task.id;
-        let parent_id = task.parent.as_ref().map(|p| format!("gt_{}", p));
-
-        let subtasks = subtasks_map.get(&raw_id).cloned();
-        let has_subtasks = subtasks.as_ref().map(|s| !s.is_empty());
-        let subtask_count = subtasks.as_ref().map(|s| s.len());
-
-        let links: Option<Vec<TaskLink>> = task.links.map(|gls| {
-            gls.into_iter()
-                .filter_map(|l| {
-                    let link = l.link?;
-                    let link_type = if link.starts_with("mailto:") || link.contains("mail.google.com") {
-                        Some("email".to_string())
-                    } else if link.contains("calendar.google.com") {
-                        Some("calendar".to_string())
-                    } else {
-                        Some("generic".to_string())
-                    };
-                    Some(TaskLink {
-                        description: l.description,
-                        link,
-                        link_type,
-                    })
-                })
-                .collect()
-        });
-
-        let notes_str = task.notes.as_deref().unwrap_or("");
-        let (parsed_due, parsed_type) = match task.due.or(task.deadline) {
-            Some(native_due) => {
-                let (_, t) = parse_widkanban_deadline(notes_str).unwrap_or((String::new(), None));
-                (Some(native_due), t)
-            }
-            None => match parse_widkanban_deadline(notes_str) {
-                Some((due, t)) => (Some(due), t),
-                None => (None, None),
-            },
-        };
-
-        unified_tasks.push(UnifiedTask {
-            id: format!("gt_{}", raw_id),
-            title,
-            source: "google_tasks".to_string(),
-            status,
-            priority: None,
-            url,
-            updated_at,
-            description: task.notes.clone(),
-            source_meta: SourceMeta {
-                list_id: Some(entry.list_id),
-                list_title: Some(entry.list_title),
-                notes: task.notes,
-                due_date: parsed_due,
-                deadline_type: parsed_type,
-                parent_id,
-                has_subtasks,
-                subtask_count,
-                subtasks,
-                links,
-                ..Default::default()
-            },
-        });
-    }
-
-    Ok(unified_tasks)
-}
-
-/// Fetch assigned GitHub issues and pull requests with rich metadata.
-#[tauri::command]
-async fn fetch_github_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| {
-            if let Ok(mut health) = get_health_store().lock() {
-                health.github.connected = false;
-                health.github.error_message = Some("GitHub token not configured".to_string());
-            }
-            "GitHub token not configured".to_string()
-        })?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .get("https://api.github.com/user/issues?filter=all&state=open&per_page=100")
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| {
-            if let Ok(mut health) = get_health_store().lock() {
-                health.github.connected = false;
-                health.github.error_message = Some(format!("Network error: {}", e));
-            }
-            format!("Failed to fetch GitHub issues: {}", e)
-        })?;
-
-    let rate_limit_limit = resp
-        .headers()
-        .get("x-ratelimit-limit")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u32>().ok());
-    let rate_limit_remaining = resp
-        .headers()
-        .get("x-ratelimit-remaining")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u32>().ok());
-    let rate_limit_reset = resp
-        .headers()
-        .get("x-ratelimit-reset")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok());
-    let token_expires_at = resp
-        .headers()
-        .get("github-authentication-token-expiration")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    let is_rate_limited = rate_limit_remaining.map(|r| r == 0).unwrap_or(false);
-    let now = current_epoch_seconds();
-    let is_success = resp.status().is_success();
-    let status_code = resp.status().as_u16();
-
-    if let Ok(mut health) = get_health_store().lock() {
-        health.github = ProviderHealth {
-            connected: is_success,
-            rate_limit_remaining,
-            rate_limit_limit,
-            rate_limit_reset,
-            token_expires_at,
-            is_expiring_soon: Some(false),
-            is_rate_limited: Some(is_rate_limited),
-            last_checked: Some(now),
-            error_message: if is_success {
-                None
-            } else if status_code == 401 {
-                Some("Token invalid, expired, or revoked (401 Unauthorized)".to_string())
-            } else if status_code == 403 && is_rate_limited {
-                Some("GitHub API rate limit exceeded".to_string())
-            } else {
-                Some(format!("HTTP {}", resp.status()))
-            },
-        };
-    }
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error {}: {}", status, body));
-    }
-
-    let issues: Vec<GHIssue> = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse GitHub issues response: {}", e))?;
-
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
-
-    for issue in issues {
-        let repo = parse_github_repo_from_url(&issue.html_url);
-        let status = github_issue_status(&issue.state, issue.labels.as_deref());
-        let is_pull_request = issue.pull_request.is_some();
-
-        let labels = issue.labels.map(|labs| {
-            labs.into_iter()
-                .map(|l| GitHubLabel {
-                    name: l.name,
-                    color: l.color,
-                    description: l.description,
-                })
-                .collect()
-        });
-
-        let author = issue.user.map(|u| TaskUser {
-            login: u.login,
-            avatar_url: u.avatar_url.unwrap_or_default(),
-        });
-
-        let assignees = issue.assignees.map(|users| {
-            users
-                .into_iter()
-                .map(|u| TaskUser {
-                    login: u.login,
-                    avatar_url: u.avatar_url.unwrap_or_default(),
-                })
-                .collect()
-        });
-
-        let milestone = issue.milestone.map(|m| TaskMilestone {
-            title: m.title,
-            due_on: m.due_on,
-        });
-
-        // If this issue is a pull request with an API URL, fetch branch and diff comparison info
-        let mut branch_info: Option<PRBranchInfo> = None;
-        if let Some(ref pr_ref) = issue.pull_request {
-            if let Some(ref pr_url) = pr_ref.url {
-                let pr_resp = client
-                    .get(pr_url)
-                    .header("User-Agent", "WidKanban-Desktop")
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .bearer_auth(&token)
-                    .send()
-                    .await;
-
-                if let Ok(resp) = pr_resp {
-                    if resp.status().is_success() {
-                        if let Ok(pr_detail) = resp.json::<GHPullDetail>().await {
-                            let head_ref = pr_detail
-                                .head
-                                .as_ref()
-                                .map(|h| h.r#ref.clone())
-                                .unwrap_or_default();
-                            let base_ref = pr_detail
-                                .base
-                                .as_ref()
-                                .map(|b| b.r#ref.clone())
-                                .unwrap_or_else(|| "main".to_string());
-
-                            let head_repo = pr_detail
-                                .head
-                                .as_ref()
-                                .and_then(|h| h.repo.as_ref())
-                                .and_then(|r| r.full_name.clone());
-                            let base_repo = pr_detail
-                                .base
-                                .as_ref()
-                                .and_then(|b| b.repo.as_ref())
-                                .and_then(|r| r.full_name.clone());
-
-                            let is_fork = match (&head_repo, &base_repo) {
-                                (Some(h), Some(b)) => Some(h != b),
-                                _ => None,
-                            };
-
-                            if !head_ref.is_empty() {
-                                branch_info = Some(PRBranchInfo {
-                                    head_ref,
-                                    base_ref,
-                                    is_fork,
-                                    head_repo,
-                                    is_draft: pr_detail.draft,
-                                    additions: pr_detail.additions,
-                                    deletions: pr_detail.deletions,
-                                    changed_files: pr_detail.changed_files,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let body_str = issue.body.as_deref().unwrap_or("");
-        let (parsed_due, parsed_type) = match parse_widkanban_deadline(body_str) {
-            Some((due, t)) => (Some(due), t),
-            None => (milestone.as_ref().and_then(|m| m.due_on.clone()), None),
-        };
-
-        unified_tasks.push(UnifiedTask {
-            id: format!("gh_{}", issue.id),
-            title: issue.title,
-            source: "github".to_string(),
-            status,
-            priority: None,
-            url: issue.html_url,
-            updated_at: issue.updated_at.unwrap_or_else(|| chrono_now_iso()),
-            description: issue.body,
-            source_meta: SourceMeta {
-                repo,
-                issue_number: Some(issue.number),
-                labels,
-                is_pull_request: Some(is_pull_request),
-                comments_count: issue.comments,
-                milestone,
-                author,
-                assignees,
-                branch_info,
-                due_date: parsed_due,
-                deadline_type: parsed_type,
-                ..Default::default()
-            },
-        });
-    }
-
-    Ok(unified_tasks)
-}
-
-/// Update a single Google Task's completion status.
-#[tauri::command]
-async fn update_google_task(
+async fn fetch_provider_tasks(
     app_handle: tauri::AppHandle,
-    task_id: String,
-    list_id: String,
-    new_status: String,
+    provider: String,
+) -> Result<Vec<UnifiedTask>, String> {
+    let adapter = providers::resolve_provider(&provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.fetch_tasks(&ctx).await
+}
+
+#[tauri::command]
+async fn transition_task_status(
+    app_handle: tauri::AppHandle,
+    request: providers::TaskTransitionRequest,
 ) -> Result<(), String> {
-    let token = ensure_valid_google_token(&app_handle).await?;
-
-    let raw_id = task_id.strip_prefix("gt_").unwrap_or(&task_id);
-    let google_status = task_status_to_google_status(&new_status);
-    let payload = GTaskPatchPayload { status: google_status };
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .patch(format!(
-            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-            list_id, raw_id
-        ))
-        .bearer_auth(&token)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to update task: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (update) {}: {}", status, body));
-    }
-
-    Ok(())
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.transition_status(&ctx, request).await
 }
 
-/// Update a Google Tasks subtask's completion status.
 #[tauri::command]
-async fn update_google_subtask(
+async fn update_task_deadline(
     app_handle: tauri::AppHandle,
-    task_id: String,
-    list_id: String,
-    new_status: String,
+    request: providers::TaskDeadlineRequest,
+) -> Result<providers::DeadlineUpdateResult, String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.update_deadline(&ctx, request).await
+}
+
+#[tauri::command]
+async fn delete_task_remote(
+    app_handle: tauri::AppHandle,
+    request: providers::RemoteDeleteRequest,
 ) -> Result<(), String> {
-    update_google_task(app_handle, task_id, list_id, new_status).await
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.delete_remote(&ctx, request).await
 }
 
-#[derive(Serialize)]
-struct CreateSubtaskPayload<'a> {
-    title: &'a str,
-}
-
-/// Create a new nested subtask under a Google Tasks parent item.
 #[tauri::command]
-async fn create_google_subtask(
+async fn mutate_task_subtask(
     app_handle: tauri::AppHandle,
-    list_id: String,
-    parent_id: String,
-    title: String,
-) -> Result<SubtaskItem, String> {
-    let token = ensure_valid_google_token(&app_handle).await?;
-
-    let raw_parent = parent_id.strip_prefix("gt_").unwrap_or(&parent_id);
-    let trimmed_title = title.trim();
-    if trimmed_title.is_empty() {
-        return Err("Subtask title cannot be empty".to_string());
-    }
-
-    let payload = CreateSubtaskPayload {
-        title: trimmed_title,
-    };
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .post(format!(
-            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks?parent={}",
-            list_id, raw_parent
-        ))
-        .bearer_auth(&token)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to create subtask: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (create subtask) {}: {}", status, body));
-    }
-
-    let created: GTask = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse created subtask: {}", e))?;
-
-    let st_status = google_status_to_task_status(created.status.as_deref());
-    Ok(SubtaskItem {
-        id: format!("gt_{}", created.id),
-        title: created.title.unwrap_or_else(|| trimmed_title.to_string()),
-        status: st_status,
-    })
-}
-
-/// Delete a Google Tasks subtask.
-#[tauri::command]
-async fn delete_google_subtask(
-    app_handle: tauri::AppHandle,
-    list_id: String,
-    subtask_id: String,
-) -> Result<(), String> {
-    let token = ensure_valid_google_token(&app_handle).await?;
-
-    let raw_subtask = subtask_id.strip_prefix("gt_").unwrap_or(&subtask_id);
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .delete(format!(
-            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-            list_id, raw_subtask
-        ))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to delete subtask: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error (delete subtask) {}: {}", status, body));
-    }
-
-    Ok(())
-}
-
-/// Fetch tasks from Microsoft 365 / Microsoft Graph:
-/// 1. Microsoft To Do & Flagged Emails (/me/todo/lists and /me/todo/lists/{id}/tasks)
-/// 2. Microsoft Planner (/me/planner/tasks)
-/// 3. Teams for Education Assignments (/education/me/assignments)
-#[tauri::command]
-async fn fetch_microsoft_tasks(app_handle: tauri::AppHandle) -> Result<Vec<UnifiedTask>, String> {
-    let token = match ensure_valid_microsoft_token(&app_handle).await {
-        Ok(t) => t,
-        Err(e) => {
-            if let Ok(mut health) = get_health_store().lock() {
-                health.microsoft = Some(ProviderHealth {
-                    connected: false,
-                    error_message: Some(e.clone()),
-                    last_checked: Some(current_epoch_seconds()),
-                    ..Default::default()
-                });
-            }
-            return Err(e);
-        }
-    };
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let mut unified_tasks: Vec<UnifiedTask> = Vec::new();
-
-    // 1. Fetch Microsoft To Do lists & tasks
-    let lists_resp = client
-        .get("https://graph.microsoft.com/v1.0/me/todo/lists")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = lists_resp {
-        if resp.status().is_success() {
-            if let Ok(lists_body) = resp.json::<MSGraphCollection<MSToDoList>>().await {
-                for list in lists_body.value.unwrap_or_default() {
-                    let is_flagged_list = list
-                        .wellknown_list_name
-                        .as_deref()
-                        .map(|w| w.eq_ignore_ascii_case("flaggedEmails"))
-                        .unwrap_or(false);
-
-                    let tasks_resp = client
-                        .get(format!(
-                            "https://graph.microsoft.com/v1.0/me/todo/lists/{}/tasks?$expand=checklistItems,linkedResources",
-                            list.id
-                        ))
-                        .bearer_auth(&token)
-                        .send()
-                        .await;
-
-                    if let Ok(t_resp) = tasks_resp {
-                        if t_resp.status().is_success() {
-                            if let Ok(tasks_body) = t_resp.json::<MSGraphCollection<MSToDoTask>>().await {
-                                for task in tasks_body.value.unwrap_or_default() {
-                                    let title = task.title.clone().unwrap_or_default();
-                                    if title.trim().is_empty() {
-                                        continue;
-                                    }
-
-                                    let status = ms_status_to_task_status(task.status.as_deref(), None);
-
-                                    let subtasks: Option<Vec<SubtaskItem>> = task.checklist_items.map(|items| {
-                                        items
-                                            .into_iter()
-                                            .map(|ci| SubtaskItem {
-                                                id: ci.id,
-                                                title: ci.display_name.unwrap_or_default(),
-                                                status: if ci.is_checked.unwrap_or(false) {
-                                                    "completed".to_string()
-                                                } else {
-                                                    "needsAction".to_string()
-                                                },
-                                            })
-                                            .collect()
-                                    });
-
-                                    let has_subtasks = subtasks.as_ref().map(|s| !s.is_empty());
-                                    let subtask_count = subtasks.as_ref().map(|s| s.len());
-
-                                    let links: Option<Vec<TaskLink>> = task.linked_resources.map(|res| {
-                                        res.into_iter()
-                                            .filter_map(|lr| {
-                                                let link = lr.web_url?;
-                                                Some(TaskLink {
-                                                    description: lr.display_name.or(lr.application_name),
-                                                    link,
-                                                    link_type: Some("url".to_string()),
-                                                })
-                                            })
-                                            .collect()
-                                    });
-
-                                    let web_url = links
-                                        .as_ref()
-                                        .and_then(|l| l.first())
-                                        .map(|l| l.link.clone())
-                                        .unwrap_or_else(|| {
-                                            format!("https://to-do.office.com/tasks/id/{}", task.id)
-                                        });
-
-                                    unified_tasks.push(UnifiedTask {
-                                        id: format!("ms_todo_{}", task.id),
-                                        title,
-                                        source: "microsoft_teams".to_string(),
-                                        status,
-                                        priority: None,
-                                        url: web_url,
-                                        updated_at: chrono_now_iso(),
-                                        description: task.body.and_then(|b| b.content),
-                                        source_meta: SourceMeta {
-                                            list_id: Some(list.id.clone()),
-                                            list_title: list.display_name.clone(),
-                                            due_date: task.due_date_time.and_then(|d| d.date_time),
-                                            has_subtasks,
-                                            subtask_count,
-                                            subtasks,
-                                            links,
-                                            is_flagged_email: if is_flagged_list { Some(true) } else { None },
-                                            ..Default::default()
-                                        },
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Fetch Microsoft Planner tasks
-    let planner_resp = client
-        .get("https://graph.microsoft.com/v1.0/me/planner/tasks")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = planner_resp {
-        if resp.status().is_success() {
-            if let Ok(planner_body) = resp.json::<MSGraphCollection<MSPlannerTask>>().await {
-                for task in planner_body.value.unwrap_or_default() {
-                    let title = task.title.clone().unwrap_or_default();
-                    if title.trim().is_empty() {
-                        continue;
-                    }
-
-                    let status = ms_status_to_task_status(None, task.percent_complete);
-                    let percent = task.percent_complete.unwrap_or(0);
-
-                    unified_tasks.push(UnifiedTask {
-                        id: format!("ms_planner_{}", task.id),
-                        title,
-                        source: "microsoft_teams".to_string(),
-                        status,
-                        priority: None,
-                        url: "https://tasks.office.com/".to_string(),
-                        updated_at: chrono_now_iso(),
-                        description: None,
-                        source_meta: SourceMeta {
-                            is_planner: Some(true),
-                            percent_complete: Some(percent),
-                            due_date: task.due_date_time,
-                            ..Default::default()
-                        },
-                    });
-                }
-            }
-        }
-    }
-
-    // 3. Fetch Teams for Education assignments (optional / school accounts)
-    let edu_resp = client
-        .get("https://graph.microsoft.com/v1.0/education/me/assignments")
-        .bearer_auth(&token)
-        .send()
-        .await;
-
-    if let Ok(resp) = edu_resp {
-        if resp.status().is_success() {
-            if let Ok(edu_body) = resp.json::<MSGraphCollection<MSEducationAssignment>>().await {
-                for assignment in edu_body.value.unwrap_or_default() {
-                    let title = assignment.display_name.clone().unwrap_or_default();
-                    if title.trim().is_empty() {
-                        continue;
-                    }
-
-                    let status = ms_status_to_task_status(assignment.status.as_deref(), None);
-                    let web_url = assignment.web_url.clone().unwrap_or_else(|| {
-                        "https://teams.microsoft.com/l/entity/66aeee93-507d-479a-a3ef-ba44ac2e7735/classroom".to_string()
-                    });
-
-                    unified_tasks.push(UnifiedTask {
-                        id: format!("ms_assignment_{}", assignment.id),
-                        title,
-                        source: "microsoft_teams".to_string(),
-                        status,
-                        priority: None,
-                        url: web_url.clone(),
-                        updated_at: chrono_now_iso(),
-                        description: assignment.instructions.and_then(|i| i.content),
-                        source_meta: SourceMeta {
-                            is_assignment: Some(true),
-                            assignment_id: Some(assignment.id),
-                            due_date: assignment.due_date_time,
-                            submission_url: Some(web_url),
-                            course_name: assignment.class_id,
-                            ..Default::default()
-                        },
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(unified_tasks)
-}
-
-/// Update completion status for a Microsoft 365 task (To Do, Planner, or Assignment)
-#[tauri::command]
-async fn update_microsoft_task(
-    app_handle: tauri::AppHandle,
-    task_id: String,
-    list_id: Option<String>,
-    new_status: String,
-) -> Result<(), String> {
-    let token = ensure_valid_microsoft_token(&app_handle).await?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    if task_id.starts_with("ms_planner_") {
-        let raw_id = task_id.strip_prefix("ms_planner_").unwrap_or(&task_id);
-        let percent = task_status_to_ms_planner_percent(&new_status);
-
-        // Fetch task to get @odata.etag
-        let get_resp = client
-            .get(format!("https://graph.microsoft.com/v1.0/planner/tasks/{}", raw_id))
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch planner task: {}", e))?;
-
-        if !get_resp.status().is_success() {
-            let status = get_resp.status();
-            let body = get_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft Planner GET error ({}): {}", status, body));
-        }
-
-        let etag = get_resp
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("*");
-
-        let patch_resp = client
-            .patch(format!("https://graph.microsoft.com/v1.0/planner/tasks/{}", raw_id))
-            .header("If-Match", etag)
-            .bearer_auth(&token)
-            .json(&serde_json::json!({ "percentComplete": percent }))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to patch planner task: {}", e))?;
-
-        if !patch_resp.status().is_success() {
-            let status = patch_resp.status();
-            let body = patch_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft Planner PATCH error ({}): {}", status, body));
-        }
-    } else if task_id.starts_with("ms_assignment_") {
-        // Teams assignments: status update is managed via local state
-        return Ok(());
-    } else {
-        // Default to Microsoft To Do
-        let raw_id = task_id.strip_prefix("ms_todo_").unwrap_or(&task_id);
-        let target_list_id = list_id.ok_or_else(|| "list_id is required for Microsoft To Do task updates".to_string())?;
-        let ms_status = task_status_to_ms_todo_status(&new_status);
-
-        let patch_resp = client
-            .patch(format!(
-                "https://graph.microsoft.com/v1.0/me/todo/lists/{}/tasks/{}",
-                target_list_id, raw_id
-            ))
-            .bearer_auth(&token)
-            .json(&serde_json::json!({ "status": ms_status }))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to update To Do task: {}", e))?;
-
-        if !patch_resp.status().is_success() {
-            let status = patch_resp.status();
-            let body = patch_resp.text().await.unwrap_or_default();
-            return Err(format!("Microsoft To Do API error ({}): {}", status, body));
-        }
-    }
-
-    Ok(())
+    request: providers::SubtaskMutationRequest,
+) -> Result<Option<SubtaskItem>, String> {
+    let adapter = providers::resolve_provider(&request.provider)?;
+    let ctx = providers::ProviderContext::new(app_handle);
+    adapter.mutate_subtask(&ctx, request).await
 }
 
 /// Discover or create To-Do and In-Progress labels on a GitHub repository.
@@ -3901,319 +2801,6 @@ async fn setup_github_repo_labels(
     })
 }
 
-/// Update labels on a GitHub issue or pull request when moved between To-Do and In-Progress.
-#[tauri::command]
-async fn update_github_issue_labels(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    target_label: Option<String>,
-    opposing_label: Option<String>,
-    post_comment_fallback: bool,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. Remove opposing label if specified
-    if let Some(ref opp) = opposing_label {
-        let opp_trim = opp.trim();
-        if !opp_trim.is_empty() {
-            let delete_url = format!(
-                "https://api.github.com/repos/{}/issues/{}/labels/{}",
-                repo,
-                issue_number,
-                url_encode(opp_trim)
-            );
-            let _ = client
-                .delete(&delete_url)
-                .header("User-Agent", "WidKanban-Desktop")
-                .header("Accept", "application/vnd.github.v3+json")
-                .bearer_auth(&token)
-                .send()
-                .await;
-        }
-    }
-
-    // 2. Add target label if specified
-    let target_trim = target_label.as_deref().unwrap_or("").trim();
-    if !target_trim.is_empty() {
-        let add_url = format!("https://api.github.com/repos/{}/issues/{}/labels", repo, issue_number);
-        let payload = AddLabelsPayload {
-            labels: vec![target_trim],
-        };
-        let add_resp = client
-            .post(&add_url)
-            .header("User-Agent", "WidKanban-Desktop")
-            .header("Accept", "application/vnd.github.v3+json")
-            .bearer_auth(&token)
-            .json(&payload)
-            .send()
-            .await;
-
-        let add_failed = match add_resp {
-            Ok(ref resp) => !resp.status().is_success(),
-            Err(_) => true,
-        };
-
-        if add_failed {
-            if post_comment_fallback {
-                // Attempt comment fallback
-                let comment_url = format!(
-                    "https://api.github.com/repos/{}/issues/{}/comments",
-                    repo, issue_number
-                );
-                let comment_body = format!(
-                    "Task status updated to **{}** via WidKanban widget.",
-                    target_trim
-                );
-                let comment_payload = CreateCommentPayload {
-                    body: &comment_body,
-                };
-                let comment_resp = client
-                    .post(&comment_url)
-                    .header("User-Agent", "WidKanban-Desktop")
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .bearer_auth(&token)
-                    .json(&comment_payload)
-                    .send()
-                    .await;
-
-                if let Ok(c_resp) = comment_resp {
-                    if c_resp.status().is_success() {
-                        return Ok(());
-                    }
-                }
-            }
-
-            return Err(format!(
-                "Failed to apply label '{}' to {}#{}",
-                target_trim, repo, issue_number
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Serialize)]
-struct CloseIssuePayload<'a> {
-    state: &'a str,
-    state_reason: &'a str,
-}
-
-#[derive(Serialize)]
-struct GraphQLRequest<'a> {
-    query: &'a str,
-    variables: serde_json::Value,
-}
-
-/// Close a GitHub issue as "not_planned", with optional reason and duplicate reference comments.
-#[tauri::command]
-async fn close_github_issue(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    reason: Option<String>,
-    duplicate_of: Option<u64>,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. If duplicate or reason specified, post comment first
-    let mut comment_parts = Vec::new();
-    if let Some(dup) = duplicate_of {
-        comment_parts.push(format!("Duplicate of #{}", dup));
-    }
-    if let Some(r) = reason {
-        let r_trim = r.trim();
-        if !r_trim.is_empty() {
-            if duplicate_of.is_some() {
-                comment_parts.push(format!("Reason: {}", r_trim));
-            } else {
-                comment_parts.push(r_trim.to_string());
-            }
-        }
-    }
-
-    if !comment_parts.is_empty() {
-        let comment_body = comment_parts.join("\n\n");
-        let comment_payload = CreateCommentPayload {
-            body: &comment_body,
-        };
-        let comment_url = format!(
-            "https://api.github.com/repos/{}/issues/{}/comments",
-            repo, issue_number
-        );
-        let _ = client
-            .post(&comment_url)
-            .header("User-Agent", "WidKanban-Desktop")
-            .header("Accept", "application/vnd.github.v3+json")
-            .bearer_auth(&token)
-            .json(&comment_payload)
-            .send()
-            .await;
-    }
-
-    // 2. Close issue as not_planned
-    let patch_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
-    let patch_payload = CloseIssuePayload {
-        state: "closed",
-        state_reason: "not_planned",
-    };
-
-    let resp = client
-        .patch(&patch_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .json(&patch_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error closing issue: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Failed to close issue {}#{} ({}): {}", repo, issue_number, status, body));
-    }
-
-    Ok(())
-}
-
-/// Permanently delete an issue on GitHub via GraphQL (requires Repository Admin/Owner permissions).
-#[tauri::command]
-async fn delete_github_issue_permanently(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-) -> Result<(), String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let parts: Vec<&str> = repo.split('/').collect();
-    if parts.len() != 2 {
-        return Err(format!("Invalid repository format '{}', expected 'owner/repo'", repo));
-    }
-    let owner = parts[0];
-    let name = parts[1];
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // Step 1: Query issue Node ID
-    let query = r#"
-        query($owner: String!, $name: String!, $number: Int!) {
-            repository(owner: $owner, name: $name) {
-                issue(number: $number) {
-                    id
-                }
-            }
-        }
-    "#;
-    let query_payload = GraphQLRequest {
-        query,
-        variables: serde_json::json!({
-            "owner": owner,
-            "name": name,
-            "number": issue_number,
-        }),
-    };
-
-    let q_resp = client
-        .post("https://api.github.com/graphql")
-        .header("User-Agent", "WidKanban-Desktop")
-        .bearer_auth(&token)
-        .json(&query_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error querying issue node ID: {}", e))?;
-
-    let q_json: serde_json::Value = q_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse issue ID response: {}", e))?;
-
-    if let Some(errors) = q_json.get("errors").and_then(|e| e.as_array()) {
-        if !errors.is_empty() {
-            let msg = errors[0]
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("GraphQL query failed");
-            return Err(format!("GitHub error: {}", msg));
-        }
-    }
-
-    let issue_id = q_json
-        .pointer("/data/repository/issue/id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Issue {}#{} not found", repo, issue_number))?;
-
-    // Step 2: Call deleteIssue mutation
-    let mutation = r#"
-        mutation($issueId: ID!) {
-            deleteIssue(input: { issueId: $issueId }) {
-                clientMutationId
-            }
-        }
-    "#;
-    let mutation_payload = GraphQLRequest {
-        query: mutation,
-        variables: serde_json::json!({
-            "issueId": issue_id,
-        }),
-    };
-
-    let m_resp = client
-        .post("https://api.github.com/graphql")
-        .header("User-Agent", "WidKanban-Desktop")
-        .bearer_auth(&token)
-        .json(&mutation_payload)
-        .send()
-        .await
-        .map_err(|e| format!("Network error executing delete mutation: {}", e))?;
-
-    let m_json: serde_json::Value = m_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse delete mutation response: {}", e))?;
-
-    if let Some(errors) = m_json.get("errors").and_then(|e| e.as_array()) {
-        if !errors.is_empty() {
-            let msg = errors[0]
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Permanent deletion failed");
-            return Err(format!(
-                "Failed to permanently delete issue on GitHub: {}. (Note: Only repository admins/owners can permanently delete issues)",
-                msg
-            ));
-        }
-    }
-
-    Ok(())
-}
-
 // ─── Widkanban Deadline Helpers & Commands ──────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -4334,139 +2921,14 @@ pub fn update_body_with_widkanban_deadline(
     }
 }
 
-/// Set, update, or clear a Widkanban deadline tag in a GitHub Issue or Pull Request description body.
-#[tauri::command]
-async fn update_github_deadline(
-    app_handle: tauri::AppHandle,
-    repo: String,
-    issue_number: u64,
-    _is_pr: bool,
-    due_date: Option<String>,
-    deadline_type: Option<String>,
-) -> Result<String, String> {
-    let creds = read_credentials(&app_handle);
-    let token = creds
-        .github_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    // 1. Fetch current remote issue body
-    let issue_url = format!("https://api.github.com/repos/{}/issues/{}", repo, issue_number);
-    let get_resp = client
-        .get(&issue_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Network error fetching issue {}: {}", issue_number, e))?;
-
-    if !get_resp.status().is_success() {
-        let status = get_resp.status();
-        let body = get_resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error fetching issue {}: {} - {}", issue_number, status, body));
-    }
-
-    let issue_data: serde_json::Value = get_resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse issue response {}: {}", issue_number, e))?;
-
-    let existing_body = issue_data.get("body").and_then(|b| b.as_str());
-
-    // 2. Format new body with deadline tag
-    let new_body = update_body_with_widkanban_deadline(
-        existing_body,
-        due_date.as_deref(),
-        deadline_type.as_deref(),
-    );
-
-    // 3. Patch issue on remote
-    let patch_resp = client
-        .patch(&issue_url)
-        .header("User-Agent", "WidKanban-Desktop")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(&token)
-        .json(&serde_json::json!({
-            "body": new_body
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Network error updating issue deadline {}: {}", issue_number, e))?;
-
-    if !patch_resp.status().is_success() {
-        let status = patch_resp.status();
-        let body = patch_resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error updating issue deadline {}: {} - {}", issue_number, status, body));
-    }
-
-    Ok(new_body)
-}
-
-/// Set, update, or clear the due date on a Google Task via the Google Tasks REST API v1.
-#[tauri::command]
-async fn update_google_task_deadline(
-    app_handle: tauri::AppHandle,
-    list_id: String,
-    task_id: String,
-    due_date: Option<String>,
-) -> Result<(), String> {
-    let token = ensure_valid_google_token(&app_handle).await?;
-    let raw_id = task_id.strip_prefix("gt_").unwrap_or(&task_id);
-
-    // Google Tasks API requires RFC 3339 date-only UTC midnight format ("YYYY-MM-DDT00:00:00.000Z") or null to clear
-    let normalized_due: Option<String> = match due_date {
-        Some(ref d) if !d.trim().is_empty() => {
-            let trimmed = d.trim();
-            if trimmed.len() >= 10 && trimmed.as_bytes()[4] == b'-' && trimmed.as_bytes()[7] == b'-' {
-                Some(format!("{}T00:00:00.000Z", &trimmed[..10]))
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        _ => None,
-    };
-
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .patch(format!(
-            "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-            list_id, raw_id
-        ))
-        .bearer_auth(&token)
-        .json(&serde_json::json!({
-            "due": normalized_due
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Network error updating Google Task due date: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google Tasks API error updating due date ({}): {}", status, body));
-    }
-
-    Ok(())
-}
-
-fn chrono_epoch_to_iso(secs: u64) -> String {
+pub(crate) fn chrono_epoch_to_iso(secs: u64) -> String {
     let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
 }
 
 /// Returns the current UTC time as an ISO 8601 string, without pulling in
 /// the `chrono` crate — uses std::time instead.
-fn chrono_now_iso() -> String {
+pub(crate) fn chrono_now_iso() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4589,20 +3051,12 @@ pub fn run() {
             inspect_credentials,
             start_google_oauth_flow,
             start_microsoft_oauth_flow,
-            fetch_google_tasks,
-            fetch_github_tasks,
-            fetch_microsoft_tasks,
-            update_google_task,
-            update_google_subtask,
-            create_google_subtask,
-            delete_google_subtask,
-            update_microsoft_task,
+            fetch_provider_tasks,
+            transition_task_status,
+            update_task_deadline,
+            delete_task_remote,
+            mutate_task_subtask,
             setup_github_repo_labels,
-            update_github_issue_labels,
-            close_github_issue,
-            delete_github_issue_permanently,
-            update_github_deadline,
-            update_google_task_deadline,
             open_oauth_preview,
         ])
         .setup(|app| {
@@ -4999,29 +3453,6 @@ mod tests {
     }
 
     #[test]
-    fn test_close_issue_payload_serialization() {
-        let payload = CloseIssuePayload {
-            state: "closed",
-            state_reason: "not_planned",
-        };
-        let serialized = serde_json::to_string(&payload).expect("serialization failed");
-        assert!(serialized.contains(r#""state":"closed""#));
-        assert!(serialized.contains(r#""state_reason":"not_planned""#));
-    }
-
-    #[test]
-    fn test_graphql_request_serialization() {
-        let payload = GraphQLRequest {
-            query: "query { viewer { login } }",
-            variables: serde_json::json!({ "foo": "bar" }),
-        };
-        let serialized = serde_json::to_string(&payload).expect("serialization failed");
-        assert!(serialized.contains("query"));
-        assert!(serialized.contains("variables"));
-        assert!(serialized.contains("foo"));
-    }
-
-    #[test]
     fn test_ms_status_to_task_status() {
         assert_eq!(ms_status_to_task_status(Some("notStarted"), None), "todo");
         assert_eq!(ms_status_to_task_status(Some("inProgress"), None), "in_progress");
@@ -5213,15 +3644,6 @@ mod tests {
         assert!(json.contains("authStatus"));
         assert!(json.contains("microsoft_has_refresh_token"));
         assert!(json.contains("microsoft_include_education"));
-    }
-
-    #[test]
-    fn test_create_subtask_payload_serialization() {
-        let payload = CreateSubtaskPayload {
-            title: "Write documentation",
-        };
-        let serialized = serde_json::to_string(&payload).expect("serialization failed");
-        assert!(serialized.contains(r#""title":"Write documentation""#));
     }
 
     #[test]

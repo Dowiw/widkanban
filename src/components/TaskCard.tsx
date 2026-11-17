@@ -3,6 +3,11 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { UnifiedTask, GitHubLabel, SubtaskItem } from '../types/task';
 import { useTaskStore } from '../store/useTaskStore';
+import {
+  countCompletedSubtasks,
+  getTaskCapabilities,
+  isSubtaskDone,
+} from '../domain/taskCapabilities';
 import { getSmartDueDate } from '../utils/deadline';
 import { 
   CheckSquare, 
@@ -50,16 +55,13 @@ function getContrastTextColor(hex: string): string {
 export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) => {
   const {
     openDeleteModal,
-    deleteTaskLocally,
+    removeTask,
     deletePreference,
-    closeGitHubIssueOnRemote,
-    deleteGitHubIssuePermanentlyOnRemote,
-    updateGitHubDeadline,
-    updateGoogleTaskDeadline,
+    setTaskDeadline,
     customization,
-    toggleGoogleSubtask,
-    createGoogleSubtask,
-    deleteGoogleSubtask,
+    toggleSubtask,
+    createSubtask,
+    deleteSubtask,
   } = useTaskStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
@@ -93,9 +95,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   const isGitHub = task.source === 'github';
   const isGoogle = task.source === 'google_tasks';
   const isMicrosoft = task.source === 'microsoft_teams';
-  const canEditDeadline =
-    (isGitHub && Boolean(task.sourceMeta?.repo && task.sourceMeta?.issueNumber)) ||
-    (isGoogle && Boolean(task.sourceMeta?.listId));
+  const capabilities = getTaskCapabilities(task);
+  const { canEditDeadline, canManageSubtasks } = capabilities;
   const smartDue = getSmartDueDate(task.sourceMeta?.dueDate, task.status);
 
   const formatLocalYmdMidnightUtc = (d: Date): string => {
@@ -126,18 +127,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
 
   const handleSetDeadline = async (isoDate: string | null, type?: string) => {
     setShowDeadlinePicker(false);
-    if (isGoogle && task.sourceMeta?.listId) {
-      await updateGoogleTaskDeadline(task.id, task.sourceMeta.listId, isoDate);
-      return;
-    }
-    if (!task.sourceMeta?.repo || !task.sourceMeta?.issueNumber) return;
-    await updateGitHubDeadline(
+    if (!canEditDeadline) return;
+    await setTaskDeadline(
       task.id,
-      task.sourceMeta.repo,
-      task.sourceMeta.issueNumber,
-      Boolean(task.sourceMeta.isPullRequest),
       isoDate,
-      type || deadlineType
+      capabilities.supportsDeadlineTypeToggle ? type || deadlineType : undefined
     );
   };
 
@@ -150,28 +144,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
     e.stopPropagation();
 
     if (deletePreference?.remember) {
-      if (deletePreference.action === 'local' || !isGitHub) {
-        deleteTaskLocally(task.id);
+      if (deletePreference.action === 'local' || capabilities.supportedRemoteDeleteModes.length === 0) {
+        await removeTask(task.id, { mode: 'local' });
         return;
       }
-      if (deletePreference.action === 'github_close' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
-        const res = await closeGitHubIssueOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
-        if (res.success) {
-          deleteTaskLocally(task.id);
-        } else {
-          openDeleteModal(task);
-        }
-        return;
+      const remoteMode =
+        deletePreference.action === 'github_permanent' ? 'permanent' : 'close';
+      const res = await removeTask(task.id, { mode: 'remote', remoteMode });
+      if (!res.success) {
+        openDeleteModal(task);
       }
-      if (deletePreference.action === 'github_permanent' && task.sourceMeta?.repo && task.sourceMeta?.issueNumber) {
-        const res = await deleteGitHubIssuePermanentlyOnRemote(task.sourceMeta.repo, task.sourceMeta.issueNumber);
-        if (res.success) {
-          deleteTaskLocally(task.id);
-        } else {
-          openDeleteModal(task);
-        }
-        return;
-      }
+      return;
     }
 
     openDeleteModal(task);
@@ -188,24 +171,25 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
   };
 
   const subtasks = task.sourceMeta?.subtasks || [];
-  const totalSubtasks = subtasks.length;
-  const completedSubtasks = subtasks.filter((s) => s.status === 'done').length;
+  const { completed: completedSubtasks, total: totalSubtasks } = countCompletedSubtasks(subtasks);
 
   const handleToggleSubtaskCheck = (e: React.MouseEvent, subtaskId: string) => {
     e.stopPropagation();
-    toggleGoogleSubtask(task.id, subtaskId);
+    if (!canManageSubtasks) return;
+    toggleSubtask(task.id, subtaskId);
   };
 
   const handleDeleteSubtask = (e: React.MouseEvent, subtaskId: string) => {
     e.stopPropagation();
-    deleteGoogleSubtask(task.id, subtaskId);
+    if (!canManageSubtasks) return;
+    deleteSubtask(task.id, subtaskId);
   };
 
   const handleAddSubtaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!newSubtaskTitle.trim()) return;
-    await createGoogleSubtask(task.id, newSubtaskTitle.trim());
+    if (!canManageSubtasks || !newSubtaskTitle.trim()) return;
+    await createSubtask(task.id, newSubtaskTitle.trim());
     setNewSubtaskTitle('');
   };
 
@@ -319,11 +303,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                 >
                   <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
                     <span className="font-semibold text-xs">
-                      {isGoogle
-                        ? 'Google Task Due Date'
-                        : task.sourceMeta?.isPullRequest
-                        ? 'PR Review Due'
-                        : 'Issue Deadline'}
+                      {capabilities.deadlinePopoverTitle}
                     </span>
                     <button
                       type="button"
@@ -334,8 +314,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
                     </button>
                   </div>
 
-                  {/* Deadline Type toggle (GitHub only) */}
-                  {isGitHub && (
+                  {/* Deadline Type toggle (when supported by provider) */}
+                  {capabilities.supportsDeadlineTypeToggle && (
                     <div className="grid grid-cols-2 gap-1 my-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg">
                       <button
                         type="button"
@@ -707,7 +687,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
         <div className="mt-2.5 pt-2 border-t border-slate-200/70 dark:border-slate-750/70 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             <span>Subtasks ({completedSubtasks}/{totalSubtasks} completed)</span>
-            {!isAddingSubtask && (
+            {canManageSubtasks && !isAddingSubtask && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -723,99 +703,112 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, isOverlay = false }) =
           </div>
 
           <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
-            {subtasks.map((st: SubtaskItem) => (
-              <div
-                key={st.id}
-                className="group/subtask flex items-center justify-between text-[11px] p-1.5 rounded bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-750 hover:border-slate-200 dark:hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-center space-x-2 min-w-0 flex-1">
-                  <button
-                    type="button"
-                    onClick={(e) => handleToggleSubtaskCheck(e, st.id)}
-                    className={`h-3.5 w-3.5 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      st.status === 'done'
-                        ? 'bg-emerald-500 text-white'
-                        : 'border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 hover:border-indigo-500'
-                    }`}
-                    title={st.status === 'done' ? 'Mark uncompleted' : 'Mark completed'}
-                  >
-                    {st.status === 'done' && <Check className="h-2.5 w-2.5 stroke-[3]" />}
-                  </button>
-                  <span
-                    onClick={(e) => handleToggleSubtaskCheck(e, st.id)}
-                    className={`truncate cursor-pointer select-none ${
-                      st.status === 'done'
-                        ? 'line-through text-slate-400 dark:text-slate-500'
-                        : 'text-slate-700 dark:text-slate-200'
-                    }`}
-                  >
-                    {st.title}
-                  </span>
-                </div>
-
-                {/* Hover Deletion */}
-                <button
-                  type="button"
-                  onClick={(e) => handleDeleteSubtask(e, st.id)}
-                  className="opacity-0 group-hover/subtask:opacity-100 p-0.5 text-slate-400 hover:text-rose-500 rounded transition-all shrink-0 ml-1"
-                  title="Delete subtask"
+            {subtasks.map((st: SubtaskItem) => {
+              const stDone = isSubtaskDone(st);
+              return (
+                <div
+                  key={st.id}
+                  className="group/subtask flex items-center justify-between text-[11px] p-1.5 rounded bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-750 hover:border-slate-200 dark:hover:border-slate-700 transition-colors"
                 >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-center space-x-2 min-w-0 flex-1">
+                    <button
+                      type="button"
+                      disabled={!canManageSubtasks}
+                      onClick={(e) => handleToggleSubtaskCheck(e, st.id)}
+                      className={`h-3.5 w-3.5 rounded flex items-center justify-center shrink-0 transition-colors ${
+                        stDone
+                          ? 'bg-emerald-500 text-white'
+                          : 'border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 hover:border-indigo-500'
+                      } ${!canManageSubtasks ? 'opacity-70 cursor-default' : ''}`}
+                      title={
+                        !canManageSubtasks
+                          ? 'Read-only checklist item'
+                          : stDone
+                          ? 'Mark uncompleted'
+                          : 'Mark completed'
+                      }
+                    >
+                      {stDone && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                    </button>
+                    <span
+                      onClick={(e) => handleToggleSubtaskCheck(e, st.id)}
+                      className={`truncate select-none ${canManageSubtasks ? 'cursor-pointer' : ''} ${
+                        stDone
+                          ? 'line-through text-slate-400 dark:text-slate-500'
+                          : 'text-slate-700 dark:text-slate-200'
+                      }`}
+                    >
+                      {st.title}
+                    </span>
+                  </div>
+
+                  {/* Hover Deletion (only when provider supports subtask management) */}
+                  {canManageSubtasks && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteSubtask(e, st.id)}
+                      className="opacity-0 group-hover/subtask:opacity-100 p-0.5 text-slate-400 hover:text-rose-500 rounded transition-all shrink-0 ml-1"
+                      title="Delete subtask"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Inline Add Subtask Input Form */}
-          {isAddingSubtask ? (
-            <form onSubmit={handleAddSubtaskSubmit} className="flex items-center space-x-1 pt-1" onClick={(e) => e.stopPropagation()}>
-              <input
-                type="text"
-                autoFocus
-                placeholder="New subtask title..."
-                value={newSubtaskTitle}
-                onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
+          {canManageSubtasks &&
+            (isAddingSubtask ? (
+              <form onSubmit={handleAddSubtaskSubmit} className="flex items-center space-x-1 pt-1" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="New subtask title..."
+                  value={newSubtaskTitle}
+                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setIsAddingSubtask(false);
+                      setNewSubtaskTitle('');
+                    }
+                  }}
+                  className="flex-1 text-[11px] px-2 py-1 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newSubtaskTitle.trim()}
+                  className="px-2 py-1 text-[11px] rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium transition-colors"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     setIsAddingSubtask(false);
                     setNewSubtaskTitle('');
-                  }
-                }}
-                className="flex-1 text-[11px] px-2 py-1 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
-              />
-              <button
-                type="submit"
-                disabled={!newSubtaskTitle.trim()}
-                className="px-2 py-1 text-[11px] rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium transition-colors"
-              >
-                Add
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsAddingSubtask(false);
-                  setNewSubtaskTitle('');
-                }}
-                className="px-1.5 py-1 text-[11px] rounded text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              >
-                Cancel
-              </button>
-            </form>
-          ) : (
-            subtasks.length === 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsAddingSubtask(true);
-                }}
-                className="w-full py-1 text-[11px] border border-dashed border-slate-300 dark:border-slate-700 rounded text-slate-500 dark:text-slate-400 hover:text-indigo-600 hover:border-indigo-400 dark:hover:text-indigo-400 transition-colors flex items-center justify-center space-x-1"
-              >
-                <Plus className="h-3 w-3" />
-                <span>Add first subtask</span>
-              </button>
-            )
-          )}
+                  }}
+                  className="px-1.5 py-1 text-[11px] rounded text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              subtasks.length === 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsAddingSubtask(true);
+                  }}
+                  className="w-full py-1 text-[11px] border border-dashed border-slate-300 dark:border-slate-700 rounded text-slate-500 dark:text-slate-400 hover:text-indigo-600 hover:border-indigo-400 dark:hover:text-indigo-400 transition-colors flex items-center justify-center space-x-1"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span>Add first subtask</span>
+                </button>
+              )
+            ))}
         </div>
       )}
 

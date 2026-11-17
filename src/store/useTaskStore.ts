@@ -1,7 +1,22 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import { updateDescriptionWithDeadlineTag } from '../utils/deadline';
+import {
+  defaultTaskSyncAdapter,
+  TaskSyncAdapter,
+} from '../sync/taskSyncAdapter';
+import {
+  ActionResult,
+  createSubtask as engineCreateSubtask,
+  deleteSubtask as engineDeleteSubtask,
+  removeTask as engineRemoveTask,
+  RemoveTaskOptions,
+  setTaskDeadline as engineSetTaskDeadline,
+  syncGithubLabelsWithBoard,
+  syncProviderTasks,
+  toggleSubtask as engineToggleSubtask,
+  transitionTask as engineTransitionTask,
+} from '../sync/taskSyncEngine';
 import {
   UnifiedTask,
   SubtaskItem,
@@ -33,13 +48,6 @@ interface IpcResult<T = void> {
   data?: T;
   error?: string;
 }
-
-export const isTauriContext = (): boolean => {
-  if (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST)) {
-    return true;
-  }
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-};
 
 const safeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> => {
   try {
@@ -106,9 +114,14 @@ interface TaskState {
   enableAutostart: (startMinimized?: boolean) => Promise<boolean>;
   disableAutostart: () => Promise<boolean>;
 
-  moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => void;
+  // Runtime Task Sync Seam
+  syncAdapter: TaskSyncAdapter;
+  setSyncAdapter: (adapter: TaskSyncAdapter) => void;
+
+  moveTask: (taskId: string, targetStatus: TaskStatus, targetIndex?: number) => Promise<void>;
   addTask: (task: Omit<UnifiedTask, 'id' | 'updatedAt'>) => void;
   deleteTask: (taskId: string) => void;
+  removeTask: (taskId: string, options?: RemoveTaskOptions) => Promise<ActionResult>;
   openDeleteModal: (task: UnifiedTask) => void;
   closeDeleteModal: () => void;
   setTrashDropdownOpen: (isOpen: boolean) => void;
@@ -118,33 +131,15 @@ interface TaskState {
   clearLocallyDeletedTasks: () => void;
   setDeletePreference: (pref: DeletePreference | null) => void;
   dismissLocallyDeletedTip: () => void;
-  closeGitHubIssueOnRemote: (
-    repo: string,
-    issueNumber: number,
-    reason?: string,
-    duplicateOf?: number
-  ) => Promise<{ success: boolean; error?: string }>;
-  deleteGitHubIssuePermanentlyOnRemote: (
-    repo: string,
-    issueNumber: number
-  ) => Promise<{ success: boolean; error?: string }>;
   deadlineFilter: DeadlineFilterOption;
   deadlineSort: DeadlineSortOption;
   setDeadlineFilter: (filter: DeadlineFilterOption) => void;
   setDeadlineSort: (sort: DeadlineSortOption) => void;
-  updateGitHubDeadline: (
+  setTaskDeadline: (
     taskId: string,
-    repo: string,
-    issueNumber: number,
-    isPr: boolean,
     dueDate: string | null,
     deadlineType?: string
-  ) => Promise<{ success: boolean; error?: string }>;
-  updateGoogleTaskDeadline: (
-    taskId: string,
-    listId: string,
-    dueDate: string | null
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<ActionResult>;
   setSearchQuery: (query: string) => void;
   setFilterSource: (source: 'all' | TaskSource) => void;
   togglePin: () => void;
@@ -159,9 +154,9 @@ interface TaskState {
   fetchGoogleTasks: () => Promise<void>;
   fetchGithubTasks: () => Promise<void>;
   fetchMicrosoftTasks: () => Promise<void>;
-  toggleGoogleSubtask: (parentTaskId: string, subtaskId: string) => Promise<void>;
-  createGoogleSubtask: (parentTaskId: string, title: string) => Promise<SubtaskItem | null>;
-  deleteGoogleSubtask: (parentTaskId: string, subtaskId: string) => Promise<void>;
+  toggleSubtask: (parentTaskId: string, subtaskId: string) => Promise<ActionResult>;
+  createSubtask: (parentTaskId: string, title: string) => Promise<SubtaskItem | null>;
+  deleteSubtask: (parentTaskId: string, subtaskId: string) => Promise<ActionResult>;
   checkAuthStatus: () => Promise<AuthStatus>;
   inspectCredentials: (payload: {
     githubToken?: string;
@@ -243,6 +238,8 @@ export const useTaskStore = create<TaskState>()(
       isAutoSyncPromptOpen: false,
       apiHealth: DEFAULT_API_HEALTH_STATE,
       syncBanner: null,
+      syncAdapter: defaultTaskSyncAdapter(),
+      setSyncAdapter: (adapter) => set({ syncAdapter: adapter }),
       setAutoSyncSettings: (settings) =>
         set((state) => ({
           autoSyncSettings: { ...state.autoSyncSettings, ...settings },
@@ -250,141 +247,15 @@ export const useTaskStore = create<TaskState>()(
       setAutoSyncPromptOpen: (isOpen) => set({ isAutoSyncPromptOpen: isOpen }),
       setSyncBanner: (banner) => set({ syncBanner: banner }),
 
-      moveTask: (taskId, targetStatus, targetIndex) => {
-        // --- Optimistic UI update ---
-        const prevTasks = get().tasks;
-
-        set((state) => {
-          const taskIndex = state.tasks.findIndex((t) => t.id === taskId);
-          if (taskIndex === -1) return state;
-
-          const updatedTasks = [...state.tasks];
-          const [movedTask] = updatedTasks.splice(taskIndex, 1);
-
-          let updatedSourceMeta = movedTask.sourceMeta;
-          const syncSettings = state.githubSyncSettings;
-          if (
-            movedTask.source === 'github' &&
-            syncSettings.manageLabels &&
-            (targetStatus === 'todo' || targetStatus === 'in_progress')
-          ) {
-            const currentLabels = movedTask.sourceMeta?.labels || [];
-            const todoTrim = syncSettings.todoLabel.trim().toLowerCase();
-            const inProgTrim = syncSettings.inProgressLabel.trim().toLowerCase();
-
-            let newLabels = [...currentLabels];
-            if (targetStatus === 'in_progress') {
-              if (todoTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoTrim);
-              }
-              if (inProgTrim && !newLabels.some((l) => l.name.toLowerCase() === inProgTrim)) {
-                newLabels.push({
-                  name: syncSettings.inProgressLabel.trim(),
-                  color: 'd93f0b',
-                  description: 'Work currently in progress (managed by WidKanban)',
-                });
-              }
-            } else if (targetStatus === 'todo') {
-              if (inProgTrim) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgTrim);
-              }
-              if (todoTrim && !newLabels.some((l) => l.name.toLowerCase() === todoTrim)) {
-                newLabels.push({
-                  name: syncSettings.todoLabel.trim(),
-                  color: '0075ca',
-                  description: 'Tasks ready to be worked on (managed by WidKanban)',
-                });
-              }
-            }
-            updatedSourceMeta = { ...movedTask.sourceMeta, labels: newLabels };
-          }
-
-          const updatedTask: UnifiedTask = {
-            ...movedTask,
-            status: targetStatus,
-            updatedAt: new Date().toISOString(),
-            sourceMeta: updatedSourceMeta,
-          };
-
-          if (targetIndex !== undefined) {
-            updatedTasks.splice(targetIndex, 0, updatedTask);
-          } else {
-            updatedTasks.push(updatedTask);
-          }
-
-          return { tasks: updatedTasks };
-        });
-
-        // In browser preview mode without native Tauri runtime,
-        // optimistic state updates remain local in Zustand without attempting background IPC or reverting mock tasks!
-        if (!isTauriContext()) {
-          return;
-        }
-
-        // --- Background write-back for Google Tasks ---
-        const task = prevTasks.find((t) => t.id === taskId);
-        if (task && task.source === 'google_tasks' && task.sourceMeta?.listId) {
-          const rawId = task.id.replace(/^gt_/, '');
-          safeInvokeWithResult<void>('update_google_task', {
-            taskId: rawId,
-            listId: task.sourceMeta.listId,
-            newStatus: targetStatus,
-          }).then((res) => {
-            if (!res.success) {
-              console.warn(`[Sync] Background update failed for Google Task ${rawId}. Reverting...`);
-              set({ tasks: prevTasks });
-            }
-          });
-        }
-
-        // --- Background write-back for GitHub Tasks (To-Do <-> In-Progress only; Done remains strictly local) ---
-        if (
-          task &&
-          task.source === 'github' &&
-          task.sourceMeta?.repo &&
-          task.sourceMeta?.issueNumber &&
-          (targetStatus === 'todo' || targetStatus === 'in_progress') &&
-          (task.status === 'todo' || task.status === 'in_progress')
-        ) {
-          const settings = get().githubSyncSettings;
-          if (settings.manageLabels) {
-            const targetLabel =
-              targetStatus === 'in_progress' ? settings.inProgressLabel : settings.todoLabel;
-            const opposingLabel =
-              targetStatus === 'in_progress' ? settings.todoLabel : settings.inProgressLabel;
-
-            safeInvokeWithResult<void>('update_github_issue_labels', {
-              repo: task.sourceMeta.repo,
-              issueNumber: task.sourceMeta.issueNumber,
-              targetLabel: targetLabel.trim() || null,
-              opposingLabel: opposingLabel.trim() || null,
-              postCommentFallback: settings.postCommentsFallback,
-            }).then((res) => {
-              if (!res.success) {
-                console.warn(
-                  `[Sync] Background label update failed for ${task.sourceMeta.repo}#${task.sourceMeta.issueNumber}. Reverting...`
-                );
-                set({ tasks: prevTasks });
-              }
-            });
-          }
-        }
-
-        // --- Background write-back for Microsoft 365 / Teams Tasks ---
-        if (task && task.source === 'microsoft_teams') {
-          safeInvokeWithResult<void>('update_microsoft_task', {
-            taskId: task.id,
-            listId: task.sourceMeta?.listId || null,
-            newStatus: targetStatus,
-          }).then((res) => {
-            if (!res.success) {
-              console.warn(
-                `[Sync] Background update failed for Microsoft task ${task.id}. Reverting...`
-              );
-              set({ tasks: prevTasks });
-            }
-          });
-        }
+      moveTask: async (taskId, targetStatus, targetIndex) => {
+        await engineTransitionTask(
+          get,
+          set,
+          get().syncAdapter,
+          taskId,
+          targetStatus,
+          targetIndex
+        );
       },
 
       addTask: (newTaskData) => {
@@ -392,16 +263,9 @@ export const useTaskStore = create<TaskState>()(
           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
             ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
             : Date.now().toString(36);
-        const prefix =
-          newTaskData.source === 'github'
-            ? 'gh'
-            : newTaskData.source === 'microsoft_teams'
-            ? 'ms'
-            : 'gt';
-        const id = `${prefix}_${rawUuid}`;
         const task: UnifiedTask = {
           ...newTaskData,
-          id,
+          id: `local_${rawUuid}`,
           updatedAt: new Date().toISOString(),
         };
 
@@ -411,14 +275,11 @@ export const useTaskStore = create<TaskState>()(
       },
 
       deleteTask: (taskId) => {
-        const task = get().tasks.find((t) => t.id === taskId);
-        set((state) => ({
-          tasks: state.tasks.filter((t) => t.id !== taskId),
-          locallyDeletedTasks:
-            task && !state.locallyDeletedTasks.some((t) => t.id === taskId)
-              ? [task, ...state.locallyDeletedTasks]
-              : state.locallyDeletedTasks,
-        }));
+        void engineRemoveTask(get, set, get().syncAdapter, taskId, { mode: 'local' });
+      },
+
+      removeTask: async (taskId, options = { mode: 'local' }) => {
+        return await engineRemoveTask(get, set, get().syncAdapter, taskId, options);
       },
 
       openDeleteModal: (task) => set({ deleteModalTask: task }),
@@ -428,15 +289,8 @@ export const useTaskStore = create<TaskState>()(
         set((state) => ({ isTrashDropdownOpen: !state.isTrashDropdownOpen })),
 
       deleteTaskLocally: (taskId) => {
-        const task = get().tasks.find((t) => t.id === taskId);
-        set((state) => ({
-          tasks: state.tasks.filter((t) => t.id !== taskId),
-          locallyDeletedTasks:
-            task && !state.locallyDeletedTasks.some((t) => t.id === taskId)
-              ? [task, ...state.locallyDeletedTasks]
-              : state.locallyDeletedTasks,
-          deleteModalTask: null,
-        }));
+        void engineRemoveTask(get, set, get().syncAdapter, taskId, { mode: 'local' });
+        set({ deleteModalTask: null });
       },
 
       restoreLocallyDeletedTask: (taskId) => {
@@ -454,175 +308,16 @@ export const useTaskStore = create<TaskState>()(
       setDeletePreference: (pref) => set({ deletePreference: pref }),
       dismissLocallyDeletedTip: () => set({ hasSeenLocallyDeletedTip: true }),
 
-      closeGitHubIssueOnRemote: async (repo, issueNumber, reason, duplicateOf) => {
-        return await safeInvokeWithResult<void>('close_github_issue', {
-          repo,
-          issueNumber,
-          reason: reason || null,
-          duplicateOf: duplicateOf || null,
-        });
+      toggleSubtask: async (parentTaskId, subtaskId) => {
+        return await engineToggleSubtask(get, set, get().syncAdapter, parentTaskId, subtaskId);
       },
 
-      deleteGitHubIssuePermanentlyOnRemote: async (repo, issueNumber) => {
-        return await safeInvokeWithResult<void>('delete_github_issue_permanently', {
-          repo,
-          issueNumber,
-        });
+      createSubtask: async (parentTaskId, title) => {
+        return await engineCreateSubtask(get, set, get().syncAdapter, parentTaskId, title);
       },
 
-      toggleGoogleSubtask: async (parentTaskId: string, subtaskId: string) => {
-        const prevTasks = get().tasks;
-        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
-        if (!parentTask || !parentTask.sourceMeta?.subtasks) return;
-
-        const targetSubtask = parentTask.sourceMeta.subtasks.find((st) => st.id === subtaskId);
-        if (!targetSubtask) return;
-
-        const newStatus: TaskStatus = targetSubtask.status === 'done' ? 'todo' : 'done';
-
-        // 1. Optimistic 60fps update
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
-            const updatedSubtasks = task.sourceMeta.subtasks.map((st) =>
-              st.id === subtaskId ? { ...st, status: newStatus } : st
-            );
-            return {
-              ...task,
-              sourceMeta: {
-                ...task.sourceMeta,
-                subtasks: updatedSubtasks,
-              },
-            };
-          }),
-        }));
-
-        if (!isTauriContext()) return;
-
-        // 2. Background write-back for Google Tasks
-        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
-          const rawSubtaskId = subtaskId.replace(/^gt_/, '');
-          const res = await safeInvokeWithResult<void>('update_google_subtask', {
-            taskId: rawSubtaskId,
-            listId: parentTask.sourceMeta.listId,
-            newStatus,
-          });
-
-          if (!res.success) {
-            console.warn(`[Sync] Failed to update Google subtask ${rawSubtaskId}. Reverting...`);
-            set({ tasks: prevTasks });
-          }
-        }
-      },
-
-      createGoogleSubtask: async (parentTaskId: string, title: string) => {
-        const trimmed = title.trim();
-        if (!trimmed) return null;
-
-        const prevTasks = get().tasks;
-        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
-        if (!parentTask) return null;
-
-        const tempId = `gt_tmp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const optimisticSubtask: SubtaskItem = {
-          id: tempId,
-          title: trimmed,
-          status: 'todo',
-        };
-
-        // 1. Optimistic update
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== parentTaskId) return task;
-            const existingSubtasks = task.sourceMeta?.subtasks || [];
-            const updatedSubtasks = [...existingSubtasks, optimisticSubtask];
-            return {
-              ...task,
-              sourceMeta: {
-                ...task.sourceMeta,
-                hasSubtasks: true,
-                subtaskCount: updatedSubtasks.length,
-                subtasks: updatedSubtasks,
-              },
-            };
-          }),
-        }));
-
-        if (!isTauriContext()) return optimisticSubtask;
-
-        // 2. Background write-back for Google Tasks
-        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
-          const rawParentId = parentTask.id.replace(/^gt_/, '');
-          const res = await safeInvokeWithResult<SubtaskItem>('create_google_subtask', {
-            listId: parentTask.sourceMeta.listId,
-            parentId: rawParentId,
-            title: trimmed,
-          });
-
-          if (res.success && res.data) {
-            const confirmedSubtask = res.data;
-            set((state) => ({
-              tasks: state.tasks.map((task) => {
-                if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
-                return {
-                  ...task,
-                  sourceMeta: {
-                    ...task.sourceMeta,
-                    subtasks: task.sourceMeta.subtasks.map((st) =>
-                      st.id === tempId ? confirmedSubtask : st
-                    ),
-                  },
-                };
-              }),
-            }));
-            return confirmedSubtask;
-          } else {
-            console.warn(`[Sync] Failed to create Google subtask. Reverting...`);
-            set({ tasks: prevTasks });
-            return null;
-          }
-        }
-
-        return optimisticSubtask;
-      },
-
-      deleteGoogleSubtask: async (parentTaskId: string, subtaskId: string) => {
-        const prevTasks = get().tasks;
-        const parentTask = prevTasks.find((t) => t.id === parentTaskId);
-        if (!parentTask || !parentTask.sourceMeta?.subtasks) return;
-
-        // 1. Optimistic removal
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== parentTaskId || !task.sourceMeta?.subtasks) return task;
-            const updatedSubtasks = task.sourceMeta.subtasks.filter((st) => st.id !== subtaskId);
-            return {
-              ...task,
-              sourceMeta: {
-                ...task.sourceMeta,
-                hasSubtasks: updatedSubtasks.length > 0,
-                subtaskCount: updatedSubtasks.length,
-                subtasks: updatedSubtasks,
-              },
-            };
-          }),
-        }));
-
-        if (!isTauriContext()) return;
-
-        // 2. Background write-back for Google Tasks
-        if (parentTask.source === 'google_tasks' && parentTask.sourceMeta?.listId) {
-          const rawSubtaskId = subtaskId.replace(/^gt_/, '');
-          const res = await safeInvokeWithResult<void>('delete_google_subtask', {
-            listId: parentTask.sourceMeta.listId,
-            subtaskId: rawSubtaskId,
-          });
-
-          if (!res.success) {
-            console.warn(`[Sync] Failed to delete Google subtask ${rawSubtaskId}. Reverting...`);
-            set({ tasks: prevTasks });
-          }
-        }
+      deleteSubtask: async (parentTaskId, subtaskId) => {
+        return await engineDeleteSubtask(get, set, get().syncAdapter, parentTaskId, subtaskId);
       },
 
       setSearchQuery: (query) => set({ searchQuery: query }),
@@ -630,98 +325,15 @@ export const useTaskStore = create<TaskState>()(
       setDeadlineFilter: (filter) => set({ deadlineFilter: filter }),
       setDeadlineSort: (sort) => set({ deadlineSort: sort }),
 
-      updateGitHubDeadline: async (taskId, repo, issueNumber, isPr, dueDate, deadlineType) => {
-        const prevTasks = get().tasks;
-        set((state) => ({
-          tasks: state.tasks.map((t) => {
-            if (t.id === taskId) {
-              const resolvedType = deadlineType || t.sourceMeta.deadlineType;
-              const updatedDesc = updateDescriptionWithDeadlineTag(
-                t.description ?? t.sourceMeta?.notes,
-                dueDate,
-                resolvedType
-              );
-              return {
-                ...t,
-                description: updatedDesc,
-                sourceMeta: {
-                  ...t.sourceMeta,
-                  dueDate: dueDate || undefined,
-                  deadlineType: resolvedType,
-                  ...(t.sourceMeta.notes !== undefined ? { notes: updatedDesc } : {}),
-                },
-              };
-            }
-            return t;
-          }),
-        }));
-
-        if (!isTauriContext()) return { success: true };
-
-        const res = await safeInvokeWithResult<string>('update_github_deadline', {
-          repo,
-          issueNumber,
-          isPr,
-          dueDate: dueDate || null,
-          deadlineType: deadlineType || null,
-        });
-
-        if (!res.success) {
-          set({ tasks: prevTasks });
-          return { success: false, error: res.error };
-        }
-
-        if (typeof res.data === 'string') {
-          const confirmedBody = res.data || undefined;
-          set((state) => ({
-            tasks: state.tasks.map((t) =>
-              t.id === taskId
-                ? {
-                    ...t,
-                    description: confirmedBody,
-                    sourceMeta: {
-                      ...t.sourceMeta,
-                      ...(t.sourceMeta.notes !== undefined ? { notes: confirmedBody } : {}),
-                    },
-                  }
-                : t
-            ),
-          }));
-        }
-
-        return { success: true };
-      },
-
-      updateGoogleTaskDeadline: async (taskId, listId, dueDate) => {
-        const prevTasks = get().tasks;
-        set((state) => ({
-          tasks: state.tasks.map((t) => {
-            if (t.id === taskId) {
-              return {
-                ...t,
-                sourceMeta: {
-                  ...t.sourceMeta,
-                  dueDate: dueDate || undefined,
-                },
-              };
-            }
-            return t;
-          }),
-        }));
-
-        if (!isTauriContext()) return { success: true };
-
-        const res = await safeInvokeWithResult('update_google_task_deadline', {
-          listId,
+      setTaskDeadline: async (taskId, dueDate, deadlineType) => {
+        return await engineSetTaskDeadline(
+          get,
+          set,
+          get().syncAdapter,
           taskId,
-          dueDate: dueDate || null,
-        });
-
-        if (!res.success) {
-          set({ tasks: prevTasks });
-          return { success: false, error: res.error };
-        }
-        return { success: true };
+          dueDate,
+          deadlineType
+        );
       },
 
       setPinMode: async (mode: PinMode) => {
@@ -853,83 +465,9 @@ export const useTaskStore = create<TaskState>()(
       },
 
       syncLabelsWithHomeBoard: async () => {
-        const settings = get().githubSyncSettings;
-        if (!settings.manageLabels) return;
-
-        const todoTrim = settings.todoLabel.trim();
-        const inProgTrim = settings.inProgressLabel.trim();
-        const todoLower = todoTrim.toLowerCase();
-        const inProgLower = inProgTrim.toLowerCase();
-
-        // 1. Immediately synchronize local tasks on the home board (instant 60fps UI feedback)
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.source !== 'github') return task;
-
-            const currentLabels = task.sourceMeta?.labels || [];
-            let newLabels = [...currentLabels];
-
-            if (task.status === 'in_progress') {
-              if (todoLower) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== todoLower);
-              }
-              if (inProgLower && !newLabels.some((l) => l.name.toLowerCase() === inProgLower)) {
-                newLabels.push({
-                  name: inProgTrim,
-                  color: 'd93f0b',
-                  description: 'Work currently in progress (managed by WidKanban)',
-                });
-              }
-            } else if (task.status === 'todo') {
-              if (inProgLower) {
-                newLabels = newLabels.filter((l) => l.name.toLowerCase() !== inProgLower);
-              }
-              if (todoLower && !newLabels.some((l) => l.name.toLowerCase() === todoLower)) {
-                newLabels.push({
-                  name: todoTrim,
-                  color: '0075ca',
-                  description: 'Tasks ready to be worked on (managed by WidKanban)',
-                });
-              }
-            }
-
-            return {
-              ...task,
-              sourceMeta: {
-                ...task.sourceMeta,
-                labels: newLabels,
-              },
-            };
-          }),
-        }));
-
-        // 2. Dispatch background write-backs to GitHub so remote issues receive the agreed labels
-        const activeGithubTasks = get().tasks.filter(
-          (t) =>
-            t.source === 'github' &&
-            t.sourceMeta?.repo &&
-            t.sourceMeta?.issueNumber &&
-            (t.status === 'todo' || t.status === 'in_progress')
-        );
-
-        const updates = activeGithubTasks.map((t) => {
-          const isProgress = t.status === 'in_progress';
-          const target = isProgress ? inProgTrim : todoTrim;
-          const opposing = isProgress ? todoTrim : inProgTrim;
-
-          return safeInvokeWithResult<void>('update_github_issue_labels', {
-            repo: t.sourceMeta.repo,
-            issueNumber: t.sourceMeta.issueNumber,
-            targetLabel: target || null,
-            opposingLabel: opposing || null,
-            postCommentFallback: settings.postCommentsFallback,
-          });
-        });
-
-        await Promise.allSettled(updates);
-
-        // 3. Re-fetch from GitHub so the home board has full confirmed remote state
-        await get().fetchGithubTasks();
+        await syncGithubLabelsWithBoard(get, set, get().syncAdapter);
+        await get().fetchApiHealth();
+        await get().checkAuthStatus();
       },
 
       sendDesktopNotification: async (title: string, body: string) => {
@@ -1028,41 +566,19 @@ export const useTaskStore = create<TaskState>()(
       },
 
       fetchGoogleTasks: async () => {
-        const fetched = await safeInvoke<UnifiedTask[]>('fetch_google_tasks');
-        if (fetched) {
-          set((state) => {
-            const nonGoogleTasks = state.tasks.filter((t) => t.source !== 'google_tasks');
-            return { tasks: [...fetched, ...nonGoogleTasks] };
-          });
-        }
+        await syncProviderTasks(get, set, get().syncAdapter, 'google_tasks');
         await get().fetchApiHealth();
         await get().checkAuthStatus();
       },
 
       fetchGithubTasks: async () => {
-        const fetched = await safeInvoke<UnifiedTask[]>('fetch_github_tasks');
-        if (fetched) {
-          set((state) => {
-            const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
-            const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
-            const nonGithubTasks = state.tasks.filter((t) => t.source !== 'github');
-            return { tasks: [...nonGithubTasks, ...activeFetched] };
-          });
-        }
+        await syncProviderTasks(get, set, get().syncAdapter, 'github');
         await get().fetchApiHealth();
         await get().checkAuthStatus();
       },
 
       fetchMicrosoftTasks: async () => {
-        const fetched = await safeInvoke<UnifiedTask[]>('fetch_microsoft_tasks');
-        if (!fetched) return;
-
-        set((state) => {
-          const locallyDeletedIds = new Set(state.locallyDeletedTasks.map((t) => t.id));
-          const activeFetched = fetched.filter((t) => !locallyDeletedIds.has(t.id));
-          const nonMsTasks = state.tasks.filter((t) => t.source !== 'microsoft_teams');
-          return { tasks: [...nonMsTasks, ...activeFetched] };
-        });
+        await syncProviderTasks(get, set, get().syncAdapter, 'microsoft_teams');
       },
 
       checkAuthStatus: async () => {

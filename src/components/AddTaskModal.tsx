@@ -87,7 +87,7 @@ export const AddTaskModal: React.FC = () => {
     } else {
       const listTitle = cleanMeta || (knownLists[0] || 'My Tasks');
       const subtaskItems: SubtaskItem[] = initialSubtasks.map((stTitle, idx) => ({
-        id: `gt_sub_init_${Date.now()}_${idx}`,
+        id: `local_sub_init_${Date.now()}_${idx}`,
         title: stTitle,
         status: 'todo',
       }));
