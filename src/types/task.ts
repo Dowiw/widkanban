@@ -268,6 +268,64 @@ export interface ProviderInspection {
   allRequiredGranted: boolean;
 }
 
+export type RemoteDeleteMode = 'close' | 'permanent';
+
+export interface TaskCapabilities {
+  canEditDeadline: boolean;
+  canManageSubtasks: boolean;
+  supportedRemoteDeleteModes: RemoteDeleteMode[];
+  containerLabel: string;
+  deadlinePopoverTitle: string;
+  supportsDeadlineTypeToggle: boolean;
+  supportsDateTimePicker: boolean;
+}
+
+export interface TaskTransitionRequest {
+  provider: TaskSource;
+  taskId: string;
+  newStatus: TaskStatus;
+  containerId?: string;
+  issueNumber?: number;
+  targetLabel?: string | null;
+  opposingLabel?: string | null;
+  postCommentFallback?: boolean;
+}
+
+export interface TaskDeadlineRequest {
+  provider: TaskSource;
+  taskId: string;
+  containerId?: string;
+  issueNumber?: number;
+  isPr?: boolean;
+  dueDate: string | null;
+  deadlineType?: string | null;
+}
+
+export interface DeadlineUpdateResult {
+  dueDate?: string | null;
+  updatedDescription?: string | null;
+}
+
+export interface RemoteDeleteRequest {
+  provider: TaskSource;
+  taskId: string;
+  containerId?: string;
+  issueNumber?: number;
+  mode: RemoteDeleteMode;
+  reason?: string;
+  duplicateOf?: number;
+}
+
+export interface SubtaskMutationRequest {
+  provider: TaskSource;
+  action: 'toggle' | 'create' | 'delete';
+  containerId: string;
+  taskId: string;
+  subtaskId?: string;
+  newStatus?: TaskStatus;
+  title?: string;
+}
+
 export interface CredentialInspectionReport {
   providers: ProviderInspection[];
   canProceed: boolean;

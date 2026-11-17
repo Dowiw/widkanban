@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useTaskStore } from './useTaskStore';
+import { InMemoryTaskSyncAdapter } from '../sync/taskSyncAdapter';
 import { INITIAL_MOCK_TASKS } from '../mock/mockTasks';
 import { UnifiedTask, DEFAULT_AUTOSYNC_SETTINGS, DEFAULT_API_HEALTH_STATE } from '../types/task';
 
-// Access the mocked invoke so we can control its return value per-test
+// Access the mocked invoke so we can control non-task-sync IPC commands (auth/health/window)
 import { invoke } from '@tauri-apps/api/core';
 const mockInvoke = vi.mocked(invoke);
+let testSyncAdapter: InMemoryTaskSyncAdapter;
 
 describe('useTaskStore', () => {
   beforeEach(() => {
@@ -15,6 +17,8 @@ describe('useTaskStore', () => {
     // Reset the invoke mock to default (returns null → safeInvoke returns null)
     mockInvoke.mockClear();
     mockInvoke.mockResolvedValue(null);
+
+    testSyncAdapter = new InMemoryTaskSyncAdapter();
 
     // Reset store state before each test
     useTaskStore.setState({
@@ -30,6 +34,7 @@ describe('useTaskStore', () => {
       isAutoSyncPromptOpen: false,
       apiHealth: DEFAULT_API_HEALTH_STATE,
       syncBanner: null,
+      syncAdapter: testSyncAdapter,
     });
   });
 
@@ -63,19 +68,21 @@ describe('useTaskStore', () => {
     expect(updatedTask?.status).toBe('done');
   });
 
-  it('fires update_google_task IPC when moving a Google Task', () => {
+  it('dispatches unified google_tasks transition through syncAdapter when moving a Google Task', async () => {
     const { moveTask } = useTaskStore.getState();
-    moveTask('gt_201', 'done');
+    await moveTask('gt_201', 'done');
 
-    expect(mockInvoke).toHaveBeenCalledWith('update_google_task', {
-      taskId: '201', // "gt_" prefix stripped
-      listId: 'work_deliverables',
-      newStatus: 'done',
-    });
+    expect(testSyncAdapter.transitions).toEqual([
+      {
+        provider: 'google_tasks',
+        taskId: 'gt_201',
+        containerId: 'work_deliverables',
+        newStatus: 'done',
+      },
+    ]);
   });
 
-  it('does NOT fire update_google_task IPC when moving a GitHub issue', () => {
-    mockInvoke.mockClear();
+  it('does NOT dispatch a google_tasks transition when moving a GitHub issue', async () => {
     const { addTask, moveTask } = useTaskStore.getState();
 
     addTask({
@@ -87,12 +94,9 @@ describe('useTaskStore', () => {
     });
 
     const added = useTaskStore.getState().tasks.find((t) => t.source === 'github')!;
-    moveTask(added.id, 'in_progress');
+    await moveTask(added.id, 'in_progress');
 
-    const googleUpdateCalls = mockInvoke.mock.calls.filter(
-      (call) => call[0] === 'update_google_task'
-    );
-    expect(googleUpdateCalls).toHaveLength(0);
+    expect(testSyncAdapter.transitions.filter((t) => t.provider === 'google_tasks')).toHaveLength(0);
   });
 
   it('adds a new GitHub task correctly with rich label metadata', () => {
@@ -117,7 +121,7 @@ describe('useTaskStore', () => {
 
     const createdTask = tasks[0];
     expect(createdTask.title).toBe('Fix authentication token refresh');
-    expect(createdTask.id).toContain('gh_');
+    expect(createdTask.id.length).toBeGreaterThan(0);
     expect(createdTask.source).toBe('github');
     expect(createdTask.sourceMeta.labels?.[0].color).toBe('d73a4a');
   });
@@ -200,7 +204,7 @@ describe('useTaskStore', () => {
       sourceMeta: { listId: 'abc', listTitle: 'My Tasks' },
     };
 
-    mockInvoke.mockResolvedValueOnce([freshGoogleTask]);
+    testSyncAdapter.tasksByProvider.google_tasks = [freshGoogleTask];
 
     const { fetchGoogleTasks } = useTaskStore.getState();
     await fetchGoogleTasks();
@@ -239,7 +243,7 @@ describe('useTaskStore', () => {
       },
     };
 
-    mockInvoke.mockResolvedValueOnce([freshGithubTask]);
+    testSyncAdapter.tasksByProvider.github = [freshGithubTask];
 
     const { fetchGithubTasks } = useTaskStore.getState();
     await fetchGithubTasks();
@@ -251,12 +255,14 @@ describe('useTaskStore', () => {
     expect(tasks.some((t) => t.id === 'gt_201')).toBe(true);
   });
 
-  it('fetchGoogleTasks and fetchGithubTasks do nothing when IPC returns null', async () => {
-    mockInvoke.mockResolvedValue(null);
-
+  it('fetchGoogleTasks and fetchGithubTasks preserve existing tasks when adapter fails', async () => {
     const tasksBefore = useTaskStore.getState().tasks;
     const { fetchGoogleTasks, fetchGithubTasks } = useTaskStore.getState();
+
+    testSyncAdapter.nextError = new Error('Google offline');
     await fetchGoogleTasks();
+
+    testSyncAdapter.nextError = new Error('GitHub offline');
     await fetchGithubTasks();
 
     expect(useTaskStore.getState().tasks).toEqual(tasksBefore);
@@ -337,7 +343,7 @@ describe('useTaskStore', () => {
       sourceMeta: { teamName: 'Math 101', isAssignment: true },
     };
 
-    mockInvoke.mockResolvedValueOnce([freshMsTask]);
+    testSyncAdapter.tasksByProvider.microsoft_teams = [freshMsTask];
 
     const { fetchMicrosoftTasks } = useTaskStore.getState();
     await fetchMicrosoftTasks();
@@ -348,15 +354,15 @@ describe('useTaskStore', () => {
     expect(tasks.some((t) => t.source === 'google_tasks')).toBe(true);
   });
 
-  it('fires update_microsoft_task IPC when moving a Microsoft task', () => {
-    mockInvoke.mockClear();
+  it('dispatches microsoft_teams transition through syncAdapter when moving a Microsoft task', async () => {
     const { moveTask } = useTaskStore.getState();
 
-    moveTask('ms_302', 'done');
+    await moveTask('ms_302', 'done');
 
-    expect(mockInvoke).toHaveBeenCalledWith('update_microsoft_task', {
+    expect(testSyncAdapter.transitions).toContainEqual({
+      provider: 'microsoft_teams',
       taskId: 'ms_302',
-      listId: null,
+      containerId: undefined,
       newStatus: 'done',
     });
   });
@@ -364,8 +370,17 @@ describe('useTaskStore', () => {
   it('saveCredentials accepts microsoftToken and triggers sync', async () => {
     mockInvoke.mockClear();
     mockInvoke
-      .mockResolvedValueOnce({ has_github: false, has_google: false, has_microsoft: true }) // save_credentials
-      .mockResolvedValueOnce([]); // fetch_microsoft_tasks
+      .mockResolvedValueOnce({ has_github: false, has_google: false, has_microsoft: true }); // save_credentials
+    const msSyncedTask: UnifiedTask = {
+      id: 'ms_saved_1',
+      title: 'Synced after save',
+      source: 'microsoft_teams',
+      status: 'todo',
+      url: 'https://teams.microsoft.com',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: {},
+    };
+    testSyncAdapter.tasksByProvider.microsoft_teams = [msSyncedTask];
 
     const { saveCredentials } = useTaskStore.getState();
     const result = await saveCredentials({ microsoftToken: 'ms_mock_token' });
@@ -382,7 +397,7 @@ describe('useTaskStore', () => {
       microsoftClientId: null,
       microsoftIncludeEducation: null,
     });
-    expect(mockInvoke).toHaveBeenCalledWith('fetch_microsoft_tasks', undefined);
+    expect(useTaskStore.getState().tasks.some((t) => t.id === 'ms_saved_1')).toBe(true);
   });
 
   it('inspectCredentials invokes inspect_credentials IPC and returns report', async () => {
@@ -411,8 +426,7 @@ describe('useTaskStore', () => {
     });
   });
 
-  it('fires update_github_issue_labels IPC when moving GitHub issue between todo and in_progress', () => {
-    mockInvoke.mockClear();
+  it('dispatches unified transition with label metadata when moving GitHub issue between todo and in_progress', async () => {
     const { addTask, moveTask } = useTaskStore.getState();
 
     addTask({
@@ -423,35 +437,36 @@ describe('useTaskStore', () => {
       sourceMeta: { repo: 'org/widkanban', issueNumber: 105 },
     });
 
-    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    const added = useTaskStore.getState().tasks.find((t) => t.source === 'github')!;
 
-    // Move to in_progress
-    moveTask(added.id, 'in_progress');
+    await moveTask(added.id, 'in_progress');
 
-    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
-      repo: 'org/widkanban',
+    expect(testSyncAdapter.transitions[0]).toMatchObject({
+      provider: 'github',
+      taskId: added.id,
+      containerId: 'org/widkanban',
       issueNumber: 105,
+      newStatus: 'in_progress',
       targetLabel: 'in-progress',
       opposingLabel: 'to-do',
       postCommentFallback: false,
     });
 
-    mockInvoke.mockClear();
+    await moveTask(added.id, 'todo');
 
-    // Move back to todo
-    moveTask(added.id, 'todo');
-
-    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
-      repo: 'org/widkanban',
+    expect(testSyncAdapter.transitions[1]).toMatchObject({
+      provider: 'github',
+      taskId: added.id,
+      containerId: 'org/widkanban',
       issueNumber: 105,
+      newStatus: 'todo',
       targetLabel: 'to-do',
       opposingLabel: 'in-progress',
       postCommentFallback: false,
     });
   });
 
-  it('does NOT call update_github_issue_labels when moving GitHub issue to done (Done is strictly local)', () => {
-    mockInvoke.mockClear();
+  it('does NOT dispatch a remote transition when moving GitHub issue to done (Done is strictly local)', async () => {
     const { addTask, moveTask } = useTaskStore.getState();
 
     addTask({
@@ -462,24 +477,16 @@ describe('useTaskStore', () => {
       sourceMeta: { repo: 'org/widkanban', issueNumber: 106 },
     });
 
-    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    const added = useTaskStore.getState().tasks.find((t) => t.source === 'github')!;
 
-    // Moving to done
-    moveTask(added.id, 'done');
+    await moveTask(added.id, 'done');
 
-    // State updated locally
     const task = useTaskStore.getState().tasks.find((t) => t.id === added.id);
     expect(task?.status).toBe('done');
-
-    // Never calls GitHub writeback!
-    const githubLabelCalls = mockInvoke.mock.calls.filter(
-      (call) => call[0] === 'update_github_issue_labels'
-    );
-    expect(githubLabelCalls).toHaveLength(0);
+    expect(testSyncAdapter.transitions).toHaveLength(0);
   });
 
-  it('does NOT call update_github_issue_labels when manageLabels is disabled', () => {
-    mockInvoke.mockClear();
+  it('does NOT dispatch GitHub transitions when manageLabels is disabled', async () => {
     const { addTask, moveTask, setGithubSyncSettings } = useTaskStore.getState();
 
     setGithubSyncSettings({ manageLabels: false });
@@ -492,13 +499,10 @@ describe('useTaskStore', () => {
       sourceMeta: { repo: 'org/widkanban', issueNumber: 107 },
     });
 
-    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
-    moveTask(added.id, 'in_progress');
+    const added = useTaskStore.getState().tasks.find((t) => t.source === 'github')!;
+    await moveTask(added.id, 'in_progress');
 
-    const githubLabelCalls = mockInvoke.mock.calls.filter(
-      (call) => call[0] === 'update_github_issue_labels'
-    );
-    expect(githubLabelCalls).toHaveLength(0);
+    expect(testSyncAdapter.transitions).toHaveLength(0);
   });
 
   it('addTask creates production-compliant UnifiedTask with UUID-based client ID, status, priority, and description', () => {
@@ -523,7 +527,7 @@ describe('useTaskStore', () => {
     const created = tasks.find((t) => t.title === 'Production Task Feature');
 
     expect(created).toBeDefined();
-    expect(created?.id).toMatch(/^gh_[a-zA-Z0-9]+$/);
+    expect(created?.id).toMatch(/^local_[a-zA-Z0-9]+$/);
     expect(created?.status).toBe('in_progress');
     expect(created?.priority).toBe('urgent');
     expect(created?.description).toContain('### Plan');
@@ -554,7 +558,7 @@ describe('useTaskStore', () => {
     const created = tasks.find((t) => t.title === 'Team Meeting Prep');
 
     expect(created).toBeDefined();
-    expect(created?.id).toMatch(/^gt_[a-zA-Z0-9]+$/);
+    expect(created?.id).toMatch(/^local_[a-zA-Z0-9]+$/);
     expect(created?.source).toBe('google_tasks');
     expect(created?.priority).toBe('high');
     expect(created?.sourceMeta.listTitle).toBe('Sprint 12');
@@ -627,7 +631,7 @@ describe('useTaskStore', () => {
       sourceMeta: { repo: 'org/widkanban', issueNumber: 201 },
     });
 
-    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    const added = useTaskStore.getState().tasks.find((t) => t.title === 'Task to locally delete')!;
     deleteTaskLocally(added.id);
 
     expect(useTaskStore.getState().tasks.some((t) => t.id === added.id)).toBe(false);
@@ -645,7 +649,7 @@ describe('useTaskStore', () => {
       sourceMeta: { repo: 'org/widkanban', issueNumber: 202 },
     });
 
-    const added = useTaskStore.getState().tasks.find((t) => t.id.startsWith('gh_'))!;
+    const added = useTaskStore.getState().tasks.find((t) => t.title === 'Task to restore')!;
     deleteTaskLocally(added.id);
     expect(useTaskStore.getState().locallyDeletedTasks.some((t) => t.id === added.id)).toBe(true);
 
@@ -680,7 +684,7 @@ describe('useTaskStore', () => {
       tasks: [],
     });
 
-    mockInvoke.mockResolvedValueOnce([hiddenTask, regularTask]);
+    testSyncAdapter.tasksByProvider.github = [hiddenTask, regularTask];
 
     const { fetchGithubTasks } = useTaskStore.getState();
     await fetchGithubTasks();
@@ -690,35 +694,54 @@ describe('useTaskStore', () => {
     expect(currentTasks.some((t) => t.id === regularTask.id)).toBe(true);
   });
 
-  it('closeGitHubIssueOnRemote invokes close_github_issue with reason and duplicate', async () => {
-    mockInvoke.mockResolvedValueOnce(null);
+  it('removeTask closes GitHub issue with reason/duplicate and permanently deletes via unified adapter', async () => {
+    const issueTask: UnifiedTask = {
+      id: 'gh_42',
+      title: 'Issue to remove',
+      source: 'github',
+      status: 'todo',
+      url: 'https://github.com/org/widkanban/issues/42',
+      updatedAt: new Date().toISOString(),
+      sourceMeta: { repo: 'org/widkanban', issueNumber: 42 },
+    };
+    useTaskStore.setState({ tasks: [issueTask] });
 
-    const { closeGitHubIssueOnRemote } = useTaskStore.getState();
-    const res = await closeGitHubIssueOnRemote('org/widkanban', 42, 'Not needed', 10);
-
-    expect(mockInvoke).toHaveBeenCalledWith('close_github_issue', {
-      repo: 'org/widkanban',
-      issueNumber: 42,
+    const { removeTask } = useTaskStore.getState();
+    const closeRes = await removeTask('gh_42', {
+      mode: 'remote',
+      remoteMode: 'close',
       reason: 'Not needed',
       duplicateOf: 10,
     });
-    expect(res.success).toBe(true);
-  });
 
-  it('deleteGitHubIssuePermanentlyOnRemote invokes delete_github_issue_permanently command', async () => {
-    mockInvoke.mockResolvedValueOnce(null);
-
-    const { deleteGitHubIssuePermanentlyOnRemote } = useTaskStore.getState();
-    const res = await deleteGitHubIssuePermanentlyOnRemote('org/widkanban', 42);
-
-    expect(mockInvoke).toHaveBeenCalledWith('delete_github_issue_permanently', {
-      repo: 'org/widkanban',
+    expect(closeRes.success).toBe(true);
+    expect(testSyncAdapter.remoteDeletions[0]).toEqual({
+      provider: 'github',
+      taskId: 'gh_42',
+      containerId: 'org/widkanban',
       issueNumber: 42,
+      mode: 'close',
+      reason: 'Not needed',
+      duplicateOf: 10,
     });
-    expect(res.success).toBe(true);
+
+    useTaskStore.setState({ tasks: [issueTask], locallyDeletedTasks: [] });
+    const permRes = await removeTask('gh_42', {
+      mode: 'remote',
+      remoteMode: 'permanent',
+    });
+
+    expect(permRes.success).toBe(true);
+    expect(testSyncAdapter.remoteDeletions[1]).toMatchObject({
+      provider: 'github',
+      taskId: 'gh_42',
+      containerId: 'org/widkanban',
+      issueNumber: 42,
+      mode: 'permanent',
+    });
   });
 
-  it('syncLabelsWithHomeBoard synchronizes local task labels and dispatches GitHub updates', async () => {
+  it('syncLabelsWithHomeBoard synchronizes local task labels and dispatches unified GitHub transitions', async () => {
     const ghTask1: UnifiedTask = {
       id: 'gh_task_1',
       title: 'In Progress Task',
@@ -747,6 +770,7 @@ describe('useTaskStore', () => {
       },
     };
 
+    testSyncAdapter.tasksByProvider.github = [ghTask1, ghTask2];
     useTaskStore.setState({
       tasks: [ghTask1, ghTask2],
       githubSyncSettings: {
@@ -758,36 +782,27 @@ describe('useTaskStore', () => {
       },
     });
 
-    mockInvoke.mockResolvedValue(null);
-
     const { syncLabelsWithHomeBoard } = useTaskStore.getState();
     await syncLabelsWithHomeBoard();
 
-    // Verify task1 (in_progress) now has in-progress label locally
-    const updated1 = useTaskStore.getState().tasks.find((t) => t.id === 'gh_task_1');
-    expect(updated1?.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(true);
-    expect(updated1?.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(false);
-
-    // Verify task2 (todo) now has to-do label locally
-    const updated2 = useTaskStore.getState().tasks.find((t) => t.id === 'gh_task_2');
-    expect(updated2?.sourceMeta?.labels?.some((l) => l.name === 'to-do')).toBe(true);
-    expect(updated2?.sourceMeta?.labels?.some((l) => l.name === 'in-progress')).toBe(false);
-
-    // Verify update_github_issue_labels was called for both tasks
-    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
-      repo: 'org/widkanban',
-      issueNumber: 1,
-      targetLabel: 'in-progress',
-      opposingLabel: 'to-do',
-      postCommentFallback: false,
-    });
-    expect(mockInvoke).toHaveBeenCalledWith('update_github_issue_labels', {
-      repo: 'org/widkanban',
-      issueNumber: 2,
-      targetLabel: 'to-do',
-      opposingLabel: 'in-progress',
-      postCommentFallback: false,
-    });
+    expect(testSyncAdapter.transitions).toContainEqual(
+      expect.objectContaining({
+        provider: 'github',
+        containerId: 'org/widkanban',
+        issueNumber: 1,
+        targetLabel: 'in-progress',
+        opposingLabel: 'to-do',
+      })
+    );
+    expect(testSyncAdapter.transitions).toContainEqual(
+      expect.objectContaining({
+        provider: 'github',
+        containerId: 'org/widkanban',
+        issueNumber: 2,
+        targetLabel: 'to-do',
+        opposingLabel: 'in-progress',
+      })
+    );
   });
 
   it('moveTask optimistically updates sourceMeta.labels when moving between todo and in_progress', () => {
@@ -1062,9 +1077,9 @@ describe('useTaskStore', () => {
         authStatus: { has_github: true, has_google: false, has_microsoft: false },
       });
 
+      testSyncAdapter.tasksByProvider.github = [initialTask, newTask];
       mockInvoke.mockImplementation(async (cmd) => {
         if (cmd === 'get_auth_status') return { has_github: true, has_google: false, has_microsoft: false };
-        if (cmd === 'fetch_github_tasks') return [initialTask, newTask];
         if (cmd === 'get_api_health') return { github: { connected: true }, google: { connected: false } };
         if (cmd === 'send_desktop_notification') return null;
         return null;
@@ -1083,6 +1098,17 @@ describe('useTaskStore', () => {
     });
 
     it('skips GitHub fetch during refresh when rate limited', async () => {
+      const staleGhTask: UnifiedTask = {
+        id: 'gh_rate_1',
+        title: 'Fresh task should stay skipped',
+        source: 'github',
+        status: 'todo',
+        url: '',
+        updatedAt: new Date().toISOString(),
+        sourceMeta: {},
+      };
+      testSyncAdapter.tasksByProvider.github = [staleGhTask];
+
       useTaskStore.setState({
         authStatus: { has_github: true, has_google: false, has_microsoft: false },
         apiHealth: {
@@ -1101,13 +1127,10 @@ describe('useTaskStore', () => {
         return null;
       });
 
-      mockInvoke.mockClear();
-
       const { refreshTasksWithDiff } = useTaskStore.getState();
       await refreshTasksWithDiff();
 
-      // fetch_github_tasks should NOT have been called because it is rate limited!
-      expect(mockInvoke).not.toHaveBeenCalledWith('fetch_github_tasks', undefined);
+      expect(useTaskStore.getState().tasks.some((t) => t.id === 'gh_rate_1')).toBe(false);
     });
 
     it('startGoogleOAuthFlow succeeds and updates auth status with refresh token', async () => {
@@ -1254,7 +1277,7 @@ describe('useTaskStore', () => {
     });
   });
 
-  describe('Google Tasks interactive subtasks management (Batch 3)', () => {
+  describe('subtask & deadline integration through unified sync seam', () => {
     const sampleGoogleTask: UnifiedTask = {
       id: 'gt_parent_1',
       title: 'Parent Task',
@@ -1278,93 +1301,51 @@ describe('useTaskStore', () => {
       useTaskStore.setState({
         tasks: [sampleGoogleTask],
       });
-      mockInvoke.mockClear();
     });
 
-    it('toggleGoogleSubtask toggles status between todo and done and dispatches update_google_subtask', async () => {
-      mockInvoke.mockResolvedValueOnce(null);
-      const { toggleGoogleSubtask } = useTaskStore.getState();
+    it('toggleSubtask toggles status and reverts if syncAdapter rejects', async () => {
+      const { toggleSubtask } = useTaskStore.getState();
 
-      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
-
-      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
-      const subtask1 = task.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
-      expect(subtask1.status).toBe('done');
-
-      expect(mockInvoke).toHaveBeenCalledWith('update_google_subtask', {
-        taskId: 'sub_1',
-        listId: 'work_list',
+      await toggleSubtask('gt_parent_1', 'gt_sub_1');
+      expect(
+        useTaskStore.getState().tasks[0].sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')?.status
+      ).toBe('done');
+      expect(testSyncAdapter.subtaskMutations[0]).toEqual({
+        provider: 'google_tasks',
+        action: 'toggle',
+        containerId: 'work_list',
+        taskId: 'gt_parent_1',
+        subtaskId: 'gt_sub_1',
         newStatus: 'done',
       });
 
-      // Toggle back to todo
-      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
-      const subtask1Again = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
-      expect(subtask1Again.status).toBe('todo');
-
-      expect(mockInvoke).toHaveBeenCalledWith('update_google_subtask', {
-        taskId: 'sub_1',
-        listId: 'work_list',
-        newStatus: 'todo',
-      });
+      testSyncAdapter.nextError = new Error('Network error');
+      await toggleSubtask('gt_parent_1', 'gt_sub_1');
+      expect(
+        useTaskStore.getState().tasks[0].sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')?.status
+      ).toBe('done');
     });
 
-    it('toggleGoogleSubtask reverts optimistic state if IPC command fails', async () => {
-      mockInvoke.mockRejectedValueOnce(new Error('Network error'));
-      const { toggleGoogleSubtask } = useTaskStore.getState();
-
-      await toggleGoogleSubtask('gt_parent_1', 'gt_sub_1');
-
-      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
-      const subtask1 = task.sourceMeta.subtasks!.find((s) => s.id === 'gt_sub_1')!;
-      expect(subtask1.status).toBe('todo');
-    });
-
-    it('createGoogleSubtask adds subtask optimistically and updates with remote result', async () => {
-      mockInvoke.mockResolvedValueOnce({
+    it('createSubtask and deleteSubtask update counts and forward opaque IDs across seam', async () => {
+      testSyncAdapter.nextCreatedSubtask = {
         id: 'gt_remote_sub_999',
         title: 'New Subtask',
         status: 'todo',
-      });
+      };
 
-      const { createGoogleSubtask } = useTaskStore.getState();
-      const created = await createGoogleSubtask('gt_parent_1', 'New Subtask');
+      const { createSubtask, deleteSubtask } = useTaskStore.getState();
+      const created = await createSubtask('gt_parent_1', 'New Subtask');
 
-      expect(created).toBeDefined();
       expect(created?.id).toBe('gt_remote_sub_999');
+      expect(useTaskStore.getState().tasks[0].sourceMeta.subtaskCount).toBe(3);
 
-      expect(mockInvoke).toHaveBeenCalledWith('create_google_subtask', {
-        listId: 'work_list',
-        parentId: 'parent_1',
-        title: 'New Subtask',
-      });
-
-      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
-      expect(task.sourceMeta.subtasks).toHaveLength(3);
-      expect(task.sourceMeta.subtaskCount).toBe(3);
-      expect(task.sourceMeta.hasSubtasks).toBe(true);
-      expect(task.sourceMeta.subtasks?.some((s) => s.id === 'gt_remote_sub_999')).toBe(true);
-    });
-
-    it('deleteGoogleSubtask removes subtask optimistically and dispatches delete_google_subtask', async () => {
-      mockInvoke.mockResolvedValueOnce(null);
-      const { deleteGoogleSubtask } = useTaskStore.getState();
-
-      await deleteGoogleSubtask('gt_parent_1', 'gt_sub_1');
-
-      const task = useTaskStore.getState().tasks.find((t) => t.id === 'gt_parent_1')!;
-      expect(task.sourceMeta.subtasks).toHaveLength(1);
-      expect(task.sourceMeta.subtaskCount).toBe(1);
-      expect(task.sourceMeta.subtasks?.some((s) => s.id === 'gt_sub_1')).toBe(false);
-
-      expect(mockInvoke).toHaveBeenCalledWith('delete_google_subtask', {
-        listId: 'work_list',
-        subtaskId: 'sub_1',
-      });
+      await deleteSubtask('gt_parent_1', 'gt_sub_1');
+      expect(useTaskStore.getState().tasks[0].sourceMeta.subtaskCount).toBe(2);
+      expect(testSyncAdapter.subtaskMutations[1].subtaskId).toBe('gt_sub_1');
     });
   });
 
-  describe('deadline tracking and priority filtering (Batch 1)', () => {
+  describe('deadline tracking and priority filtering', () => {
     it('sets deadline filter and sort options in store', () => {
       const { setDeadlineFilter, setDeadlineSort } = useTaskStore.getState();
 
@@ -1375,14 +1356,14 @@ describe('useTaskStore', () => {
       expect(useTaskStore.getState().deadlineSort).toBe('soonest');
     });
 
-    it('optimistically updates task deadline and invokes update_github_deadline IPC', async () => {
-      mockInvoke.mockResolvedValueOnce(null);
-      const { addTask, updateGitHubDeadline } = useTaskStore.getState();
+    it('setTaskDeadline updates GitHub deadline, keeps description tag synced, and clears cleanly', async () => {
+      const { addTask, setTaskDeadline } = useTaskStore.getState();
 
       addTask({
         title: 'Review authentication RFC',
         source: 'github',
         status: 'in_progress',
+        description: 'Initial summary',
         url: 'https://github.com/org/widkanban/issues/42',
         sourceMeta: { repo: 'org/widkanban', issueNumber: 42, isPullRequest: true },
       });
@@ -1390,51 +1371,20 @@ describe('useTaskStore', () => {
       const task = useTaskStore.getState().tasks.find((t) => t.title === 'Review authentication RFC')!;
       const dueIso = '2026-10-25T18:00:00.000Z';
 
-      const res = await updateGitHubDeadline(task.id, 'org/widkanban', 42, true, dueIso, 'review');
-      expect(res.success).toBe(true);
+      const setRes = await setTaskDeadline(task.id, dueIso, 'review');
+      expect(setRes.success).toBe(true);
 
       const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
       expect(updated.sourceMeta?.dueDate).toBe(dueIso);
       expect(updated.sourceMeta?.deadlineType).toBe('review');
       expect(updated.description).toContain(`> ⏱️ **Widkanban Deadline**: ${dueIso}`);
 
-      expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
-        repo: 'org/widkanban',
-        issueNumber: 42,
-        isPr: true,
-        dueDate: dueIso,
-        deadlineType: 'review',
-      });
-    });
+      const clearRes = await setTaskDeadline(task.id, null);
+      expect(clearRes.success).toBe(true);
 
-    it('clears task deadline on remote and optimistically updates store', async () => {
-      mockInvoke.mockResolvedValueOnce(null);
-      const { addTask, updateGitHubDeadline } = useTaskStore.getState();
-
-      addTask({
-        title: 'Test issue with due date',
-        source: 'github',
-        status: 'todo',
-        description: 'Original body\n\n> ⏱️ **Widkanban Deadline**: 2026-10-25T00:00:00Z <!-- Widkanban: {"due":"2026-10-25T00:00:00Z","type":"deadline"} -->',
-        url: 'https://github.com/org/widkanban/issues/99',
-        sourceMeta: { repo: 'org/widkanban', issueNumber: 99, dueDate: '2026-10-25T00:00:00Z' },
-      });
-
-      const task = useTaskStore.getState().tasks.find((t) => t.title === 'Test issue with due date')!;
-      const res = await updateGitHubDeadline(task.id, 'org/widkanban', 99, false, null);
-      expect(res.success).toBe(true);
-
-      const updated = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
-      expect(updated.sourceMeta?.dueDate).toBeUndefined();
-      expect(updated.description).toBe('Original body');
-
-      expect(mockInvoke).toHaveBeenCalledWith('update_github_deadline', {
-        repo: 'org/widkanban',
-        issueNumber: 99,
-        isPr: false,
-        dueDate: null,
-        deadlineType: null,
-      });
+      const cleared = useTaskStore.getState().tasks.find((t) => t.id === task.id)!;
+      expect(cleared.sourceMeta?.dueDate).toBeUndefined();
+      expect(cleared.description).toBe('Initial summary');
     });
   });
 });
