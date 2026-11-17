@@ -21,8 +21,11 @@
 
 :root {
   --widget-radius: 16px;
-  --col-radius: 12px;
-  --card-radius: 8px;
+  --modal-radius: 16px;
+  --col-radius: 16px;
+  --card-radius: 16px;
+  --subcard-radius: 10px;
+  --input-radius: 6px;
   --col-header-height: 36px;
   --col-min-width: 260px;
 }
@@ -30,6 +33,11 @@
 @layer base {
   body {
     @apply select-none overflow-hidden bg-slate-50 antialiased;
+    font-family: inherit;
+  }
+
+  code, kbd, samp, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
 }
 
@@ -41,12 +49,12 @@
 
 ::-webkit-scrollbar-track {
   background: #f1f5f9;
-  border-radius: 9999px;
+  border-radius: var(--input-radius, 9999px);
 }
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border-radius: 9999px;
+  border-radius: var(--input-radius, 9999px);
 }
 
 ::-webkit-scrollbar-thumb:hover {

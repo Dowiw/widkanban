@@ -91,7 +91,7 @@ export const LocallyDeletedDropdown: React.FC = () => {
                     ) : (
                       <CheckSquare className="h-3 w-3 text-blue-600 dark:text-blue-400 shrink-0" />
                     )}
-                    <span className="truncate font-mono">
+                    <span className="truncate">
                       {repo && issueNumber
                         ? `${repo}#${issueNumber}`
                         : task.source === 'google_tasks'
